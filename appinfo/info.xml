@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	  xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>educai</id>
+	<name>Talk AI</name>
+	<summary>Multi-bot manager for Nextcloud Talk</summary>
+	<description>Create and manage multiple AI bots for Nextcloud Talk using an OpenAI-compatible API.</description>
+	<version>2.39.1</version>
+	<licence>agpl</licence>
+	<author mail="pascal.kienast@uni-potsdam.de" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
+	<namespace>EducAI</namespace>
+	<category>tools</category>
+	<bugs>https://github.com/EDUCAlliance/talk-ai/issues</bugs>
+	<dependencies>
+		<nextcloud min-version="30" max-version="34"/>
+	</dependencies>
+	<navigations>
+		<navigation>
+			<id>educai</id>
+			<name>Talk AI</name>
+			<route>educai.page.index</route>
+			<icon>app.svg</icon>
+			<type>link</type>
+		</navigation>
+	</navigations>
+
+	<settings>
+		<personal>OCA\EducAI\Settings\PersonalSettings</personal>
+		<personal-section>OCA\EducAI\Settings\PersonalSection</personal-section>
+		<admin>OCA\EducAI\Settings\AdminSettings</admin>
+		<admin-section>OCA\EducAI\Settings\AdminSection</admin-section>
+	</settings>
+
+	<background-jobs>
+		<job>OCA\EducAI\Jobs\ProcessQueuedRequestsJob</job>
+		<job>OCA\EducAI\Jobs\CleanupConversationsJob</job>
+		<job>OCA\EducAI\Jobs\CleanupOrphanedSourcesJob</job>
+		<job>OCA\EducAI\Jobs\CleanupRoomDocumentsJob</job>
+	</background-jobs>
+
+	<repair-steps>
+		<install>
+			<step>OCA\EducAI\Migration\RegisterTalkBotRepairStep</step>
+		</install>
+	</repair-steps>
+</info>
