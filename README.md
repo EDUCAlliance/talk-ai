@@ -4,7 +4,7 @@
 
 # Talk AI
 
-*by [EDUC — the European Digital UniverCity](https://educalliance.eu)*
+*developed by [EDUC — the European Digital UniverCity](https://educalliance.eu)*
 
 **Run many purpose-built AI assistants inside Nextcloud Talk — each with its own prompt, model, knowledge and tools, under real access governance.**
 
@@ -104,6 +104,8 @@ vendor/bin/phpunit --bootstrap tests/unit/bootstrap.php tests/unit
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local Nextcloud verification notes.
 
 ## About
+
+<a href="https://educalliance.eu"><img src="img/educ-logo.png" width="220" align="right" alt="EDUC — the European Digital UniverCity"></a>
 
 Talk AI is developed **by [EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant (hence the `educai` package id). The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–34 install.
 
