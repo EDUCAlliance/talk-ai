@@ -150,7 +150,7 @@ Since Nextcloud is configured with `backgroundjobs_mode = cron`, **you MUST have
 
 ### Check Current Configuration
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ config:app:get core backgroundjobs_mode
+sudo -u www-data php occ config:app:get core backgroundjobs_mode
 ```
 
 Expected output: `cron`
@@ -164,7 +164,7 @@ crontab -e
 
 Add this line (runs every 5 minutes):
 ```bash
-*/5 * * * * docker exec -u www-data master-nextcloud-1 php /var/www/html/cron.php
+*/5 * * * * sudo -u www-data php /var/www/html/cron.php
 ```
 
 Save and exit. Verify it's registered:
@@ -187,7 +187,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/docker exec -u www-data master-nextcloud-1 php /var/www/html/cron.php
+ExecStart=/usr/bin/sudo -u www-data php /var/www/html/cron.php
 User=educ-dev
 ```
 
@@ -229,74 +229,74 @@ journalctl -u nextcloud-cron.service -f
 
 **View live logs:**
 ```bash
-docker exec master-nextcloud-1 tail -f /var/www/html/data/nextcloud.log
+tail -f /path/to/nextcloud/data/nextcloud.log
 ```
 
 **Filter for Talk AI entries:**
 ```bash
-docker exec master-nextcloud-1 tail -100 /var/www/html/data/nextcloud.log | grep -i educai
+tail -100 /path/to/nextcloud/data/nextcloud.log | grep -i educai
 ```
 
 **Check for errors:**
 ```bash
-docker exec master-nextcloud-1 tail -500 /var/www/html/data/nextcloud.log | grep -i "error\|exception"
+tail -500 /path/to/nextcloud/data/nextcloud.log | grep -i "error\|exception"
 ```
 
 **Watch for RAG processing:**
 ```bash
-docker exec master-nextcloud-1 tail -f /var/www/html/data/nextcloud.log | grep -i "educai\|reindex\|embedding"
+tail -f /path/to/nextcloud/data/nextcloud.log | grep -i "educai\|reindex\|embedding"
 ```
 
 ### Check Background Job Status
 
 **List all background jobs:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ background-job:list
+sudo -u www-data php occ background-job:list
 ```
 
 **Check background job mode:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ config:app:get core backgroundjobs_mode
+sudo -u www-data php occ config:app:get core backgroundjobs_mode
 ```
 
 **Set background job mode to cron (if not already):**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ config:app:set core backgroundjobs_mode --value=cron
+sudo -u www-data php occ config:app:set core backgroundjobs_mode --value=cron
 ```
 
 ### Manually Trigger Background Jobs
 
 **Run ONE background job cycle:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php /var/www/html/cron.php
+sudo -u www-data php /var/www/html/cron.php
 ```
 
 **Run worker (processes multiple jobs continuously):**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ background-job:worker
+sudo -u www-data php occ background-job:worker
 ```
 
 **Manually trigger job worker and watch output:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ background-job:worker 2>&1 | head -50
+sudo -u www-data php occ background-job:worker 2>&1 | head -50
 ```
 
 ### Check App Status
 
 **Check if app is enabled:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ app:list | grep educai
+sudo -u www-data php occ app:list | grep educai
 ```
 
 **Reload the app (after code changes):**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ app:enable educai
-docker exec -u www-data master-nextcloud-1 php occ upgrade --no-interaction
+sudo -u www-data php occ app:enable educai
+sudo -u www-data php occ upgrade --no-interaction
 ```
 
 **Check migration status:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ migrations:status educai
+sudo -u www-data php occ migrations:status educai
 ```
 
 ---
@@ -313,12 +313,12 @@ docker exec -u www-data master-nextcloud-1 php occ migrations:status educai
 
 2. **Manually trigger cron:**
    ```bash
-   docker exec -u www-data master-nextcloud-1 php /var/www/html/cron.php
+   sudo -u www-data php /var/www/html/cron.php
    ```
 
 3. **Watch logs for processing:**
    ```bash
-   docker exec master-nextcloud-1 tail -f /var/www/html/data/nextcloud.log | grep -i educai
+   tail -f /path/to/nextcloud/data/nextcloud.log | grep -i educai
    ```
 
 4. **Check for errors in the source:**
@@ -373,7 +373,7 @@ docker exec -u www-data master-nextcloud-1 php occ migrations:status educai
 
 **Via Command Line:**
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ config:list educai
+sudo -u www-data php occ config:list educai
 ```
 
 ---
@@ -407,7 +407,7 @@ docker exec -u www-data master-nextcloud-1 php occ config:list educai
 docker exec -it <db-container-name> mysql -u nextcloud -p nextcloud
 
 # Or if database is in the same container:
-docker exec master-nextcloud-1 mysql -u nextcloud -pnextcloud nextcloud
+mysql -u <dbuser> -p <dbname>   # credentials from config.php
 
 # Query pending sources
 SELECT * FROM oc_educai_bot_sources WHERE status = 'pending';
@@ -442,20 +442,20 @@ After applying fixes:
 
 1. **Run upgrade checks after deploying code changes:**
    ```bash
-   docker exec -u www-data master-nextcloud-1 php occ app:enable educai
-   docker exec -u www-data master-nextcloud-1 php occ upgrade --no-interaction
+   sudo -u www-data php occ app:enable educai
+   sudo -u www-data php occ upgrade --no-interaction
    ```
 
 2. **Click "Reindex" on a pending document** in the bot edit page
 
 3. **Manually trigger cron:**
    ```bash
-   docker exec -u www-data master-nextcloud-1 php /var/www/html/cron.php
+   sudo -u www-data php /var/www/html/cron.php
    ```
 
 4. **Watch logs:**
    ```bash
-   docker exec master-nextcloud-1 tail -f /var/www/html/data/nextcloud.log | grep -i educai
+   tail -f /path/to/nextcloud/data/nextcloud.log | grep -i educai
    ```
 
 5. **Refresh bot edit page** after 1-2 minutes to see updated status
@@ -476,23 +476,23 @@ Expected flow:
 
 ```bash
 # Background jobs
-docker exec -u www-data master-nextcloud-1 php occ background-job:list
-docker exec -u www-data master-nextcloud-1 php occ background-job:worker
+sudo -u www-data php occ background-job:list
+sudo -u www-data php occ background-job:worker
 
 # App management
-docker exec -u www-data master-nextcloud-1 php occ app:list
-docker exec -u www-data master-nextcloud-1 php occ app:enable educai
-docker exec -u www-data master-nextcloud-1 php occ upgrade --no-interaction
+sudo -u www-data php occ app:list
+sudo -u www-data php occ app:enable educai
+sudo -u www-data php occ upgrade --no-interaction
 
 # Configuration
-docker exec -u www-data master-nextcloud-1 php occ config:app:get core backgroundjobs_mode
-docker exec -u www-data master-nextcloud-1 php occ config:list educai
+sudo -u www-data php occ config:app:get core backgroundjobs_mode
+sudo -u www-data php occ config:list educai
 
 # Migrations
-docker exec -u www-data master-nextcloud-1 php occ migrations:status educai
+sudo -u www-data php occ migrations:status educai
 
 # Cron
-docker exec -u www-data master-nextcloud-1 php /var/www/html/cron.php
+sudo -u www-data php /var/www/html/cron.php
 ```
 
 ---

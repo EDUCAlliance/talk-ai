@@ -72,9 +72,9 @@ The webhook URL must include `/index.php` on installations that route apps throu
 For Docker-based local development:
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:list
-docker exec -u www-data master-nextcloud-1 php occ app:disable educai
-docker exec -u www-data master-nextcloud-1 php occ app:enable educai
+sudo -u www-data php occ talk:bot:list
+sudo -u www-data php occ app:disable educai
+sudo -u www-data php occ app:enable educai
 ```
 
 ## 4. Create A Bot

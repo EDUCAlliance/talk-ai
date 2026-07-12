@@ -80,32 +80,32 @@ Current migration files live in `lib/Migration/`. Recent schema work includes pe
 
 ## Local Docker Verification
 
-In the local `educ-nc` development stack, the known container is `master-nextcloud-1`.
+The commands below assume a standard Nextcloud installation; adapt the prefix to your dev setup (e.g. `docker exec -u www-data <container> php occ …` for Docker-based environments).
 
 Useful commands:
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ status
-docker exec -u www-data master-nextcloud-1 php occ app:list
-docker exec -u www-data master-nextcloud-1 php occ migrations:status educai
-docker exec -u www-data master-nextcloud-1 php occ app:disable educai
-docker exec -u www-data master-nextcloud-1 php occ app:enable educai
+sudo -u www-data php occ status
+sudo -u www-data php occ app:list
+sudo -u www-data php occ migrations:status educai
+sudo -u www-data php occ app:disable educai
+sudo -u www-data php occ app:enable educai
 ```
 
 Run cron manually when testing RAG or queued work:
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php cron.php
+sudo -u www-data php cron.php
 ```
 
 List or execute queued jobs directly when testing one-off background work:
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ background-job:list --limit=200
-docker exec -u www-data master-nextcloud-1 php occ background-job:execute --force-execute <job-id>
+sudo -u www-data php occ background-job:list --limit=200
+sudo -u www-data php occ background-job:execute --force-execute <job-id>
 ```
 
-For direct database inspection in this setup, `occ db:query` may be unavailable. Use PHP/PDO inside the container when you need live table data.
+For direct database inspection, use your database client of choice against the Nextcloud database.
 
 ## Runtime Checks
 

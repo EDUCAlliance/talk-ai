@@ -12,7 +12,7 @@
 ### 2. Verify Webhook Registration
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:list
+sudo -u www-data php occ talk:bot:list
 ```
 
 Expected output:
@@ -28,7 +28,7 @@ Expected output:
 
 Open a terminal and run:
 ```bash
-docker exec master-nextcloud-1 tail -f /var/www/html/data/nextcloud.log | grep -i educai
+tail -f /path/to/nextcloud/data/nextcloud.log | grep -i educai
 ```
 
 Keep this running, then send a message in Talk like:
@@ -107,7 +107,7 @@ cat > /tmp/test-webhook.json <<'EOF'
 EOF
 
 # Test the webhook
-docker exec master-nextcloud-1 curl -X POST \
+curl -X POST \
   http://localhost/index.php/apps/educai/webhook/talk \
   -H "Content-Type: application/json" \
   -d @/tmp/test-webhook.json \
@@ -117,7 +117,7 @@ docker exec master-nextcloud-1 curl -X POST \
 ### 6. Check Bot Exists in Database
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php -r "
+sudo -u www-data php -r "
 require '/var/www/html/lib/base.php';
 \$bots = \OC::$server->get('OCA\EducAI\Db\BotMapper')->findAll();
 foreach (\$bots as \$bot) {
@@ -129,7 +129,7 @@ foreach (\$bots as \$bot) {
 ### 7. Verify Settings are Saved
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php -r "
+sudo -u www-data php -r "
 require '/var/www/html/lib/base.php';
 \$settings = \OC::$server->get('OCA\EducAI\Db\SettingsMapper')->getSettings();
 echo 'API Endpoint: ' . \$settings->getApiEndpoint() . PHP_EOL;
@@ -182,10 +182,10 @@ This means the bot is working but the LLM API call is failing.
 **Fix:**
 ```bash
 # Uninstall incorrect registration
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:uninstall "Talk AI"
+sudo -u www-data php occ talk:bot:uninstall "Talk AI"
 
 # Re-register with CORRECT URL (note /index.php)
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:install \
+sudo -u www-data php occ talk:bot:install \
   -f webhook,response \
   "Talk AI" \
   "your-secret-here" \
@@ -227,8 +227,8 @@ Leave webhook secret empty in settings - signature verification will be skipped 
 2. Save in Talk AI settings
 3. Re-register bot with same secret:
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:uninstall "Talk AI"
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:install \
+sudo -u www-data php occ talk:bot:uninstall "Talk AI"
+sudo -u www-data php occ talk:bot:install \
   -f webhook,response \
   "Talk AI" \
   "your-secret-here" \
@@ -253,19 +253,19 @@ docker exec -u www-data master-nextcloud-1 php occ talk:bot:install \
 ### Enable Full Debug Logging
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ log:manage --level debug
+sudo -u www-data php occ log:manage --level debug
 ```
 
 ### Watch All Logs (Not Just educai)
 
 ```bash
-docker exec master-nextcloud-1 tail -f /var/www/html/data/nextcloud.log
+tail -f /path/to/nextcloud/data/nextcloud.log
 ```
 
 ### Check Talk Bot Errors
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ talk:bot:list
+sudo -u www-data php occ talk:bot:list
 # Look at the error_count column
 ```
 
@@ -273,7 +273,7 @@ docker exec -u www-data master-nextcloud-1 php occ talk:bot:list
 
 ```bash
 # Test if LLM endpoint is reachable
-docker exec master-nextcloud-1 curl -v https://chat-ai.academiccloud.de/v1/chat/completions \
+curl -v https://chat-ai.academiccloud.de/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"mistral-large-instruct","messages":[{"role":"user","content":"test"}]}'
