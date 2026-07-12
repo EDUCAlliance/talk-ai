@@ -1,74 +1,35 @@
-# Talk AI Development
+# Development
 
-This guide covers build, test, and local verification work for the app.
+Build, test, and local verification. Requirements: Nextcloud 30–34, PHP 8.1+, Node.js 22, npm 10.5+. The package scripts expect the app inside a Nextcloud checkout, usually under `apps-extra/educai`.
 
-## Requirements
-
-- Nextcloud 30 to 33
-- PHP 8.1 or newer
-- Node.js 22 or newer
-- npm 10.5 or newer
-- Composer dependencies from the surrounding Nextcloud workspace
-
-The package scripts expect the app to live inside a Nextcloud checkout, usually under `apps-extra/educai`.
-
-## Frontend Build
-
-Install dependencies once:
+## Frontend
 
 ```bash
-npm install
-```
-
-Build production assets:
-
-```bash
-npm run build
-```
-
-Build during development:
-
-```bash
-npm run watch
-```
-
-Lint frontend code:
-
-```bash
-npm run lint
+npm ci                 # install dependencies
+npm run build          # production build (writes bundles to js/)
+npm run watch          # rebuild on change
+npm run lint           # eslint
 npm run stylelint
 ```
 
-Generated files are written under `js/`. Commit generated assets when the repository expects deployable app bundles.
+Commit the generated `js/` assets — the repository ships deployable bundles. After frontend changes, run a build and hard-refresh the browser (Nextcloud caches bundles aggressively).
 
-## PHP Tests
-
-Run the unit suite with the lightweight bootstrap:
+## PHP
 
 ```bash
+# unit tests (lightweight bootstrap — no server install needed)
 vendor/bin/phpunit --bootstrap tests/unit/bootstrap.php tests/unit
-```
 
-Run a targeted test file:
-
-```bash
+# single test file
 vendor/bin/phpunit --bootstrap tests/unit/bootstrap.php tests/unit/Service/SettingsServiceTest.php
-```
 
-Some full Nextcloud PHPUnit bootstraps require an initialized server install and may fail in a plain workspace. Prefer the app unit bootstrap unless the test needs the full server.
-
-## PHP Lint
-
-Use `php -l` for changed PHP files:
-
-```bash
+# syntax check
 php -l lib/Service/BotService.php
-php -l lib/Service/LLMClient.php
 ```
 
 ## Migrations
 
-Migrations run during app enable and Nextcloud upgrade:
+Migrations live in `lib/Migration/` and run on app enable and `occ upgrade`:
 
 ```bash
 sudo -u www-data php occ app:enable educai
@@ -76,76 +37,21 @@ sudo -u www-data php occ upgrade --no-interaction
 sudo -u www-data php occ migrations:status educai
 ```
 
-Current migration files live in `lib/Migration/`. Recent schema work includes per-bot temperature, Talk attachment and room-document support, admin layout changes, and secondary endpoint fallback settings.
+## Useful occ Commands
 
-## Local Docker Verification
-
-In the local `educ-nc` development stack, the known container is `master-nextcloud-1`.
-
-Useful commands:
+Adapt the prefix to your setup (e.g. `docker exec -u www-data <container> php occ …`):
 
 ```bash
-docker exec -u www-data master-nextcloud-1 php occ status
-docker exec -u www-data master-nextcloud-1 php occ app:list
-docker exec -u www-data master-nextcloud-1 php occ migrations:status educai
-docker exec -u www-data master-nextcloud-1 php occ app:disable educai
-docker exec -u www-data master-nextcloud-1 php occ app:enable educai
+sudo -u www-data php occ app:enable educai        # also re-runs repair steps
+sudo -u www-data php occ app:disable educai
+sudo -u www-data php occ talk:bot:list             # shared Talk bot registration
+sudo -u www-data php cron.php                      # run background jobs (RAG etc.)
+sudo -u www-data php occ background-job:list --limit=200
+sudo -u www-data php occ background-job:execute --force-execute <job-id>
 ```
 
-Run cron manually when testing RAG or queued work:
+When testing Talk behavior, watch `nextcloud.log` for `EducAI:` entries.
 
-```bash
-docker exec -u www-data master-nextcloud-1 php cron.php
-```
+## Documentation
 
-List or execute queued jobs directly when testing one-off background work:
-
-```bash
-docker exec -u www-data master-nextcloud-1 php occ background-job:list --limit=200
-docker exec -u www-data master-nextcloud-1 php occ background-job:execute --force-execute <job-id>
-```
-
-For direct database inspection in this setup, `occ db:query` may be unavailable. Use PHP/PDO inside the container when you need live table data.
-
-## Runtime Checks
-
-After changing admin settings, bot forms, or Smart Picker code:
-
-1. Run `npm run build`.
-2. Reload or re-enable the app if the server-side wiring changed.
-3. Open a fresh browser tab to avoid stale Nextcloud bundles.
-4. Verify the affected page in the local Nextcloud UI.
-
-After changing migrations or schema-dependent services:
-
-1. Run targeted PHP tests.
-2. Run `occ upgrade`.
-3. Check `occ migrations:status educai`.
-4. Inspect the affected table or UI state.
-
-After changing wiki index sync:
-
-1. Run `occ upgrade` or disable/enable the app so the registry tables and backfill job are applied.
-2. Execute the queued `OCA\EducAI\Jobs\RebuildWikiRootRegistryJob` or run cron.
-3. Inspect `educai_wiki_roots` and `educai_wiki_root_bots` to confirm existing wiki bots were registered.
-4. Create or delete a Markdown file through WebDAV in a Collectives wiki and in a normal personal-files wiki.
-5. Confirm a deduplicated `OCA\EducAI\Jobs\SyncWikiRootIndexJob` appears for the expected `root_id`.
-6. Execute the job and check that the wiki root `index.md` `Existing Files` section changed.
-
-After changing Talk behavior:
-
-1. Confirm the shared Talk bot registration.
-2. Test the target room path.
-3. Check `nextcloud.log` for `EducAI:` entries.
-
-## Documentation Rules
-
-Keep the root README short. Put setup details, runtime behavior, and analysis documents under `docs/`.
-
-When changing behavior, update the nearest specific guide:
-
-- RAG behavior: `docs/RAG_TOOL_GUIDE.md` or `docs/RAG_BACKGROUND_JOBS_GUIDE.md`
-- MCP behavior: `docs/MCP_TOOL_CALLING_ANALYSIS.md`
-- local operations: `docs/docker_commands_cheatsheet.md`
-- product overview: `docs/FEATURES.md`
-- architecture: `docs/ARCHITECTURE.md`
+Keep the root README short; details belong in `docs/`. When changing behavior, update the closest guide (see [docs/README.md](README.md) for the index).

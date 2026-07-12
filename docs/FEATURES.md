@@ -114,11 +114,10 @@ Built-in tools run in the app:
 - `wiki_read_page`
 - `wiki_write_page`
 - `wiki_log_event`
-- `catalogue_search`
-- `catalogue_past_search`
-- `catalogue_get_opportunity`
 
 The visible tool list depends on admin settings and bot scope. For example, image tools require a vision endpoint, audio tools require a speech endpoint, and wiki tools require a personal bot.
+
+Companion apps can contribute additional tools through the [tool-provider extension point](TOOL_PROVIDERS.md); contributed tools behave like built-ins.
 
 ### MCP Tools
 
@@ -136,13 +135,12 @@ The admin settings page is organized into sections:
 - RAG & Embeddings
 - Document Conversion
 - Media Tools
-- Catalogue
 - Rate Limits
 - Conversation Memory
 - Agent Tools
 - All Bots
 
-Admin settings cover credentials, model access, embedding and conversion providers, rate-limit queueing, conversation context size, catalogue indexing, MCP tools, and bot administration.
+Admin settings cover credentials, model access, embedding and conversion providers, rate-limit queueing, conversation context size, MCP tools, and bot administration.
 
 ## Conversation Memory
 
