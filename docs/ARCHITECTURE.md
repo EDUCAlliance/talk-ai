@@ -98,6 +98,8 @@ Fallback retry uses the configured fallback model only for eligible timeout or c
 
 RAG source ingestion runs through background jobs. The ingestion service resolves files through Nextcloud storage APIs, extracts text, chunks content, requests embeddings, and stores vectors in JSON-compatible form.
 
+The built-in `rag_search_documents` tool embeds the model-generated query and computes cosine similarity in PHP. This keeps the implementation database-portable.
+
 ## Wiki Index Sync
 
 Wiki tools keep root-level `index.md` pages up to date through `WikiService::syncIndexForRoot()`. The same index sync also runs after manual file changes, but the hot file-event path stays small enough for large instances:
@@ -110,8 +112,6 @@ Wiki tools keep root-level `index.md` pages up to date through `WikiService::syn
 6. `SyncWikiRootIndexJob` loads the registered root, calls `WikiService::syncIndexForRoot()`, and writes either `last_synced_at` or `last_error` back to `educai_wiki_roots`.
 
 The matching key is the Nextcloud node ID, not the path. `root_path` is stored for debugging and as a CLI background-job fallback when `IRootFolder::getById()` cannot resolve a folder in the current execution context. This keeps personal-file wikis and Collectives-backed wikis on the same path-independent implementation.
-
-The built-in `rag_search_documents` tool embeds the model-generated query and computes cosine similarity in PHP. This keeps the implementation database-portable.
 
 ## Talk Bot Registration
 

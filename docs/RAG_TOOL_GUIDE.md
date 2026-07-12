@@ -1,196 +1,46 @@
-# RAG Tool Integration
+# RAG Tool
 
-The EducAI plugin provides a built-in RAG (Retrieval-Augmented Generation) tool that allows the AI assistant to dynamically search through indexed documents. Unlike the traditional Top-K approach that injects a fixed number of chunks into every query, the RAG tool gives the LLM control over when and how to search the knowledge base.
+Talk AI exposes indexed documents to the model through a search tool instead of injecting a fixed number of chunks into every prompt. The LLM decides when to search, crafts its own queries, can search multiple times per turn, and filters results by relevance — so document context only enters the conversation when it's actually needed.
 
-## How It Works
+## `rag_search_documents`
 
-When RAG is enabled for a bot that has indexed documents:
+Semantic search over the bot's indexed documents. Available automatically when RAG is enabled for a bot that has at least one `ready` source.
 
-1. **Tool Availability**: The `rag_search_documents` tool becomes automatically available to the LLM
-2. **LLM Decision**: The LLM decides when to search based on the user's question
-3. **Dynamic Queries**: The LLM can craft specific search queries and request the number of results it needs
-4. **Multiple Searches**: The LLM can perform multiple searches in a single conversation turn
-5. **Score Filtering**: The LLM can set minimum relevance thresholds to filter out poor matches
-
-## Available Tool
-
-### `rag_search_documents`
-
-Search through the bot's indexed documents using semantic similarity.
-
-**Parameters:**
 | Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | Yes | Search query to find relevant document chunks |
-| `limit` | integer | No | Max results to return (default: 5, max: 20) |
-| `min_score` | number | No | Minimum similarity score threshold (0.0-1.0, default: 0.3) |
+|---|---|---|---|
+| `query` | string | yes | Search query |
+| `limit` | integer | no | Max results (default 5, max 20) |
+| `min_score` | number | no | Minimum similarity score, 0.0–1.0 (default 0.3) |
 
-**Example usage by AI:**
-```json
-{
-  "query": "Modul 3 Titel",
-  "limit": 5,
-  "min_score": 0.3
-}
-```
-
-## Advantages Over Traditional Top-K
-
-| Feature | Traditional Top-K | RAG Tool |
-|---------|------------------|----------|
-| Search Control | Fixed per query | LLM decides when to search |
-| Query Specificity | Uses raw user message | LLM crafts optimal search query |
-| Result Count | Fixed (e.g., always 5) | Dynamic based on question complexity |
-| Multiple Searches | Not possible | LLM can search multiple times |
-| Score Filtering | Not available | LLM can filter by relevance |
-| Context Efficiency | Always injects chunks | Only when relevant |
+Typical flow: the user asks *"What Python version is required?"* → the model calls the tool with `{"query": "Python version required installation", "limit": 3}` → the tool returns matching chunks with source paths and relevance scores → the model synthesizes an answer, searching again with a different query if the first pass was incomplete.
 
 ## Configuration
 
-### Prerequisites
+1. **Enable RAG globally** — Admin settings → Talk AI → RAG & Embeddings.
+2. **Configure the embedding API** — endpoint, key, and model (e.g. `text-embedding-3-large`).
+3. **Enable RAG on the bot** when creating/editing it.
+4. **Attach files or folders** as sources; indexing runs via background jobs ([RAG_BACKGROUND_JOBS_GUIDE.md](RAG_BACKGROUND_JOBS_GUIDE.md)).
 
-1. **Enable RAG globally** in Admin Settings → EducAI → Retrieval-Augmented Generation
-2. **Configure embedding API** endpoint and model
-3. **Enable RAG on the bot** when creating/editing the bot
-4. **Index documents** by attaching files or folders to the bot
-
-### Admin Settings
-
-The following settings affect RAG behavior:
-
-| Setting | Description |
-|---------|-------------|
-| Enable RAG | Master switch for RAG functionality |
-| Embedding API Endpoint | API endpoint for generating embeddings |
-| Embedding API Key | Credentials for the embedding API |
-| Embedding Model | Model used for text embeddings (e.g., `text-embedding-3-large`) |
-| Chunk Size | Token count per document chunk (affects search granularity) |
-| Chunk Overlap | Overlap between consecutive chunks (provides context continuity) |
-
-**Note:** Top-K and Max Context Tokens settings have been removed as the LLM now controls these dynamically.
-
-## Typical AI Workflow
-
-1. User asks: *"What are the system requirements?"*
-2. AI recognizes this might be in the documentation
-3. AI calls `rag_search_documents` with:
-   ```json
-   {
-     "query": "system requirements hardware software prerequisites",
-     "limit": 5
-   }
-   ```
-4. Tool returns relevant chunks with relevance scores
-5. AI synthesizes an answer based on the retrieved content
-6. If the answer is incomplete, AI may search again with a different query
-
-## Example Conversation
-
-**User:** What Python version is required?
-
-**AI (internal):** I should search the knowledge base for Python version requirements.
-
-**Tool Call:**
-```json
-{
-  "name": "rag_search_documents",
-  "arguments": {
-    "query": "Python version required installation",
-    "limit": 3,
-    "min_score": 0.5
-  }
-}
-```
-
-**Tool Response:**
-```
-Found 3 relevant document chunk(s) for: "Python version required installation"
-
----
-**Source 1:** /Documents/installation-guide.md (chunk 2) [relevance: 0.87]
-
-## Prerequisites
-- Python 3.9 or higher
-- pip package manager
-- virtualenv (recommended)
-
----
-**Source 2:** /Documents/README.md (chunk 1) [relevance: 0.72]
-
-This project requires Python 3.9+ and Node.js 18+.
-...
-```
-
-**AI Response:** According to the documentation, Python 3.9 or higher is required. The installation guide also recommends using virtualenv for managing dependencies.
+Chunking is controlled by the admin settings **Chunk Size** (tokens per chunk) and **Chunk Overlap**. Smaller chunks (300–500 tokens) suit precise Q&A; larger ones (750–1000) suit narrative content.
 
 ## System Prompt Enhancement
 
-When a bot has RAG enabled and indexed documents, the system prompt is automatically enhanced with detailed instructions:
-
-```
-## CRITICAL: Document Search Instructions
-You have access to a knowledge base with indexed documents. You MUST follow these rules:
-
-1. **ALWAYS search first**: Before answering ANY question that might be in the documents, 
-   call the `rag_search_documents` tool.
-2. **Never guess**: Do NOT answer from memory if the answer could be in the documents. 
-   Search first!
-3. **How to search**: Convert the user's question into search keywords.
-   - User asks: "Was ist der Titel von Modul 3?" → Search: "Modul 3 Titel"
-   - User asks: "What are the requirements?" → Search: "requirements prerequisites"
-4. **After searching**: Read the returned chunks carefully and synthesize an answer 
-   based on the document content.
-5. **If no results**: Tell the user you couldn't find that information in the documents.
-6. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.
-```
+When a bot has RAG enabled and indexed documents, its system prompt is automatically extended with search instructions: always search before answering questions that might be covered by the documents, convert user questions into search keywords, synthesize answers from the returned chunks, and say so when nothing was found. Add your own instructions to the bot's system prompt if the default search behavior isn't right for your use case.
 
 ## Troubleshooting
 
-**"No documents have been indexed"**
-- Attach files to the bot via the Sources section
-- Wait for background job to process (check status: pending → ready)
-- Ensure file types are supported (txt, md, pdf, docx, etc.)
+| Symptom | Fix |
+|---|---|
+| "No documents have been indexed" | Attach sources and wait for the background job (`pending` → `ready`) |
+| "No matching document chunks found" | Different query, lower `min_score`, higher `limit`; verify the content is actually in the documents |
+| "File or folder no longer exists" | Source was deleted; embeddings are cleaned up automatically — remove the source |
+| Tool not offered to the bot | RAG must be enabled globally *and* on the bot, with ≥ 1 `ready` source |
 
-**"No matching document chunks found"**
-- Try different search queries
-- Lower the `min_score` threshold
-- Increase the `limit` parameter
-- Check if documents contain the expected content
-
-**"Error: No bot context available"**
-- This is an internal error; ensure the bot ID is passed correctly
-- Re-save the bot and try again
-
-**"File or folder no longer exists"**
-- The source file/folder was deleted from Nextcloud
-- Embeddings are automatically cleaned up when this is detected
-- You can safely remove the source from the bot
-
-**RAG tool not appearing for bot**
-- Verify RAG is enabled in Admin Settings (global toggle)
-- Verify RAG is enabled on the specific bot
-- Verify the bot has at least one indexed source with "ready" status
-
-## Best Practices
-
-1. **Index relevant documents**: Only attach documents that are actually useful for the bot's purpose
-2. **Use descriptive filenames**: They're included in search results and help the LLM understand context
-3. **Chunk size tuning**: Smaller chunks (300-500 tokens) for precise Q&A, larger (750-1000) for narrative content
-4. **Monitor tool usage**: Check Nextcloud logs (`nextcloud.log`) for `EducAI:` tool execution lines (tool calls are not persisted in `educai_conversations`)
-5. **System prompt guidance**: Add specific instructions about when to search if the default behavior isn't ideal
-
-## Migration from Top-K
-
-If you're upgrading from a version that used automatic Top-K injection:
-
-1. **No action required**: The RAG tool is automatically available for RAG-enabled bots
-2. **Settings removed**: `ragTopK` and `ragMaxContextTokens` settings are no longer used
-3. **Behavior change**: RAG context is no longer automatically injected into every query
-4. **Better efficiency**: The LLM now decides when to search, reducing unnecessary context
+Tool calls are logged to `nextcloud.log` (`EducAI:` lines) but not persisted in `educai_conversations`.
 
 ## Technical Details
 
-- **Similarity Algorithm**: Cosine similarity between query and chunk embeddings
-- **Embedding Storage**: Vectors stored as JSON arrays in database
-- **Result Format**: Markdown-formatted text with source attribution and relevance scores
-- **Maximum Results**: Capped at 20 chunks per search to prevent context overflow
+- Cosine similarity between the query embedding and chunk embeddings, computed in PHP (database-portable; vectors stored as JSON arrays).
+- Results are Markdown-formatted with source attribution and relevance scores, capped at 20 chunks per search.
+- Descriptive filenames help — they appear in the results and give the model context.
+- Upgrading from older Top-K versions needs no action: the `ragTopK` / `ragMaxContextTokens` settings are simply no longer used.

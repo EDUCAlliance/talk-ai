@@ -8,9 +8,9 @@ Put the app into a Nextcloud apps directory:
 
 ```bash
 cd /path/to/nextcloud/apps-extra
-git clone <repository-url> educai
+git clone https://github.com/EDUCAlliance/talk-ai.git educai
 cd educai
-npm install
+npm ci
 npm run build
 ```
 
@@ -67,15 +67,7 @@ sudo -u www-data php occ talk:bot:install \
   "https://your-nextcloud.example/index.php/apps/educai/webhook/talk"
 ```
 
-The webhook URL must include `/index.php` on installations that route apps through that path.
-
-For Docker-based local development:
-
-```bash
-sudo -u www-data php occ talk:bot:list
-sudo -u www-data php occ app:disable educai
-sudo -u www-data php occ app:enable educai
-```
+The webhook URL must include `/index.php` on installations that route apps through that path. Disabling and re-enabling the app also re-runs the automatic registration.
 
 ## 4. Create A Bot
 
