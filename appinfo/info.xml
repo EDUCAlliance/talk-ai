@@ -13,7 +13,7 @@ Talk AI turns Nextcloud Talk into a home for **multiple** AI bots instead of one
 - **Agentic tools** — built-in document search, room-document search, image analysis, audio transcription and persistent Markdown wikis, plus an extension point for companion apps and support for external MCP tool servers.
 - **Native Talk integration** — shared Talk bot, Smart Picker support, signature-verified webhooks, admin control over providers, credentials, rate limits and tool access.
 
-Developed within EDUC — the European Digital UniverCity. Works with any OpenAI-compatible endpoint on any supported Nextcloud install.
+Developed by EDUC — the European Digital UniverCity (its package id is educai). Works with any OpenAI-compatible endpoint on any supported Nextcloud install.
 	]]></description>
 	<version>2.39.1</version>
 	<licence>agpl</licence>

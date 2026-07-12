@@ -4,6 +4,8 @@
 
 # Talk AI
 
+*by [EDUC — the European Digital UniverCity](https://educalliance.eu)*
+
 **Run many purpose-built AI assistants inside Nextcloud Talk — each with its own prompt, model, knowledge and tools, under real access governance.**
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
@@ -56,6 +58,8 @@ npm ci && npm run build
 sudo -u www-data php occ app:enable educai
 ```
 
+> **Why `educai`?** The app's internal identifier is `educai` — Talk AI began as the AI assistant of the **EDUC** university alliance, and the id is kept stable so existing deployments upgrade seamlessly (the routes, database tables and `occ` commands all use it). "Talk AI" is the product name; `educai` is the package name underneath.
+
 **3. Configure** under **Administration settings → Talk AI**:
 
 - Primary API endpoint + API key (any OpenAI-compatible provider)
@@ -101,7 +105,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local Nextcloud verification 
 
 ## About
 
-Talk AI is developed within **[EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant. The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–34 install.
+Talk AI is developed **by [EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant (hence the `educai` package id). The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–34 install.
 
 Deployment-specific functionality (e.g. EDUC's course-catalogue search) lives in separate companion apps that plug into the [tool-provider extension point](docs/TOOL_PROVIDERS.md) — the core stays clean.
 
