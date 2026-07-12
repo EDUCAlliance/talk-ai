@@ -14,7 +14,6 @@ Start with the root [README](../README.md) for the project overview.
 - [BOT_SETUP_GUIDE.md](./BOT_SETUP_GUIDE.md)
 - [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
 - [WEBHOOK_DEBUG_GUIDE.md](./WEBHOOK_DEBUG_GUIDE.md)
-- [docker_commands_cheatsheet.md](./docker_commands_cheatsheet.md)
 
 ## Feature Guides
 
@@ -26,11 +25,7 @@ Start with the root [README](../README.md) for the project overview.
 
 ## Analyses And Audits
 
-- [BOT_APPROVAL_RIGHTS_ANALYSIS.md](./BOT_APPROVAL_RIGHTS_ANALYSIS.md)
-- [MCP_TOOL_CALLING_ANALYSIS.md](./MCP_TOOL_CALLING_ANALYSIS.md)
-- [RATE_LIMIT_QUEUE_ANALYSIS.md](./RATE_LIMIT_QUEUE_ANALYSIS.md)
 - [SECURITY_AUDIT.md](./SECURITY_AUDIT.md)
-- [HARDCODED_VALUES.md](./HARDCODED_VALUES.md)
 - [SMART_PICKER_BOT_PROVIDER.md](./SMART_PICKER_BOT_PROVIDER.md)
 
 ## Project

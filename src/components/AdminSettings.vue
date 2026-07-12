@@ -68,7 +68,7 @@
 
 						<div v-if="settings.appIconMode === 'default'" class="app-icon-mode-panel">
 							<p class="hint">
-								Uses the bundled EDUCAI icon pair: dark icon for light settings surfaces and white icon for app navigation.
+								Uses the bundled Talk AI icon pair: dark icon for light settings surfaces, white icon for app navigation.
 							</p>
 						</div>
 

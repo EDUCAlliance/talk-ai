@@ -1,81 +1,72 @@
+<div align="center">
+
+<img src="img/icon-appstore.png" width="120" alt="Talk AI logo">
+
 # Talk AI
 
-Talk AI is a Nextcloud app for running several AI bots in Nextcloud Talk. It connects Talk messages, bot-specific prompts, OpenAI-compatible model endpoints, file knowledge, and tool calls in one app-managed workflow.
+*by [EDUC — the European Digital UniverCity](https://educalliance.eu)*
 
-The app targets institutions that need more than one generic assistant. A bot can stay personal, serve a group or team, or become globally available after approval. Admins control providers, credentials, rate limits, fallback behavior, and tool access.
+**Run many purpose-built AI assistants inside Nextcloud Talk — each with its own prompt, model, knowledge and tools, under real access governance.**
 
-## What It Does
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![Nextcloud 30–34](https://img.shields.io/badge/Nextcloud-30–34-0082c9.svg)](https://nextcloud.com)
+[![OpenAI-compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f.svg)](#model-providers)
 
-- Creates Talk bots with their own prompt, mention name, model, temperature, visibility, and tool set.
-- Supports personal, group, team, and global bot scopes, including approval flows for shared bots.
-- Uses OpenAI-compatible chat, model-list, embedding, vision, and speech endpoints.
-- Lets admins configure a primary endpoint, an optional secondary endpoint, and one fallback model.
-- Adds knowledge through RAG sources from Nextcloud files and folders, plus optional Docling conversion for PDF, Office, and image formats.
-- Provides built-in tools for RAG search, room-document search, image analysis, audio transcription, and persistent personal wikis - plus an extension point for companion apps to contribute their own tools.
-- Registers external MCP tools that admins approve and users assign per bot.
-- Integrates with Nextcloud Talk through a shared Talk AI Talk bot, Smart Picker support, and signature-verified webhooks.
+</div>
 
-## Current App Areas
+Talk AI turns Nextcloud Talk into a home for **multiple** AI bots instead of one generic assistant. A bot can stay **personal**, be shared with a **group** or **team**, or go **global** after approval — so an institution can run a research helper, an onboarding buddy, a code reviewer and a faculty-only grants assistant side by side, each governed by who's allowed to use it.
 
-### Bot Management
+It connects Talk messages, per-bot system prompts, any **OpenAI-compatible** model endpoint, file knowledge (RAG), and agentic tool calls (built-in + MCP) into one app-managed workflow — with admin control over providers, credentials, rate limits, fallback behaviour and tool access.
 
-Users create and manage bots in the Talk AI app. Each bot has a stable `@mention`, its own system prompt, optional custom temperature, optional model selection, and a visibility scope.
+<div align="center">
+<img src="docs/screenshots/bot-discovery.png" width="820" alt="Browsing available Talk AI bots">
+</div>
 
-Shared bots use the approval workflow. Personal bots stay private and can use the personal Markdown wiki tools.
+## Highlights
 
-### Model Providers
+- **Governance-first scoping.** Every bot has a visibility scope — *personal*, *group*, *team*, or *global* — with an approval workflow for shared bots. Users only see and use the bots they're entitled to.
+- **Multi-bot by design.** Unlimited bots, each with a stable `@mention`, own system prompt, temperature, and model selection.
+- **Bring your own model.** Any OpenAI-compatible chat / model-list / embedding / vision / speech endpoint. Primary + optional secondary endpoint, plus an automatic fallback model on eligible timeouts or connection failures.
+- **Knowledge (RAG).** Index Nextcloud files and folders; optional Docling conversion for PDF, Office and image formats. Bots answer from your documents.
+- **Agentic tools.** Built-in tools for document search, room-document search, image analysis, audio transcription and persistent Markdown wikis — plus an **extension point** so companion apps can contribute their own tools, and **MCP** servers admins approve and users assign per bot.
+- **Native Talk integration.** Shared Talk bot, Smart Picker support, signature-verified webhooks.
 
-Admins configure model access in the Talk AI admin settings:
+## Screenshots
 
-- primary chat endpoint and API key
-- optional secondary chat endpoint and API key
-- single-model or per-bot model selection
-- allowed model list from `/v1/models`
-- fallback model for eligible timeout or connection failures
-- chat, streaming, and model-list timeouts
-- default temperature for bots without a custom value
+| Multi-bot manager (owner view) | Create a bot |
+|---|---|
+| ![Multi-bot manager](docs/screenshots/multi-bot-manager.png) | ![Create a bot](docs/screenshots/create-bot.png) |
 
-Legacy unprefixed model names resolve against the primary endpoint. New endpoint-aware model IDs use `primary:<model>` or `secondary:<model>`.
-
-### Knowledge And Tools
-
-Bots can use several knowledge sources and tools:
-
-- RAG over indexed files and folders
-- room-document search for files uploaded in the current Talk room
-- image attachment analysis
-- audio attachment transcription
-- persistent Markdown wiki tools for personal bots
-- admin-registered MCP tools
-
-Tool results stay in the current agent turn and are not stored as conversation history.
+| Admin settings (providers, appearance) | Bot discovery (member view) |
+|---|---|
+| ![Admin settings](docs/screenshots/admin-settings.png) | ![Bot discovery](docs/screenshots/bot-discovery.png) |
 
 ## Quick Start
 
-Install the app in a Nextcloud apps directory:
+**1. Install** into a Nextcloud apps directory and build the frontend:
 
 ```bash
 cd /path/to/nextcloud/apps-extra
 git clone https://github.com/EDUCAlliance/talk-ai.git educai
 cd educai
-npm install
-npm run build
+npm ci && npm run build
 ```
 
-Enable it from the Nextcloud app UI or with `occ`:
+**2. Enable** the app:
 
 ```bash
 sudo -u www-data php occ app:enable educai
 ```
 
-Then open **Administration settings > Talk AI** and configure at least:
+> **Why `educai`?** The app's internal identifier is `educai` — Talk AI began as the AI assistant of the **EDUC** university alliance, and the id is kept stable so existing deployments upgrade seamlessly (the routes, database tables and `occ` commands all use it). "Talk AI" is the product name; `educai` is the package name underneath.
 
-- Primary API Endpoint
-- Primary API Key
-- Default Model or allowed model list
-- Webhook Secret
+**3. Configure** under **Administration settings → Talk AI**:
 
-Talk AI attempts to register the shared Talk bot during app setup and when relevant settings change. If automatic registration cannot run in your environment, register it manually:
+- Primary API endpoint + API key (any OpenAI-compatible provider)
+- A default model or an allowed model list (fetched from `/v1/models`)
+- Webhook secret
+
+**4. Register the Talk bot** (Talk AI attempts this automatically; if your environment blocks it, do it manually):
 
 ```bash
 sudo -u www-data php occ talk:bot:install \
@@ -85,62 +76,37 @@ sudo -u www-data php occ talk:bot:install \
   "https://your-nextcloud.example/index.php/apps/educai/webhook/talk"
 ```
 
-The webhook URL must include `/index.php` on installations that need it for app routes.
+Then create your first bot in the **Talk AI** app, mention it in any Talk conversation, and chat.
 
-## About This Project
+<a name="model-providers"></a>
+## Model providers
 
-Talk AI is developed within [EDUC - the European Digital UniverCity](https://educalliance.eu),
-an alliance of European universities, where it runs as the "EDUC AI" assistant
-on the alliance-wide Nextcloud portal. The app is generic: it works with any
-OpenAI-compatible endpoint and any Nextcloud 30-34 installation.
-
-Deployment-specific functionality (for example EDUC's course-catalogue search
-tools) lives in separate companion apps that plug into the tool-provider
-extension point - see [docs/TOOL_PROVIDERS.md](docs/TOOL_PROVIDERS.md).
-
-License: AGPL-3.0-or-later.
+Talk AI speaks the OpenAI HTTP API, so it works with OpenAI, Azure OpenAI, self-hosted vLLM/Ollama, and academic gateways alike. Configure a **primary** endpoint, an optional **secondary** endpoint, and one **fallback** model. Model IDs are endpoint-aware (`primary:<model>` / `secondary:<model>`); legacy unprefixed names resolve against the primary endpoint.
 
 ## Documentation
 
-- [Documentation index](./docs/README.md)
-- [Feature guide](./docs/FEATURES.md)
-- [Architecture](./docs/ARCHITECTURE.md)
-- [Development](./docs/DEVELOPMENT.md)
-- [Quick start guide](./docs/QUICK_START.md)
-- [Bot setup guide](./docs/BOT_SETUP_GUIDE.md)
-- [Troubleshooting](./docs/TROUBLESHOOTING.md)
-- [RAG tool guide](./docs/RAG_TOOL_GUIDE.md)
-- [RAG background jobs](./docs/RAG_BACKGROUND_JOBS_GUIDE.md)
-- [MCP tool-calling analysis](./docs/MCP_TOOL_CALLING_ANALYSIS.md)
+- [Feature guide](docs/FEATURES.md) · [Architecture](docs/ARCHITECTURE.md) · [Bot setup](docs/BOT_SETUP_GUIDE.md)
+- [Quick start](docs/QUICK_START.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Development](docs/DEVELOPMENT.md)
+- [RAG tool guide](docs/RAG_TOOL_GUIDE.md) · [RAG background jobs](docs/RAG_BACKGROUND_JOBS_GUIDE.md)
+- [Tool-provider extension point](docs/TOOL_PROVIDERS.md) — how companion apps add their own bot tools
 
-## Development Snapshot
+## Development
 
-Requirements:
-
-- Nextcloud 30 to 33
-- PHP 8.1 or newer
-- Node.js 22 and npm 10.5 or newer
-- Composer dependencies from the surrounding Nextcloud workspace
-
-Common commands:
+Requirements: Nextcloud 30–34 · PHP 8.1+ · Node.js 22 / npm 10.5+.
 
 ```bash
-npm run build
-npm run watch
-npm run lint
-npm run stylelint
+npm run build          # production build
+npm run watch          # dev build, rebuild on change
+npm run lint           # eslint
 vendor/bin/phpunit --bootstrap tests/unit/bootstrap.php tests/unit
 ```
 
-Migrations run during app enable or upgrade:
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local Nextcloud verification notes.
 
-```bash
-sudo -u www-data php occ upgrade --no-interaction
-sudo -u www-data php occ migrations:status educai
-```
+## About
 
-See [Development](./docs/DEVELOPMENT.md) for the current build, test, and local Nextcloud verification notes.
+Talk AI is developed **by [EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant (hence the `educai` package id). The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–34 install.
 
-## License
+Deployment-specific functionality (e.g. EDUC's course-catalogue search) lives in separate companion apps that plug into the [tool-provider extension point](docs/TOOL_PROVIDERS.md) — the core stays clean.
 
-AGPL-3.0-or-later.
+Contributions welcome. Licensed under **AGPL-3.0-or-later**.

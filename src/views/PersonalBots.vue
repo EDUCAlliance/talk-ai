@@ -317,10 +317,10 @@ export default {
 			try {
 				const response = await axios.get(generateUrl('/apps/educai/api/v1/permissions'))
 				// eslint-disable-next-line no-console
-				console.log('[EDUCAI] Permissions response:', response.data)
+				console.log('[TalkAI] Permissions response:', response.data)
 				this.userPermissions = response.data.permissions || this.userPermissions
 				// eslint-disable-next-line no-console
-				console.log('[EDUCAI] userPermissions set to:', this.userPermissions)
+				console.log('[TalkAI] userPermissions set to:', this.userPermissions)
 				// Load pending approvals if user has approval rights
 				if (this.userPermissions.hasApprovalRights) {
 					this.loadPendingApprovals()

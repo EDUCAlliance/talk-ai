@@ -3,14 +3,28 @@
 	  xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
 	<id>educai</id>
 	<name>Talk AI</name>
-	<summary>Multi-bot manager for Nextcloud Talk</summary>
-	<description>Create and manage multiple AI bots for Nextcloud Talk using an OpenAI-compatible API.</description>
+	<summary>Run many purpose-built AI assistants in Nextcloud Talk, with access governance</summary>
+	<description><![CDATA[
+Talk AI turns Nextcloud Talk into a home for **multiple** AI bots instead of one generic assistant. Each bot has its own system prompt, model, knowledge and tools — and a visibility scope: **personal**, **group**, **team**, or **global** (with an approval workflow for shared bots), so users only see and use the bots they are entitled to.
+
+- **Multi-bot by design** — unlimited bots, each with a stable @mention, own prompt, temperature and model selection.
+- **Bring your own model** — any OpenAI-compatible chat / model-list / embedding / vision / speech endpoint, with a primary + optional secondary endpoint and an automatic fallback model.
+- **Knowledge (RAG)** — index Nextcloud files and folders, with optional Docling conversion for PDF, Office and image formats.
+- **Agentic tools** — built-in document search, room-document search, image analysis, audio transcription and persistent Markdown wikis, plus an extension point for companion apps and support for external MCP tool servers.
+- **Native Talk integration** — shared Talk bot, Smart Picker support, signature-verified webhooks, admin control over providers, credentials, rate limits and tool access.
+
+Developed by EDUC — the European Digital UniverCity (its package id is educai). Works with any OpenAI-compatible endpoint on any supported Nextcloud install.
+	]]></description>
 	<version>2.39.1</version>
 	<licence>agpl</licence>
 	<author mail="pascal.kienast@uni-potsdam.de" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
 	<namespace>EducAI</namespace>
 	<category>tools</category>
 	<bugs>https://github.com/EDUCAlliance/talk-ai/issues</bugs>
+	<screenshot small-thumbnail="https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/bot-discovery.png">https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/bot-discovery.png</screenshot>
+	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/multi-bot-manager.png</screenshot>
+	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/create-bot.png</screenshot>
+	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/admin-settings.png</screenshot>
 	<dependencies>
 		<nextcloud min-version="30" max-version="34"/>
 	</dependencies>
