@@ -4,7 +4,7 @@
 
 # Talk AI
 
-*by [EDUC — the European Digital UniverCity](https://educalliance.eu)*
+<a href="https://educalliance.eu"><img src="img/educ-logo.png" width="200" alt="by EDUC — the European Digital UniverCity"></a>
 
 **Run many purpose-built AI assistants inside Nextcloud Talk — each with its own prompt, model, knowledge and tools, under real access governance.**
 
