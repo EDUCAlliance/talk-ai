@@ -15,9 +15,9 @@ Talk AI turns Nextcloud Talk into a home for **multiple** AI bots instead of one
 
 Developed by EDUC — the European Digital UniverCity (its package id is educai). Works with any OpenAI-compatible endpoint on any supported Nextcloud install.
 	]]></description>
-	<version>2.39.1</version>
+	<version>2.39.2</version>
 	<licence>agpl</licence>
-	<author mail="pascal.kienast@uni-potsdam.de" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
+	<author mail="nextcloud.apps@educalliance.eu" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
 	<namespace>EducAI</namespace>
 	<category>tools</category>
 	<bugs>https://github.com/EDUCAlliance/talk-ai/issues</bugs>
