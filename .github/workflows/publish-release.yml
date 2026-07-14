@@ -1,0 +1,209 @@
+name: Build and publish app release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to build and publish
+        required: true
+        type: string
+      publish_appstore:
+        description: Publish the built release to the Nextcloud App Store
+        required: true
+        default: true
+        type: boolean
+      nightly:
+        description: Mark a manually dispatched App Store release as nightly
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: appstore-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: educai
+
+jobs:
+  build-and-publish:
+    name: Build, sign and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout release automation
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: automation
+          persist-credentials: false
+
+      - name: Checkout released source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate release metadata
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease || inputs.nightly || false }}
+          MANUAL_PUBLISH: ${{ inputs.publish_appstore || false }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unsupported release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          version="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' source/appinfo/info.xml)"
+          if [[ "$RELEASE_TAG" != "v$version" ]]; then
+            echo "Release tag $RELEASE_TAG does not match app version $version" >&2
+            exit 1
+          fi
+
+          nightly="false"
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+            nightly="true"
+          fi
+
+          publish_appstore="true"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$MANUAL_PUBLISH" != "true" ]]; then
+            publish_appstore="false"
+          fi
+
+          asset="$APP_NAME-$version.tar.gz"
+          download_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$asset"
+
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "artifact=$GITHUB_WORKSPACE/build/artifacts/appstore/$asset" >> "$GITHUB_OUTPUT"
+          echo "download_url=$download_url" >> "$GITHUB_OUTPUT"
+          echo "nightly=$nightly" >> "$GITHUB_OUTPUT"
+          echo "publish_appstore=$publish_appstore" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: source/.nvmrc
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Set up PHP and Composer
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.1'
+          tools: composer:v2
+          coverage: none
+
+      - name: Build production tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash automation/scripts/build-release.sh \
+            "$GITHUB_WORKSPACE/source" \
+            "$GITHUB_WORKSPACE/build/artifacts/appstore"
+
+      - name: Validate release archive
+        shell: bash
+        env:
+          ARTIFACT: ${{ steps.release.outputs.artifact }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          test -f "$ARTIFACT"
+          archive_list="$RUNNER_TEMP/$APP_NAME-archive.txt"
+          tar -tzf "$ARTIFACT" > "$archive_list"
+
+          test "$(cut -d/ -f1 "$archive_list" | sort -u)" = "$APP_NAME"
+          grep -Fx "$APP_NAME/appinfo/info.xml" "$archive_list" >/dev/null
+          grep -Fx "$APP_NAME/vendor/autoload.php" "$archive_list" >/dev/null
+          grep -Fx "$APP_NAME/js/educai-main.mjs" "$archive_list" >/dev/null
+
+          if grep -Eq "^$APP_NAME/(node_modules|src|tests|vendor-bin|\.git)/" "$archive_list"; then
+            echo "Development files were included in the release archive" >&2
+            exit 1
+          fi
+
+          packaged_version="$(tar -xOf "$ARTIFACT" "$APP_NAME/appinfo/info.xml" | sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p')"
+          test "$packaged_version" = "$VERSION"
+
+      - name: Verify signing key and certificate
+        shell: bash
+        env:
+          ARTIFACT: ${{ steps.release.outputs.artifact }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          APP_PUBLIC_CRT: ${{ secrets.APP_PUBLIC_CRT }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          key_file="$RUNNER_TEMP/$APP_NAME.key"
+          cert_file="$RUNNER_TEMP/$APP_NAME.crt"
+          public_key_file="$RUNNER_TEMP/$APP_NAME.pub"
+          signature_file="$RUNNER_TEMP/$APP_NAME.signature"
+
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
+          printf '%s\n' "$APP_PUBLIC_CRT" > "$cert_file"
+
+          key_fingerprint="$(openssl pkey -in "$key_file" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+          cert_fingerprint="$(openssl x509 -in "$cert_file" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | cut -d' ' -f1)"
+          test "$key_fingerprint" = "$cert_fingerprint"
+
+          openssl dgst -sha512 -sign "$key_file" -binary "$ARTIFACT" > "$signature_file"
+          openssl x509 -in "$cert_file" -pubkey -noout > "$public_key_file"
+          openssl dgst -sha512 -verify "$public_key_file" -signature "$signature_file" "$ARTIFACT"
+
+      - name: Attach tarball to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ steps.release.outputs.artifact }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          DOWNLOAD_URL: ${{ steps.release.outputs.download_url }}
+        run: |
+          set -euo pipefail
+
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" "$ARTIFACT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          local_hash="$(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
+          public_hash="$(curl --fail --silent --show-error --location "$DOWNLOAD_URL" | sha256sum | cut -d' ' -f1)"
+          test "$local_hash" = "$public_hash"
+
+      - name: Publish release to Nextcloud App Store
+        if: ${{ steps.release.outputs.publish_appstore == 'true' }}
+        uses: R0Wi/nextcloud-appstore-push-action@669734a3b4fb1ff7a636ae6d5bf2c18fab10a4e0
+        with:
+          app_name: ${{ env.APP_NAME }}
+          appstore_token: ${{ secrets.APPSTORE_TOKEN }}
+          download_url: ${{ steps.release.outputs.download_url }}
+          app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+          nightly: ${{ steps.release.outputs.nightly }}
+
+      - name: Remove signing material
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f \
+            "$GITHUB_WORKSPACE/$APP_NAME.key" \
+            "$RUNNER_TEMP/$APP_NAME.key" \
+            "$RUNNER_TEMP/$APP_NAME.crt" \
+            "$RUNNER_TEMP/$APP_NAME.pub" \
+            "$RUNNER_TEMP/$APP_NAME.signature"
