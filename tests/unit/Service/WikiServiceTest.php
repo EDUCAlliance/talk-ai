@@ -354,9 +354,12 @@ class WikiServiceTest extends TestCase {
 	): WikiService {
 		$botMapper = $this->createMock(BotMapper::class);
 		$botMapper->method('findById')->with(42)->willReturn($bot);
+		$rootFolder = $this->createMock(IRootFolder::class);
+		$rootFolder->method('getUserFolder')
+			->willReturnCallback([$root, 'getUserFolder']);
 
 		return new WikiService(
-			$root,
+			$rootFolder,
 			$botMapper,
 			$this->createMock(LoggerInterface::class),
 			$wikiLocationService,
@@ -375,7 +378,7 @@ class WikiServiceTest extends TestCase {
 	}
 }
 
-class InMemoryRootFolder implements IRootFolder {
+class InMemoryRootFolder {
 	/** @var array<string,InMemoryFolder> */
 	private array $folders = [];
 

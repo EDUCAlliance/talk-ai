@@ -523,9 +523,17 @@ class LLMClient {
 		$payload = [
 			'model' => $model,
 			'messages' => $fullMessages,
-			'temperature' => $options['temperature'] ?? 0.7,
-			'max_tokens' => $options['max_tokens'] ?? 1000,
 		];
+		$maxTokens = $options['max_tokens'] ?? 1000;
+
+		// GPT-5 reasoning models reject custom temperature values and use the
+		// newer max_completion_tokens parameter instead of max_tokens.
+		if ($this->modelUsesReasoningParameters($model)) {
+			$payload['max_completion_tokens'] = $maxTokens;
+		} else {
+			$payload['temperature'] = $options['temperature'] ?? 0.7;
+			$payload['max_tokens'] = $maxTokens;
+		}
 
 		if ($stream) {
 			$payload['stream'] = true;
@@ -556,6 +564,10 @@ class LLMClient {
 		}
 
 		return $this->sanitizePayloadForJson($payload);
+	}
+
+	private function modelUsesReasoningParameters(string $model): bool {
+		return preg_match('/(?:^|\/)gpt-5(?:[.\-]|$)/i', trim($model)) === 1;
 	}
 
 	/**

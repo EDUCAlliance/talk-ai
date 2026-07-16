@@ -436,6 +436,33 @@ PHP);
 			return;
 	}
 
+	if ($class === 'OCP\\BackgroundJob\\TimedJob') {
+		eval(<<<'PHP'
+namespace OCP\BackgroundJob;
+
+abstract class TimedJob {
+	public const TIME_INSENSITIVE = 0;
+	public const TIME_SENSITIVE = 1;
+
+	protected int $interval = 0;
+	protected int $timeSensitivity = self::TIME_SENSITIVE;
+
+	public function __construct(protected mixed $time = null) {}
+
+	public function setInterval(int $seconds): void {
+		$this->interval = $seconds;
+	}
+
+	public function setTimeSensitivity(int $sensitivity): void {
+		$this->timeSensitivity = $sensitivity;
+	}
+
+	abstract protected function run($arguments): void;
+}
+PHP);
+		return;
+	}
+
 	if ($class === 'OCP\\IUser') {
 		eval(<<<'PHP'
 namespace OCP;
