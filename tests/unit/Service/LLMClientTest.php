@@ -398,6 +398,116 @@ class LLMClientTest extends TestCase {
 		$this->assertSame(['prompt_tokens' => 4, 'completion_tokens' => 2, 'total_tokens' => 6], $result['usage']);
 	}
 
+	public function testStreamChatCompletionUsesReasoningParametersForGpt5Models(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:microsoft/gpt-5.6-terra');
+		$settings->setLlmStreamTimeout(240);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->with(
+				'https://primary.example.invalid/v1/chat/completions',
+				$this->callback(function (array $options): bool {
+					$this->assertSame('microsoft/gpt-5.6-terra', $options['json']['model'] ?? null);
+					$this->assertTrue($options['json']['stream'] ?? false);
+					$this->assertSame(800, $options['json']['max_completion_tokens'] ?? null);
+					$this->assertArrayNotHasKey('max_tokens', $options['json']);
+					$this->assertArrayNotHasKey('temperature', $options['json']);
+					$this->assertCount(1, $options['json']['tools'] ?? []);
+					return true;
+				})
+			)
+			->willReturn($this->rawResponse(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"
+				. "data: [DONE]\n\n"
+			));
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		$result = $llmClient->streamChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			static function (): void {},
+			null,
+			[
+				'temperature' => 0.2,
+				'max_tokens' => 800,
+				'tools' => [[
+					'type' => 'function',
+					'function' => [
+						'name' => 'example_tool',
+						'description' => 'Example tool',
+						'parameters' => ['type' => 'object'],
+					],
+				]],
+			]
+		);
+
+		$this->assertSame('ok', $result['content']);
+	}
+
+	public function testSendChatCompletionKeepsTemperatureForOtherModels(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:up/minimax-m2-5');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->with(
+				'https://primary.example.invalid/v1/chat/completions',
+				$this->callback(function (array $options): bool {
+					$this->assertSame('up/minimax-m2-5', $options['json']['model'] ?? null);
+					$this->assertSame(0.2, $options['json']['temperature'] ?? null);
+					$this->assertSame(1000, $options['json']['max_tokens'] ?? null);
+					$this->assertArrayNotHasKey('max_completion_tokens', $options['json']);
+					return true;
+				})
+			)
+			->willReturn($this->jsonResponse([
+				'model' => 'up/minimax-m2-5',
+				'choices' => [
+					['message' => ['content' => 'ok']],
+				],
+			]));
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		$result = $llmClient->sendChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			null,
+			['temperature' => 0.2]
+		);
+
+		$this->assertSame('ok', $result['content']);
+	}
+
 	public function testStreamChatCompletionRetriesWithoutUsageOptionsWhenRejected(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');

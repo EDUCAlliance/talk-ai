@@ -925,18 +925,20 @@ class AgentExecutor {
         }
 
         $tracePayload = $this->buildTraceChatCompletionPayload($systemPrompt, $messages, $model, $options, $streaming);
+        $providerPayload = $tracePayload['payload'] ?? [];
         $payload = array_merge([
             'stage' => $stage,
             'model' => $model,
             'streaming' => $streaming,
             'message_count' => count($messages),
-            'tool_count' => isset($options['tools']) && is_array($options['tools']) ? count($options['tools']) : 0,
-            'tool_choice' => $options['tool_choice'] ?? null,
-            'temperature' => $options['temperature'] ?? null,
-            'max_tokens' => $options['max_tokens'] ?? null,
+            'tool_count' => isset($providerPayload['tools']) && is_array($providerPayload['tools']) ? count($providerPayload['tools']) : 0,
+            'tool_choice' => $providerPayload['tool_choice'] ?? null,
+            'temperature' => $providerPayload['temperature'] ?? null,
+            'max_tokens' => $providerPayload['max_tokens'] ?? null,
+            'max_completion_tokens' => $providerPayload['max_completion_tokens'] ?? null,
             'request_endpoint' => $tracePayload['endpoint'] ?? null,
             'request_model_reference' => $tracePayload['model_reference'] ?? null,
-            'request_payload' => $tracePayload['payload'] ?? $tracePayload,
+            'request_payload' => $providerPayload !== [] ? $providerPayload : $tracePayload,
         ], $metadata);
 
         if (isset($tracePayload['trace_payload_error'])) {
