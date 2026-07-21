@@ -17,11 +17,11 @@ Developed by EDUC — the European Digital UniverCity (its package id is educai)
 
 ### EU funding
 
-![Co-funded by the European Union](https://raw.githubusercontent.com/EDUCAlliance/talk-ai/v2.39.4/img/eu-co-funded.png)
+![Co-funded by the European Union](https://raw.githubusercontent.com/EDUCAlliance/talk-ai/v2.39.5/img/eu-co-funded-appstore.png)
 
 Funded by the European Union. Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or the European Education and Culture Executive Agency (EACEA). Neither the European Union nor EACEA can be held responsible for them.
 	]]></description>
-	<version>2.39.4</version>
+	<version>2.39.5</version>
 	<licence>agpl</licence>
 	<author mail="nextcloud.apps@educalliance.eu" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
 	<namespace>EducAI</namespace>
