@@ -103,6 +103,14 @@ vendor/bin/phpunit --bootstrap tests/unit/bootstrap.php tests/unit
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local Nextcloud verification notes.
 
+## EU funding
+
+<div align="center">
+<img src="img/eu-co-funded.png" width="620" alt="Co-funded by the European Union">
+</div>
+
+Funded by the European Union. Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or the European Education and Culture Executive Agency (EACEA). Neither the European Union nor EACEA can be held responsible for them.
+
 ## About
 
 <a href="https://educalliance.eu"><img src="img/educ-logo.png" width="220" align="right" alt="EDUC — the European Digital UniverCity"></a>
