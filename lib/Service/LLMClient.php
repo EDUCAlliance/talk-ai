@@ -53,6 +53,19 @@ class LLMClient {
 		try {
 			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options);
 		} catch (\Exception $e) {
+			if ($this->shouldRetryWithReasoningParameters($e, $options)) {
+				try {
+					return $this->sendResolvedChatCompletion(
+						$fullMessages,
+						$modelConfig,
+						$settings,
+						array_merge($options, ['_use_reasoning_parameters' => true])
+					);
+				} catch (\Exception $retryException) {
+					$e = $retryException;
+				}
+			}
+
 			$fallbackConfig = $this->isFallbackEligibleException($e)
 				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e)
 				: null;
@@ -108,14 +121,31 @@ class LLMClient {
 		try {
 			return $this->streamResolvedChatCompletion($fullMessages, $trackedOnChunk, $modelConfig, $settings, $options);
 		} catch (\Exception $e) {
-			if (!$streamStarted && $this->shouldRetryStreamingWithoutUsage($e, $options)) {
+			$retryOptions = $options;
+			if (!$streamStarted && $this->shouldRetryStreamingWithoutUsage($e, $retryOptions)) {
+				$retryOptions = array_merge($retryOptions, ['_disable_stream_usage' => true]);
 				try {
 					return $this->streamResolvedChatCompletion(
 						$fullMessages,
 						$trackedOnChunk,
 						$modelConfig,
 						$settings,
-						array_merge($options, ['_disable_stream_usage' => true])
+						$retryOptions
+					);
+				} catch (\Exception $retryException) {
+					$e = $retryException;
+				}
+			}
+
+			if (!$streamStarted && $this->shouldRetryWithReasoningParameters($e, $retryOptions)) {
+				$retryOptions = array_merge($retryOptions, ['_use_reasoning_parameters' => true]);
+				try {
+					return $this->streamResolvedChatCompletion(
+						$fullMessages,
+						$trackedOnChunk,
+						$modelConfig,
+						$settings,
+						$retryOptions
 					);
 				} catch (\Exception $retryException) {
 					$e = $retryException;
@@ -526,9 +556,9 @@ class LLMClient {
 		];
 		$maxTokens = $options['max_tokens'] ?? 1000;
 
-		// GPT-5 reasoning models reject custom temperature values and use the
-		// newer max_completion_tokens parameter instead of max_tokens.
-		if ($this->modelUsesReasoningParameters($model)) {
+		// Default is classic OpenAI-compatible params. Reasoning-style
+		// max_completion_tokens is used only after a 400/422 remap retry.
+		if (!empty($options['_use_reasoning_parameters'])) {
 			$payload['max_completion_tokens'] = $maxTokens;
 		} else {
 			$payload['temperature'] = $options['temperature'] ?? 0.7;
@@ -564,10 +594,6 @@ class LLMClient {
 		}
 
 		return $this->sanitizePayloadForJson($payload);
-	}
-
-	private function modelUsesReasoningParameters(string $model): bool {
-		return preg_match('/(?:^|\/)gpt-5(?:[.\-]|$)/i', trim($model)) === 1;
 	}
 
 	/**
@@ -682,6 +708,17 @@ class LLMClient {
 	 */
 	private function shouldRetryStreamingWithoutUsage(\Exception $e, array $options): bool {
 		if (array_key_exists('stream_options', $options) || !empty($options['_disable_stream_usage'])) {
+			return false;
+		}
+
+		return in_array((int)$e->getCode(), [400, 422], true);
+	}
+
+	/**
+	 * @param array<string,mixed> $options
+	 */
+	private function shouldRetryWithReasoningParameters(\Exception $e, array $options): bool {
+		if (!empty($options['_use_reasoning_parameters'])) {
 			return false;
 		}
 
