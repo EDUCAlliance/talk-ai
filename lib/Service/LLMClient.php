@@ -191,12 +191,19 @@ class LLMClient {
 		];
 
 		$lastRole = 'system';
+		$knownToolCallIds = [];
 		foreach ($messages as $msg) {
 			$role = $msg['role'] ?? 'user';
 			$content = (string)($msg['content'] ?? '');
 
 			if ($role === 'tool') {
 				unset($msg['name']);
+				$toolCallId = isset($msg['tool_call_id']) && is_string($msg['tool_call_id'])
+					? $msg['tool_call_id']
+					: '';
+				if ($toolCallId === '' || !isset($knownToolCallIds[$toolCallId])) {
+					continue;
+				}
 				$fullMessages[] = $msg;
 				$lastRole = $role;
 				continue;
@@ -204,6 +211,10 @@ class LLMClient {
 
 			if ($role === 'system') {
 				$role = 'user';
+			}
+
+			if ($role === 'assistant' && trim($content) === '' && !$this->messageHasToolCalls($msg)) {
+				continue;
 			}
 
 			if ($role === 'user' && trim($content) === '') {
@@ -224,14 +235,43 @@ class LLMClient {
 				}
 			}
 
-			if ($role === 'assistant' && isset($msg['tool_calls'])) {
+			if ($role === 'assistant' && $this->messageHasToolCalls($msg)) {
 				$fullMessages[] = $msg;
+				foreach ($this->collectToolCallIds($msg) as $id) {
+					$knownToolCallIds[$id] = true;
+				}
 			} else {
 				$fullMessages[] = ['role' => $role, 'content' => $content];
 			}
 			$lastRole = $role;
 		}
 		return $fullMessages;
+	}
+
+	/**
+	 * @param array<string,mixed> $message
+	 */
+	private function messageHasToolCalls(array $message): bool {
+		return isset($message['tool_calls']) && is_array($message['tool_calls']) && $message['tool_calls'] !== [];
+	}
+
+	/**
+	 * @param array<string,mixed> $message
+	 * @return array<int,string>
+	 */
+	private function collectToolCallIds(array $message): array {
+		$ids = [];
+		foreach ($message['tool_calls'] ?? [] as $call) {
+			if (!is_array($call)) {
+				continue;
+			}
+			$id = $call['id'] ?? '';
+			if (is_string($id) && $id !== '') {
+				$ids[] = $id;
+			}
+		}
+
+		return $ids;
 	}
 
 	/**
@@ -652,7 +692,7 @@ class LLMClient {
 			}
 		}
 		if (isset($options['tools']) && is_array($options['tools']) && count($options['tools']) > 0) {
-			$payload['tools'] = $options['tools'];
+			$payload['tools'] = $this->normalizeToolSchemaProperties($options['tools']);
 		}
 		if (array_key_exists('tool_choice', $options) && $options['tool_choice'] !== null && $options['tool_choice'] !== 'auto') {
 			$payload['tool_choice'] = $options['tool_choice'];
@@ -666,6 +706,53 @@ class LLMClient {
 		}
 
 		return $this->sanitizePayloadForJson($payload);
+	}
+
+	/**
+	 * Last-line guard: json_decode turns `"properties": {}` into `[]`, which
+	 * re-encodes as a JSON array. Claude/GPT/DeepSeek/Kimi then 400/422.
+	 *
+	 * @param array<int,mixed> $tools
+	 * @return array<int,mixed>
+	 */
+	private function normalizeToolSchemaProperties(array $tools): array {
+		foreach ($tools as $index => $tool) {
+			if (!is_array($tool) || !isset($tool['function']['parameters']) || !is_array($tool['function']['parameters'])) {
+				continue;
+			}
+			$tools[$index]['function']['parameters'] = $this->normalizeJsonSchemaProperties($tool['function']['parameters']);
+		}
+
+		return $tools;
+	}
+
+	/**
+	 * @param array<string,mixed> $schema
+	 * @return array<string,mixed>
+	 */
+	private function normalizeJsonSchemaProperties(array $schema): array {
+		if (!array_key_exists('properties', $schema)) {
+			return $schema;
+		}
+
+		$properties = $schema['properties'];
+		if ($properties === [] || $properties instanceof \stdClass) {
+			$schema['properties'] = new \stdClass();
+			return $schema;
+		}
+		if (!is_array($properties)) {
+			return $schema;
+		}
+
+		$normalized = [];
+		foreach ($properties as $name => $subSchema) {
+			$normalized[$name] = is_array($subSchema)
+				? $this->normalizeJsonSchemaProperties($subSchema)
+				: $subSchema;
+		}
+		$schema['properties'] = $normalized === [] ? new \stdClass() : $normalized;
+
+		return $schema;
 	}
 
 	/**
