@@ -16,6 +16,8 @@ class LLMClient {
 	private const MODEL_OPTIONS_CACHE_TTL = 300;
 	private const CHAT_FAILURE_MESSAGE = 'Failed to get response from AI';
 	private const STREAM_FAILURE_MESSAGE = 'Failed to stream response from AI';
+	private const CONTINUED_USER_PLACEHOLDER = '(continued)';
+	private const PROVIDER_ERROR_BODY_LIMIT = 500;
 
 	private IClientService $clientService;
 	private SettingsService $settingsService;
@@ -214,6 +216,7 @@ class LLMClient {
 			$content = (string)($msg['content'] ?? '');
 
 			if ($role === 'tool') {
+				unset($msg['name']);
 				$fullMessages[] = $msg;
 				$lastRole = $role;
 				continue;
@@ -223,8 +226,12 @@ class LLMClient {
 				$role = 'user';
 			}
 
+			if ($role === 'user' && trim($content) === '') {
+				$content = self::CONTINUED_USER_PLACEHOLDER;
+			}
+
 			if ($lastRole === 'system' && $role === 'assistant') {
-				$fullMessages[] = ['role' => 'user', 'content' => ''];
+				$fullMessages[] = ['role' => 'user', 'content' => self::CONTINUED_USER_PLACEHOLDER];
 				$lastRole = 'user';
 			}
 
@@ -400,7 +407,7 @@ class LLMClient {
 			'has_tools' => isset($payload['tools']) && count($payload['tools']) > 0,
 		]);
 
-		$response = $client->post($modelConfig['endpoint'], [
+		$response = $this->executeProviderRequest(fn () => $client->post($modelConfig['endpoint'], [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $modelConfig['api_key'],
 				'Content-Type' => 'application/json',
@@ -410,9 +417,8 @@ class LLMClient {
 				$settings->getLlmChatTimeout(),
 				SettingsService::DEFAULT_LLM_CHAT_TIMEOUT
 			),
-		]);
+		]));
 
-		$this->throwForHttpError($response);
 		$body = json_decode($response->getBody(), true);
 		$rateLimitHeaders = $this->extractRateLimitHeaders($response);
 
@@ -451,7 +457,7 @@ class LLMClient {
 			'message_count' => count($fullMessages),
 		]);
 
-		$response = $client->post($modelConfig['endpoint'], [
+		$response = $this->executeProviderRequest(fn () => $client->post($modelConfig['endpoint'], [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $modelConfig['api_key'],
 				'Content-Type' => 'application/json',
@@ -462,9 +468,8 @@ class LLMClient {
 				SettingsService::DEFAULT_LLM_STREAM_TIMEOUT
 			),
 			'stream' => true,
-		]);
+		]));
 
-		$this->throwForHttpError($response);
 		$rateLimitHeaders = $this->extractRateLimitHeaders($response);
 		$body = $response->getBody();
 		if (!is_resource($body)) {
@@ -639,15 +644,103 @@ class LLMClient {
 		return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
 	}
 
+	/**
+	 * @template T of object
+	 * @param callable():T $request
+	 * @return T
+	 */
+	private function executeProviderRequest(callable $request): object {
+		try {
+			$response = $request();
+		} catch (\Exception $e) {
+			$this->throwForCaughtHttpException($e);
+		}
+
+		$this->throwForHttpError($response);
+		return $response;
+	}
+
 	private function throwForHttpError($response): void {
-		if (!method_exists($response, 'getStatusCode')) {
+		if (!is_object($response) || !method_exists($response, 'getStatusCode')) {
 			return;
 		}
 
 		$statusCode = (int)$response->getStatusCode();
-		if ($statusCode >= 400) {
-			throw new \Exception('LLM provider returned HTTP status ' . $statusCode, $statusCode);
+		if ($statusCode < 400) {
+			return;
 		}
+
+		$this->throwProviderHttpError($statusCode, $this->readResponseBody($response));
+	}
+
+	private function throwForCaughtHttpException(\Exception $e): never {
+		$candidate = $e;
+		while ($candidate instanceof \Throwable) {
+			if (
+				method_exists($candidate, 'hasResponse')
+				&& method_exists($candidate, 'getResponse')
+				&& $candidate->hasResponse()
+			) {
+				$response = $candidate->getResponse();
+				$statusCode = (is_object($response) && method_exists($response, 'getStatusCode'))
+					? (int)$response->getStatusCode()
+					: (int)$candidate->getCode();
+				if ($statusCode >= 400) {
+					$this->throwProviderHttpError($statusCode, $this->readResponseBody($response));
+				}
+			}
+			$candidate = $candidate->getPrevious();
+		}
+
+		throw $e;
+	}
+
+	private function throwProviderHttpError(int $statusCode, string $rawBody): never {
+		$excerpt = $this->excerptProviderErrorBody($rawBody);
+		$this->logger->error('LLM provider returned HTTP error', [
+			'status' => $statusCode,
+			'response_body' => $excerpt,
+		]);
+
+		$message = 'LLM provider returned HTTP status ' . $statusCode;
+		if ($excerpt !== '') {
+			$message .= ': ' . $excerpt;
+		}
+
+		throw new \Exception($message, $statusCode);
+	}
+
+	private function readResponseBody(mixed $response): string {
+		if (!is_object($response) || !method_exists($response, 'getBody')) {
+			return '';
+		}
+
+		$body = $response->getBody();
+		if (is_string($body)) {
+			return $body;
+		}
+		if (is_resource($body)) {
+			$contents = stream_get_contents($body);
+			return $contents === false ? '' : $contents;
+		}
+		if (is_object($body) && (method_exists($body, '__toString') || $body instanceof \Stringable)) {
+			return (string)$body;
+		}
+
+		return '';
+	}
+
+	private function excerptProviderErrorBody(string $body): string {
+		$normalized = trim(preg_replace('/\s+/u', ' ', $body) ?? $body);
+		if ($normalized === '') {
+			return '';
+		}
+
+		if (mb_strlen($normalized) <= self::PROVIDER_ERROR_BODY_LIMIT) {
+			return $normalized;
+		}
+
+		return mb_substr($normalized, 0, self::PROVIDER_ERROR_BODY_LIMIT) . '…';
 	}
 
 	private function isFallbackEligibleException(\Exception $e): bool {
@@ -902,15 +995,14 @@ class LLMClient {
 
 		$client = $this->clientService->newClient();
 		try {
-			$response = $client->get($modelsEndpoint, [
+			$response = $this->executeProviderRequest(fn () => $client->get($modelsEndpoint, [
 				'headers' => [
 					'Authorization' => 'Bearer ' . $apiKey,
 					'Accept' => 'application/json',
 				],
 				'timeout' => $timeout,
-			]);
+			]));
 
-			$this->throwForHttpError($response);
 			$body = json_decode($response->getBody(), true);
 			$models = $this->extractModelIds($body);
 			sort($models);

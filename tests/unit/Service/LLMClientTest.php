@@ -76,6 +76,178 @@ class LLMClientTest extends TestCase {
 		$this->assertSame('Secondary · model-a', $options[2]['label']);
 	}
 
+	public function testPrepareMessagesInsertsContinuedPlaceholderWhenHistoryStartsWithAssistant(): void {
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json']['messages'] ?? [];
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$this->chatLlmClient($client)->sendChatCompletion('system', [
+			['role' => 'assistant', 'content' => 'previous answer'],
+			['role' => 'user', 'content' => 'follow up'],
+		]);
+
+		$this->assertSame('system', $captured[0]['role'] ?? null);
+		$this->assertSame('user', $captured[1]['role'] ?? null);
+		$this->assertSame('(continued)', $captured[1]['content'] ?? null);
+		$this->assertSame('assistant', $captured[2]['role'] ?? null);
+		$this->assertSame('previous answer', $captured[2]['content'] ?? null);
+		$this->assertSame('user', $captured[3]['role'] ?? null);
+		$this->assertSame('follow up', $captured[3]['content'] ?? null);
+	}
+
+	public function testPrepareMessagesReplacesEmptyUserContent(): void {
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json']['messages'] ?? [];
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$this->chatLlmClient($client)->sendChatCompletion('system', [
+			['role' => 'user', 'content' => '   '],
+			['role' => 'assistant', 'content' => 'hello'],
+		]);
+
+		$this->assertSame('(continued)', $captured[1]['content'] ?? null);
+		$this->assertSame('hello', $captured[2]['content'] ?? null);
+	}
+
+	public function testPrepareMessagesStripsNameFromToolResults(): void {
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json']['messages'] ?? [];
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$this->chatLlmClient($client)->sendChatCompletion('system', [
+			['role' => 'user', 'content' => 'hi'],
+			[
+				'role' => 'assistant',
+				'content' => null,
+				'tool_calls' => [[
+					'id' => 'call_1',
+					'type' => 'function',
+					'function' => ['name' => 'search_test', 'arguments' => '{}'],
+				]],
+			],
+			[
+				'role' => 'tool',
+				'tool_call_id' => 'call_1',
+				'name' => 'search_test',
+				'content' => 'found it',
+			],
+		]);
+
+		$toolMessages = array_values(array_filter(
+			$captured,
+			static fn (array $message): bool => ($message['role'] ?? '') === 'tool'
+		));
+		$this->assertCount(1, $toolMessages);
+		$this->assertArrayNotHasKey('name', $toolMessages[0]);
+		$this->assertSame('call_1', $toolMessages[0]['tool_call_id'] ?? null);
+		$this->assertSame('found it', $toolMessages[0]['content'] ?? null);
+	}
+
+	public function testSendChatCompletionIncludesProviderErrorBodyInLoggedException(): void {
+		$logger = new RecordingLogger();
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->jsonResponse([
+				'error' => [
+					'message' => 'litellm.UnsupportedParamsError: temperature is not supported',
+					'type' => 'invalid_request_error',
+				],
+			], 400));
+
+		$llmClient = $this->chatLlmClient($client, $logger);
+
+		try {
+			$llmClient->sendChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				null,
+				['_use_reasoning_parameters' => true]
+			);
+			$this->fail('Expected LLM request failure');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to get response from AI', $e->getMessage());
+			$previous = $e->getPrevious();
+			$this->assertNotNull($previous);
+			$this->assertSame(400, $previous->getCode());
+			$this->assertStringContainsString('LLM provider returned HTTP status 400', $previous->getMessage());
+			$this->assertStringContainsString('litellm.UnsupportedParamsError: temperature is not supported', $previous->getMessage());
+		}
+
+		$this->assertNotEmpty($logger->errors);
+		$this->assertSame(400, $logger->errors[0]['context']['status'] ?? null);
+		$this->assertStringContainsString(
+			'litellm.UnsupportedParamsError: temperature is not supported',
+			(string)($logger->errors[0]['context']['response_body'] ?? '')
+		);
+	}
+
+	public function testSendChatCompletionReadsErrorBodyFromThrownHttpException(): void {
+		$logger = new RecordingLogger();
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willThrowException(new FakeProviderHttpException(
+				$this->jsonResponse(['error' => ['message' => 'text content blocks must be non-empty']], 400),
+				400
+			));
+
+		$llmClient = $this->chatLlmClient($client, $logger);
+
+		try {
+			$llmClient->sendChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				null,
+				['_use_reasoning_parameters' => true]
+			);
+			$this->fail('Expected LLM request failure');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to get response from AI', $e->getMessage());
+			$this->assertSame(400, $e->getPrevious()?->getCode());
+			$this->assertStringContainsString(
+				'text content blocks must be non-empty',
+				$e->getPrevious()?->getMessage() ?? ''
+			);
+		}
+
+		$this->assertSame(400, $logger->errors[0]['context']['status'] ?? null);
+		$this->assertStringContainsString(
+			'text content blocks must be non-empty',
+			(string)($logger->errors[0]['context']['response_body'] ?? '')
+		);
+	}
+
 	public function testSendChatCompletionRetriesFallbackOnTimeout(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
@@ -741,6 +913,26 @@ class LLMClientTest extends TestCase {
 		return $config;
 	}
 
+	private function chatLlmClient(IClient $client, ?LoggerInterface $logger = null): LLMClient {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:model-a');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		return new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$logger ?? $this->logger()
+		);
+	}
+
 	private function clientService(IClient $client): IClientService {
 		$clientService = $this->createMock(IClientService::class);
 		$clientService->method('newClient')->willReturn($client);
@@ -760,5 +952,39 @@ class LLMClientTest extends TestCase {
 			public function debug($message, array $context = []): void {}
 			public function log($level, $message, array $context = []): void {}
 		};
+	}
+}
+
+class RecordingLogger implements LoggerInterface {
+	/** @var array<int,array{message:string,context:array<string,mixed>}> */
+	public array $errors = [];
+
+	public function emergency($message, array $context = []): void {}
+	public function alert($message, array $context = []): void {}
+	public function critical($message, array $context = []): void {}
+	public function error($message, array $context = []): void {
+		$this->errors[] = ['message' => (string)$message, 'context' => $context];
+	}
+	public function warning($message, array $context = []): void {}
+	public function notice($message, array $context = []): void {}
+	public function info($message, array $context = []): void {}
+	public function debug($message, array $context = []): void {}
+	public function log($level, $message, array $context = []): void {}
+}
+
+class FakeProviderHttpException extends \Exception {
+	public function __construct(
+		private object $response,
+		int $code = 400
+	) {
+		parent::__construct('Client error: POST resulted in a ' . $code . ' response', $code);
+	}
+
+	public function hasResponse(): bool {
+		return true;
+	}
+
+	public function getResponse(): object {
+		return $this->response;
 	}
 }

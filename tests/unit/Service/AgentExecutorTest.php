@@ -91,6 +91,77 @@ class AgentExecutorTest extends TestCase {
 		$this->assertStringNotContainsString('Received invalid tool response', $result);
 	}
 
+	public function testRunOmitsNameFromToolResultMessages(): void {
+		$llmClient = $this->createMock(LLMClient::class);
+		$mcpClient = $this->createMock(McpClient::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
+
+		$toolRegistry->expects($this->once())
+			->method('getBuiltInToolsForBot')
+			->with(42)
+			->willReturn([['name' => 'search_test']]);
+
+		$builtInToolProvider->expects($this->once())
+			->method('getAvailableTools')
+			->willReturn([$this->buildSearchToolDefinition()]);
+
+		$callIndex = 0;
+		$llmClient->expects($this->exactly(2))
+			->method('sendChatCompletion')
+			->willReturnCallback(function (
+				string $systemPrompt,
+				array $messages
+			) use (&$callIndex): array {
+				$callIndex++;
+				if ($callIndex === 1) {
+					return [
+						'content' => '',
+						'tool_calls' => [[
+							'id' => 'call_search',
+							'type' => 'function',
+							'function' => [
+								'name' => 'search_test',
+								'arguments' => '{"query":"Berlin"}',
+							],
+						]],
+					];
+				}
+
+				$toolMessages = array_values(array_filter(
+					$messages,
+					static fn (array $message): bool => ($message['role'] ?? '') === 'tool'
+				));
+				$this->assertCount(1, $toolMessages);
+				$this->assertArrayNotHasKey('name', $toolMessages[0]);
+				$this->assertSame('call_search', $toolMessages[0]['tool_call_id'] ?? null);
+				$this->assertArrayHasKey('content', $toolMessages[0]);
+
+				return [
+					'content' => 'Final answer',
+					'tool_calls' => [],
+				];
+			});
+
+		$builtInToolProvider->expects($this->once())
+			->method('executeTool')
+			->with('search_test', ['query' => 'Berlin'])
+			->willReturn(['results' => ['Berlin']]);
+
+		$executor = new AgentExecutor(
+			$llmClient,
+			$mcpClient,
+			$toolRegistry,
+			$builtInToolProvider,
+			$this->createMock(LoggerInterface::class)
+		);
+
+		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find Berlin']], [], ['bot_id' => 42]);
+
+		$this->assertSame('Final answer', $result['content']);
+		$this->assertCount(1, $result['toolInvocations']);
+	}
+
 	public function testRunExecutesXmlWrappedJsonToolCall(): void {
 		$llmClient = $this->createMock(LLMClient::class);
 		$mcpClient = $this->createMock(McpClient::class);
@@ -1079,7 +1150,8 @@ class AgentExecutorTest extends TestCase {
 
 				$lastMessage = $messages[count($messages) - 1] ?? [];
 				$this->assertSame('tool', $lastMessage['role'] ?? null);
-				$this->assertSame('web_search', $lastMessage['name'] ?? null);
+				$this->assertArrayNotHasKey('name', $lastMessage);
+				$this->assertSame('call-invalid', $lastMessage['tool_call_id'] ?? null);
 				$this->assertStringContainsString('ERROR: Invalid tool arguments for web_search', (string)($lastMessage['content'] ?? ''));
 				$this->assertStringContainsString('missing required argument(s): query', (string)($lastMessage['content'] ?? ''));
 

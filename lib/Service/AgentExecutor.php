@@ -522,12 +522,7 @@ class AgentExecutor {
                                 'content' => null,
                                 'tool_calls' => [$forcedRagCall],
                             ];
-                            $messages[] = [
-                                'role' => 'tool',
-                                'tool_call_id' => $forcedRagCall['id'],
-                                'name' => 'rag_search_documents',
-                                'content' => $ragOutput,
-                            ];
+                            $messages[] = $this->buildToolResultMessage($forcedRagCall['id'], $ragOutput);
                             
                             // Continue the loop to let the model synthesize
                             continue;
@@ -762,12 +757,7 @@ class AgentExecutor {
                     'response' => $output,
                 ];
 
-                $messages[] = [
-                    'role' => 'tool',
-                    'tool_call_id' => $callId,
-                    'name' => $toolName,
-                    'content' => $output,
-                ];
+                $messages[] = $this->buildToolResultMessage($callId, $output);
             }
 
             $currentCallSignature = $this->buildToolCallBatchSignature($executedToolCallsForSignature);
@@ -2193,6 +2183,17 @@ class AgentExecutor {
             $result['type']
         );
         return $result;
+    }
+
+    /**
+     * @return array{role:string,tool_call_id:string,content:string}
+     */
+    private function buildToolResultMessage(string $toolCallId, string $content): array {
+        return [
+            'role' => 'tool',
+            'tool_call_id' => $toolCallId,
+            'content' => $content,
+        ];
     }
 
     /**
