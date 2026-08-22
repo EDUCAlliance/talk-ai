@@ -53,21 +53,13 @@ class LLMClient {
 		$modelConfig = $this->resolveModelConfig($settings, $modelOverride ?: $settings->getDefaultModel());
 
 		try {
-			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options);
+			return $this->sendResolvedChatCompletionWithReasoningRetry(
+				$fullMessages,
+				$modelConfig,
+				$settings,
+				$options
+			);
 		} catch (\Exception $e) {
-			if ($this->shouldRetryWithReasoningParameters($e, $options)) {
-				try {
-					return $this->sendResolvedChatCompletion(
-						$fullMessages,
-						$modelConfig,
-						$settings,
-						array_merge($options, ['_use_reasoning_parameters' => true])
-					);
-				} catch (\Exception $retryException) {
-					$e = $retryException;
-				}
-			}
-
 			$fallbackConfig = $this->isFallbackEligibleException($e)
 				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e)
 				: null;
@@ -79,7 +71,12 @@ class LLMClient {
 				]);
 
 				try {
-					return $this->sendResolvedChatCompletion($fullMessages, $fallbackConfig, $settings, $options);
+					return $this->sendResolvedChatCompletionWithReasoningRetry(
+						$fullMessages,
+						$fallbackConfig,
+						$settings,
+						$options
+					);
 				} catch (\Exception $fallbackException) {
 					$this->logger->error('LLM fallback request failed: ' . $fallbackException->getMessage(), [
 						'exception' => $fallbackException,
@@ -121,39 +118,15 @@ class LLMClient {
 		};
 
 		try {
-			return $this->streamResolvedChatCompletion($fullMessages, $trackedOnChunk, $modelConfig, $settings, $options);
+			return $this->streamResolvedChatCompletionWithCompatibilityRetries(
+				$fullMessages,
+				$trackedOnChunk,
+				$modelConfig,
+				$settings,
+				$options,
+				$streamStarted
+			);
 		} catch (\Exception $e) {
-			$retryOptions = $options;
-			if (!$streamStarted && $this->shouldRetryStreamingWithoutUsage($e, $retryOptions)) {
-				$retryOptions = array_merge($retryOptions, ['_disable_stream_usage' => true]);
-				try {
-					return $this->streamResolvedChatCompletion(
-						$fullMessages,
-						$trackedOnChunk,
-						$modelConfig,
-						$settings,
-						$retryOptions
-					);
-				} catch (\Exception $retryException) {
-					$e = $retryException;
-				}
-			}
-
-			if (!$streamStarted && $this->shouldRetryWithReasoningParameters($e, $retryOptions)) {
-				$retryOptions = array_merge($retryOptions, ['_use_reasoning_parameters' => true]);
-				try {
-					return $this->streamResolvedChatCompletion(
-						$fullMessages,
-						$trackedOnChunk,
-						$modelConfig,
-						$settings,
-						$retryOptions
-					);
-				} catch (\Exception $retryException) {
-					$e = $retryException;
-				}
-			}
-
 			$fallbackConfig = !$streamStarted && $this->isFallbackEligibleException($e)
 				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e)
 				: null;
@@ -165,7 +138,14 @@ class LLMClient {
 				]);
 
 				try {
-					return $this->streamResolvedChatCompletion($fullMessages, $trackedOnChunk, $fallbackConfig, $settings, $options);
+					return $this->streamResolvedChatCompletionWithCompatibilityRetries(
+						$fullMessages,
+						$trackedOnChunk,
+						$fallbackConfig,
+						$settings,
+						$options,
+						$streamStarted
+					);
 				} catch (\Exception $fallbackException) {
 					$this->logger->error('LLM fallback streaming failed: ' . $fallbackException->getMessage(), [
 						'exception' => $fallbackException,
@@ -395,6 +375,99 @@ class LLMClient {
 	 * @param array<string,mixed> $options
 	 * @return array<string,mixed>
 	 */
+	private function sendResolvedChatCompletionWithReasoningRetry(
+		array $fullMessages,
+		array $modelConfig,
+		$settings,
+		array $options,
+	): array {
+		try {
+			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options);
+		} catch (\Exception $e) {
+			if (!$this->shouldRetryWithReasoningParameters($e, $options, $modelConfig['model'])) {
+				throw $e;
+			}
+
+			try {
+				return $this->sendResolvedChatCompletion(
+					$fullMessages,
+					$modelConfig,
+					$settings,
+					array_merge($options, ['_use_reasoning_parameters' => true])
+				);
+			} catch (\Exception $retryException) {
+				$this->logger->warning('LLM reasoning-parameter retry failed, keeping original error', [
+					'exception' => $retryException,
+					'model' => $modelConfig['id'],
+				]);
+				throw $e;
+			}
+		}
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $fullMessages
+	 * @param callable $onChunk
+	 * @param array{id:string,endpoint_key:string,endpoint:string,api_key:string,model:string} $modelConfig
+	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>
+	 */
+	private function streamResolvedChatCompletionWithCompatibilityRetries(
+		array $fullMessages,
+		callable $onChunk,
+		array $modelConfig,
+		$settings,
+		array $options,
+		bool &$streamStarted,
+	): array {
+		$retryOptions = $options;
+		try {
+			return $this->streamResolvedChatCompletion($fullMessages, $onChunk, $modelConfig, $settings, $retryOptions);
+		} catch (\Exception $e) {
+			if (!$streamStarted && $this->shouldRetryStreamingWithoutUsage($e, $retryOptions)) {
+				$retryOptions = array_merge($retryOptions, ['_disable_stream_usage' => true]);
+				try {
+					return $this->streamResolvedChatCompletion(
+						$fullMessages,
+						$onChunk,
+						$modelConfig,
+						$settings,
+						$retryOptions
+					);
+				} catch (\Exception $retryException) {
+					$e = $retryException;
+				}
+			}
+
+			if (!$streamStarted && $this->shouldRetryWithReasoningParameters($e, $retryOptions, $modelConfig['model'])) {
+				$retryOptions = array_merge($retryOptions, ['_use_reasoning_parameters' => true]);
+				try {
+					return $this->streamResolvedChatCompletion(
+						$fullMessages,
+						$onChunk,
+						$modelConfig,
+						$settings,
+						$retryOptions
+					);
+				} catch (\Exception $retryException) {
+					$this->logger->warning('LLM streaming reasoning-parameter retry failed, keeping original error', [
+						'exception' => $retryException,
+						'model' => $modelConfig['id'],
+					]);
+					throw $e;
+				}
+			}
+
+			throw $e;
+		}
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $fullMessages
+	 * @param array{id:string,endpoint_key:string,endpoint:string,api_key:string,model:string} $modelConfig
+	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>
+	 */
 	private function sendResolvedChatCompletion(array $fullMessages, array $modelConfig, $settings, array $options): array {
 		$client = $this->clientService->newClient();
 		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, false);
@@ -584,18 +657,12 @@ class LLMClient {
 		if (array_key_exists('tool_choice', $options) && $options['tool_choice'] !== null && $options['tool_choice'] !== 'auto') {
 			$payload['tool_choice'] = $options['tool_choice'];
 		}
-		foreach (['presence_penalty', 'frequency_penalty', 'top_p'] as $opt) {
-			if (isset($options[$opt])) {
-				$payload[$opt] = $options[$opt];
+		if (!$this->modelRejectsSamplingExtras($model)) {
+			foreach (['presence_penalty', 'frequency_penalty', 'top_p'] as $opt) {
+				if (isset($options[$opt])) {
+					$payload[$opt] = $options[$opt];
+				}
 			}
-		}
-
-		// Anthropic/Claude rejects requests that set both temperature and top_p
-		// ("`temperature` and `top_p` cannot both be specified"). OpenAI tolerates
-		// it, so only drop top_p for Anthropic models and keep temperature.
-		if (isset($payload['temperature'], $payload['top_p'])
-			&& preg_match('/claude|anthropic/i', $model) === 1) {
-			unset($payload['top_p']);
 		}
 
 		return $this->sanitizePayloadForJson($payload);
@@ -810,12 +877,24 @@ class LLMClient {
 	/**
 	 * @param array<string,mixed> $options
 	 */
-	private function shouldRetryWithReasoningParameters(\Exception $e, array $options): bool {
+	private function shouldRetryWithReasoningParameters(\Exception $e, array $options, string $model = ''): bool {
 		if (!empty($options['_use_reasoning_parameters'])) {
 			return false;
 		}
 
+		if ($model !== '' && $this->modelRejectsReasoningTokenParameters($model)) {
+			return false;
+		}
+
 		return in_array((int)$e->getCode(), [400, 422], true);
+	}
+
+	private function modelRejectsReasoningTokenParameters(string $model): bool {
+		return preg_match('/mistral|codestral/i', $model) === 1;
+	}
+
+	private function modelRejectsSamplingExtras(string $model): bool {
+		return preg_match('/claude|anthropic|gpt-5/i', $model) === 1;
 	}
 
 	/**

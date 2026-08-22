@@ -871,6 +871,335 @@ class LLMClientTest extends TestCase {
 		], $calls);
 	}
 
+	public function testSendChatCompletionRetriesFallbackWithReasoningParametersWhenClassicRejected(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:qwen3-30b');
+		$settings->setFallbackModel('secondary:gpt-5.6-luna');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(3))
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
+				$calls[] = [
+					'uri' => $uri,
+					'model' => $options['json']['model'] ?? null,
+					'payload' => $options['json'],
+				];
+				if (count($calls) === 1) {
+					throw new \Exception('cURL error 28: Operation timed out');
+				}
+				if (count($calls) === 2) {
+					return $this->jsonResponse(['error' => 'gpt-5 models don\'t support temperature'], 400);
+				}
+				return $this->jsonResponse([
+					'model' => 'gpt-5.6-luna',
+					'choices' => [
+						['message' => ['content' => 'luna answer']],
+					],
+				]);
+			});
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		$result = $llmClient->sendChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			null,
+			['temperature' => 0.7, 'max_tokens' => 800]
+		);
+
+		$this->assertSame('luna answer', $result['content']);
+		$this->assertSame('secondary:gpt-5.6-luna', $result['model_reference']);
+		$this->assertSame('https://primary.example.invalid/v1/chat/completions', $calls[0]['uri']);
+		$this->assertSame('qwen3-30b', $calls[0]['model']);
+		$this->assertSame(0.7, $calls[0]['payload']['temperature'] ?? null);
+		$this->assertSame('https://secondary.example.invalid/v1/chat/completions', $calls[1]['uri']);
+		$this->assertSame('gpt-5.6-luna', $calls[1]['model']);
+		$this->assertSame(0.7, $calls[1]['payload']['temperature'] ?? null);
+		$this->assertArrayNotHasKey('max_completion_tokens', $calls[1]['payload']);
+		$this->assertSame(800, $calls[2]['payload']['max_completion_tokens'] ?? null);
+		$this->assertArrayNotHasKey('temperature', $calls[2]['payload']);
+		$this->assertArrayNotHasKey('max_tokens', $calls[2]['payload']);
+	}
+
+	public function testStreamChatCompletionRetriesFallbackWithReasoningParametersWhenClassicRejected(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:qwen3-30b');
+		$settings->setFallbackModel('secondary:gpt-5.6-luna');
+		$settings->setLlmStreamTimeout(240);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(3))
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
+				$calls[] = [
+					'uri' => $uri,
+					'model' => $options['json']['model'] ?? null,
+					'payload' => $options['json'],
+				];
+				if (count($calls) === 1) {
+					return $this->rawResponse('{"error":"temporary provider failure"}', 500);
+				}
+				if (count($calls) === 2) {
+					return $this->rawResponse('{"error":"gpt-5 models don\'t support temperature"}', 400);
+				}
+				return $this->rawResponse("data: {\"choices\":[{\"delta\":{\"content\":\"luna stream\"}}]}\n\ndata: [DONE]\n\n");
+			});
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		$result = $llmClient->streamChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			static function (): void {},
+			null,
+			[
+				'temperature' => 0.7,
+				'max_tokens' => 800,
+				'stream_options' => ['include_usage' => true],
+			]
+		);
+
+		$this->assertSame('luna stream', $result['content']);
+		$this->assertSame('secondary:gpt-5.6-luna', $result['model_reference']);
+		$this->assertSame('qwen3-30b', $calls[0]['model']);
+		$this->assertSame('gpt-5.6-luna', $calls[1]['model']);
+		$this->assertSame(0.7, $calls[1]['payload']['temperature'] ?? null);
+		$this->assertArrayNotHasKey('max_completion_tokens', $calls[1]['payload']);
+		$this->assertSame(800, $calls[2]['payload']['max_completion_tokens'] ?? null);
+		$this->assertArrayNotHasKey('temperature', $calls[2]['payload']);
+	}
+
+	public function testSendChatCompletionDropsSamplingExtrasForGpt5AndClaude(): void {
+		foreach (['primary:microsoft/gpt-5.6-luna', 'primary:microsoft/claude-sonnet-5'] as $model) {
+			$settings = new Settings();
+			$settings->setApiProvider('custom');
+			$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+			$settings->setDefaultModel($model);
+			$settings->setLlmChatTimeout(90);
+
+			$settingsService = $this->createMock(SettingsService::class);
+			$settingsService->method('getSettings')->willReturn($settings);
+			$settingsService->method('getApiKey')->willReturn('primary-key');
+			$settingsService->method('normalizePositiveInteger')
+				->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+			$captured = [];
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->once())
+				->method('post')
+				->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+					$captured = $options['json'];
+					return $this->jsonResponse([
+						'model' => $captured['model'] ?? 'model',
+						'choices' => [
+							['message' => ['content' => 'ok']],
+						],
+					]);
+				});
+
+			$llmClient = new LLMClient(
+				$this->clientService($client),
+				$settingsService,
+				$this->logger()
+			);
+
+			$llmClient->sendChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				null,
+				[
+					'temperature' => 0.2,
+					'top_p' => 0.9,
+					'presence_penalty' => 0.1,
+					'frequency_penalty' => 0.2,
+				]
+			);
+
+			$this->assertSame(0.2, $captured['temperature'] ?? null, $model);
+			$this->assertArrayNotHasKey('top_p', $captured, $model);
+			$this->assertArrayNotHasKey('presence_penalty', $captured, $model);
+			$this->assertArrayNotHasKey('frequency_penalty', $captured, $model);
+		}
+	}
+
+	public function testSendChatCompletionKeepsSamplingExtrasForClassicModels(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:up/minimax-m2-5');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json'];
+				return $this->jsonResponse([
+					'model' => 'up/minimax-m2-5',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		$llmClient->sendChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			null,
+			[
+				'temperature' => 0.2,
+				'top_p' => 0.9,
+				'presence_penalty' => 0.1,
+			]
+		);
+
+		$this->assertSame(0.2, $captured['temperature'] ?? null);
+		$this->assertSame(0.9, $captured['top_p'] ?? null);
+		$this->assertSame(0.1, $captured['presence_penalty'] ?? null);
+	}
+
+	public function testSendChatCompletionDoesNotRetryReasoningParametersForMistral(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:microsoft/Mistral-Large-3');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
+				$calls[] = $options['json'];
+				return $this->jsonResponse(['error' => 'Assistant message must have either content or tool_calls'], 400);
+			});
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		try {
+			$llmClient->sendChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				null,
+				['temperature' => 0.2, 'max_tokens' => 800]
+			);
+			$this->fail('Expected LLM request failure');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to get response from AI', $e->getMessage());
+			$this->assertSame(400, $e->getPrevious()?->getCode());
+			$this->assertStringContainsString('Assistant message must have either content or tool_calls', $e->getPrevious()?->getMessage() ?? '');
+		}
+
+		$this->assertCount(1, $calls);
+		$this->assertSame(0.2, $calls[0]['temperature'] ?? null);
+		$this->assertArrayNotHasKey('max_completion_tokens', $calls[0]);
+	}
+
+	public function testSendChatCompletionKeepsFirstErrorWhenReasoningRetryAlsoFails(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:model-a');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
+				$calls[] = $options['json'];
+				if (count($calls) === 1) {
+					return $this->jsonResponse(['error' => 'temperature is not supported'], 400);
+				}
+				return $this->jsonResponse(['error' => 'extra_forbidden: max_completion_tokens'], 422);
+			});
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger()
+		);
+
+		try {
+			$llmClient->sendChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				null,
+				['temperature' => 0.2, 'max_tokens' => 800]
+			);
+			$this->fail('Expected LLM request failure');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to get response from AI', $e->getMessage());
+			$this->assertSame(400, $e->getPrevious()?->getCode());
+			$this->assertStringContainsString('temperature is not supported', $e->getPrevious()?->getMessage() ?? '');
+			$this->assertStringNotContainsString('extra_forbidden', $e->getPrevious()?->getMessage() ?? '');
+		}
+
+		$this->assertArrayHasKey('temperature', $calls[0]);
+		$this->assertSame(800, $calls[1]['max_completion_tokens'] ?? null);
+	}
+
 	private function jsonResponse(array $body, int $status = 200): IResponse {
 		$response = $this->createMock(IResponse::class);
 		$response->method('getBody')->willReturn(json_encode($body) ?: '');
