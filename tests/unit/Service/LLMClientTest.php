@@ -173,6 +173,125 @@ class LLMClientTest extends TestCase {
 		$this->assertSame('found it', $toolMessages[0]['content'] ?? null);
 	}
 
+	public function testPrepareMessagesDropsEmptyAssistantWithoutToolCalls(): void {
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json']['messages'] ?? [];
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$this->chatLlmClient($client)->sendChatCompletion('system', [
+			['role' => 'user', 'content' => 'hi'],
+			['role' => 'assistant', 'content' => ''],
+			['role' => 'assistant', 'content' => '   '],
+			['role' => 'user', 'content' => 'follow up'],
+		]);
+
+		$this->assertSame(['system', 'user'], array_column($captured, 'role'));
+		$this->assertSame("hi\n\nfollow up", $captured[1]['content'] ?? null);
+	}
+
+	public function testPrepareMessagesDropsOrphanToolResults(): void {
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json']['messages'] ?? [];
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$this->chatLlmClient($client)->sendChatCompletion('system', [
+			['role' => 'user', 'content' => 'hi'],
+			[
+				'role' => 'assistant',
+				'content' => null,
+				'tool_calls' => [[
+					'id' => 'call_1',
+					'type' => 'function',
+					'function' => ['name' => 'search_test', 'arguments' => '{}'],
+				]],
+			],
+			[
+				'role' => 'tool',
+				'tool_call_id' => 'call_1',
+				'name' => 'search_test',
+				'content' => 'found it',
+			],
+			[
+				'role' => 'tool',
+				'tool_call_id' => 'call_missing',
+				'name' => 'search_test',
+				'content' => 'orphan',
+			],
+			['role' => 'user', 'content' => 'follow up'],
+		]);
+
+		$roles = array_column($captured, 'role');
+		$this->assertSame(['system', 'user', 'assistant', 'tool', 'user'], $roles);
+		$toolMessages = array_values(array_filter(
+			$captured,
+			static fn (array $message): bool => ($message['role'] ?? '') === 'tool'
+		));
+		$this->assertCount(1, $toolMessages);
+		$this->assertSame('call_1', $toolMessages[0]['tool_call_id'] ?? null);
+		$this->assertSame('found it', $toolMessages[0]['content'] ?? null);
+		$this->assertArrayNotHasKey('name', $toolMessages[0]);
+	}
+
+	public function testBuildPayloadCoercesEmptyToolPropertiesToObject(): void {
+		$captured = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+				$captured = $options['json'] ?? [];
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [
+						['message' => ['content' => 'ok']],
+					],
+				]);
+			});
+
+		$this->chatLlmClient($client)->sendChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			null,
+			[
+				'tools' => [[
+					'type' => 'function',
+					'function' => [
+						'name' => 'noop_tool',
+						'description' => 'No args',
+						'parameters' => [
+							'type' => 'object',
+							'properties' => [],
+						],
+					],
+				]],
+			]
+		);
+
+		$properties = $captured['tools'][0]['function']['parameters']['properties'] ?? null;
+		$this->assertEquals(new \stdClass(), $properties);
+		$this->assertSame('{}', json_encode($properties));
+		$this->assertStringNotContainsString('"properties":[]', json_encode($captured['tools']) ?: '');
+	}
+
 	public function testSendChatCompletionIncludesProviderErrorBodyInLoggedException(): void {
 		$logger = new RecordingLogger();
 		$client = $this->createMock(IClient::class);
