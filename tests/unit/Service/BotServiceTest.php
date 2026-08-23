@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Tests\Unit\Service;
 
-use OCA\EducAI\AppInfo\Application;
 use Exception;
+use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
@@ -19,22 +19,23 @@ use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolProvider;
-use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
 use OCA\EducAI\Service\RoomImageIngestionService;
 use OCA\EducAI\Service\SettingsService;
 use OCA\EducAI\Service\ToolRegistry;
-use OCA\EducAI\ToolProvider\ToolProviderRegistry;
+use OCA\EducAI\Service\TraceService;
 use OCA\EducAI\Service\WikiLocationService;
-use OCA\EducAI\Service\WikiService;
 use OCA\EducAI\Service\WikiRootRegistryService;
+use OCA\EducAI\Service\WikiService;
+use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\IGroupManager;
 use OCP\IUserManager;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -994,9 +995,12 @@ class BotServiceTest extends TestCase {
 				})
 			)
 			->willReturn([
+				'status' => 'completed',
+				'terminalReason' => 'final_response',
 				'content' => 'Saved.',
 				'messages' => [],
 				'toolInvocations' => [],
+				'rateLimitHeaders' => [],
 			]);
 
 		$service = $this->createBotService(
@@ -1022,6 +1026,413 @@ class BotServiceTest extends TestCase {
 		);
 
 		$this->assertSame('Saved.', $response);
+	}
+
+	public function testProcessMessageRoutesNoToolRequestThroughAgentExecutorAndPreservesContent(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settings = new Settings();
+		$contexts = [];
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$rateLimitService->expects($this->once())
+			->method('updateFromHeaders')
+			->with(['x-ratelimit-remaining-requests' => '17']);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->with(7, 'room-token', null, 50)
+			->willReturn([$this->createConversation('user', 'What is the weather today?')]);
+
+		$toolRegistry->expects($this->once())->method('getToolsForBot')->with(7)->willReturn([]);
+		$toolRegistry->expects($this->once())->method('getBuiltInToolsForBot')->with(7)->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))
+			->method('setInvocationContext')
+			->willReturnCallback(static function (?array $context) use (&$contexts): void {
+				$contexts[] = $context;
+			});
+
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->with(
+				$this->anything(),
+				$this->anything(),
+				[],
+				$this->callback(function (array $options): bool {
+					$this->assertSame([], $options['built_in_tools'] ?? null);
+					$this->assertArrayNotHasKey('force_tool_call', $options);
+					$this->assertArrayNotHasKey('user_query', $options);
+					$this->assertArrayNotHasKey('rag_enabled', $options);
+
+					return true;
+				})
+			)
+			->willReturn([
+				'status' => 'completed',
+				'terminalReason' => 'final_response',
+				'content' => 'Ordinary <tool_call>XML prose</tool_call> remains.',
+				'messages' => [],
+				'toolInvocations' => [],
+				'rateLimitHeaders' => ['x-ratelimit-remaining-requests' => '17'],
+			]);
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService
+		);
+
+		$response = $service->processMessage(
+			$bot,
+			'What is the weather today?',
+			'room-token',
+			'owner',
+			'@personal-bot What is the weather today?'
+		);
+
+		$this->assertSame('Ordinary <tool_call>XML prose</tool_call> remains.', $response);
+		$this->assertCount(2, $contexts);
+		$this->assertIsArray($contexts[0]);
+		$this->assertSame(7, $contexts[0]['bot_id'] ?? null);
+		$this->assertNull($contexts[1]);
+	}
+
+	public function testProcessMessageBatchesRawDeltasAndKeepsToolProgressInOrder(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settings = new Settings();
+		$visiblePartials = [];
+		$streamMismatchCount = 0;
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([$this->createConversation('user', 'Stream the answer.')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options): array {
+				$emit = $options['on_partial_result'] ?? null;
+				$this->assertIsCallable($emit);
+				foreach (['First', ' paragraph.', "\n", "\n", 'Before', ' tool.'] as $delta) {
+					$emit($delta);
+				}
+				$emit('🔧 _Using tool: search_test..._');
+				foreach (['Final', ' answer', '.'] as $delta) {
+					$emit($delta);
+				}
+
+				return [
+					'status' => 'completed',
+					'terminalReason' => 'final_response',
+					'content' => 'Final answer.',
+					'messages' => [],
+					'toolInvocations' => [],
+					'rateLimitHeaders' => [],
+				];
+			});
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService
+		);
+
+		$response = $service->processMessage(
+			$bot,
+			'Stream the answer.',
+			'room-token',
+			'owner',
+			onProgress: static function (string $partial) use (&$visiblePartials): void {
+				$visiblePartials[] = $partial;
+			},
+			onStreamMismatch: static function () use (&$streamMismatchCount): void {
+				$streamMismatchCount++;
+			}
+		);
+
+		$this->assertSame('Final answer.', $response);
+		$this->assertSame([
+			'First paragraph.',
+			'Before tool.',
+			'🔧 _Using tool: search_test..._',
+			'Final answer.',
+		], $visiblePartials);
+		$this->assertSame(1, count(array_filter(
+			$visiblePartials,
+			static fn (string $partial): bool => $partial === 'Final answer.'
+		)));
+		$this->assertSame(0, $streamMismatchCount);
+	}
+
+	#[DataProvider('streamMismatchCases')]
+	public function testProcessMessageEmitsCanonicalTerminalContentAfterStreamMismatch(string $draftDelta, array $expectedPartials): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settings = new Settings();
+		$visiblePartials = [];
+		$streamMismatchCount = 0;
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([$this->createConversation('user', 'Give me the canonical answer.')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options) use ($draftDelta): array {
+				$emit = $options['on_partial_result'] ?? null;
+				$this->assertIsCallable($emit);
+				$emit($draftDelta);
+
+				return [
+					'status' => 'completed',
+					'terminalReason' => 'final_response',
+					'content' => 'Canonical',
+					'messages' => [],
+					'toolInvocations' => [],
+					'rateLimitHeaders' => [],
+				];
+			});
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService
+		);
+
+		$response = $service->processMessage(
+			$bot,
+			'Give me the canonical answer.',
+			'room-token',
+			'owner',
+			onProgress: static function (string $partial) use (&$visiblePartials): void {
+				$visiblePartials[] = $partial;
+			},
+			onStreamMismatch: static function () use (&$streamMismatchCount): void {
+				$streamMismatchCount++;
+			}
+		);
+
+		$this->assertSame('Canonical', $response);
+		$this->assertSame($expectedPartials, $visiblePartials);
+		$this->assertSame(1, $streamMismatchCount);
+	}
+
+	/**
+	 * @return array<string,array{string,array<int,string>}>
+	 */
+	public static function streamMismatchCases(): array {
+		return [
+			'unsent draft buffer' => ['Draft', ['Canonical']],
+			'already flushed draft paragraph' => ["Draft paragraph.\n\n", ['Draft paragraph.', 'Canonical']],
+		];
+	}
+
+	public function testProcessMessageAddsAvailableRagToolToExplicitBuiltInLoadout(): void {
+		$bot = $this->createPersonalBot();
+		$bot->setRagEnabled(true);
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settings = new Settings();
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$embeddingMapper->expects($this->once())->method('findByBot')->with(7)->willReturn([new \stdClass()]);
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([$this->createConversation('user', 'Search the knowledge base.')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->with(
+				$this->callback(function (string $systemPrompt): bool {
+					$this->assertStringContainsString('`rag_search_documents`', $systemPrompt);
+					return true;
+				}),
+				$this->anything(),
+				[],
+				$this->callback(function (array $options): bool {
+					$this->assertSame([
+						['name' => BuiltInToolProvider::TOOL_RAG_SEARCH, 'config' => []],
+					], $options['built_in_tools'] ?? null);
+					$this->assertArrayNotHasKey('rag_enabled', $options);
+					return true;
+				})
+			)
+			->willReturn([
+				'status' => 'completed',
+				'terminalReason' => 'final_response',
+				'content' => 'Knowledge-base answer.',
+				'messages' => [],
+				'toolInvocations' => [],
+				'rateLimitHeaders' => [],
+			]);
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService,
+			embeddingMapper: $embeddingMapper
+		);
+
+		$this->assertSame('Knowledge-base answer.', $service->processMessage(
+			$bot,
+			'Search the knowledge base.',
+			'room-token',
+			'owner'
+		));
+	}
+
+	public function testProcessMessageForwardsAttachmentInitialToolChoiceOnlyAsRequestPreference(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settings = new Settings();
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([$this->createConversation('user', '')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([
+			['name' => BuiltInToolProvider::TOOL_ATTACHMENT_AUDIO, 'config' => []],
+		]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->with(
+				$this->anything(),
+				$this->anything(),
+				[],
+				$this->callback(function (array $options): bool {
+					$this->assertSame([
+						'type' => 'function',
+						'function' => ['name' => BuiltInToolProvider::TOOL_ATTACHMENT_AUDIO],
+					], $options['initial_tool_choice'] ?? null);
+					$this->assertArrayNotHasKey('force_tool_call', $options);
+					return true;
+				})
+			)
+			->willReturn([
+				'status' => 'completed',
+				'terminalReason' => 'final_response',
+				'content' => 'Attachment response.',
+				'messages' => [],
+				'toolInvocations' => [],
+				'rateLimitHeaders' => [],
+			]);
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService
+		);
+
+		$this->assertSame('Attachment response.', $service->processMessage(
+			$bot,
+			'',
+			'room-token',
+			'owner',
+			null,
+			null,
+			false,
+			null,
+			[
+				'attachments' => [new IncomingTalkAttachment(
+					IncomingTalkAttachment::KIND_AUDIO,
+					'file',
+					'audio/wav',
+					'voice.wav',
+					'file'
+				)],
+				'document_source_ids' => [],
+				'image_source_ids' => [],
+				'attachment_only' => true,
+			]
+		));
 	}
 
 	public function testProcessMessageScopesConversationHistoryToTalkThread(): void {
@@ -1058,9 +1469,12 @@ class BotServiceTest extends TestCase {
 		$agentExecutor->expects($this->once())
 			->method('run')
 			->willReturn([
+				'status' => 'completed',
+				'terminalReason' => 'final_response',
 				'content' => 'Thread answer.',
 				'messages' => [],
 				'toolInvocations' => [],
+				'rateLimitHeaders' => [],
 			]);
 
 		$service = $this->createBotService(
@@ -1097,13 +1511,108 @@ class BotServiceTest extends TestCase {
 		$this->assertSame(42, $inserted[1]->getThreadRootMessageId());
 	}
 
+	public function testProcessMessageKeepsSameSecondHistoryChronologicalWithoutMergingCurrentPrompt(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settings = new Settings();
+		$sameSecond = 1_700_000_000;
+		$stored = [
+			$this->createConversation('user', 'First question.'),
+			$this->createConversation('assistant', 'First answer.'),
+			$this->createConversation('user', 'Second question.'),
+			$this->createConversation('assistant', 'Second answer.'),
+		];
+		foreach ($stored as $index => $conversation) {
+			$conversation->setId($index + 1);
+			$conversation->setCreatedAt($sameSecond);
+		}
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static function (Conversation $conversation) use (&$stored, $sameSecond): Conversation {
+				$conversation->setId(count($stored) + 1);
+				$conversation->setCreatedAt($sameSecond);
+				$stored[] = $conversation;
+				return $conversation;
+			});
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->with(7, 'room-token', null, 50)
+			->willReturnCallback(static function () use (&$stored): array {
+				$history = $stored;
+				usort($history, static fn (Conversation $left, Conversation $right): int => $left->getId() <=> $right->getId());
+				return $history;
+			});
+
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->with(
+				$this->anything(),
+				$this->callback(function (array $messages): bool {
+					$this->assertSame([
+						['role' => 'user', 'content' => 'First question.'],
+						['role' => 'assistant', 'content' => 'First answer.'],
+						['role' => 'user', 'content' => 'Second question.'],
+						['role' => 'assistant', 'content' => 'Second answer.'],
+						['role' => 'user', 'content' => 'Current prompt.'],
+					], $messages);
+					return true;
+				}),
+				[],
+				$this->anything()
+			)
+			->willReturn([
+				'status' => 'completed',
+				'terminalReason' => 'final_response',
+				'content' => 'Current answer.',
+				'messages' => [],
+				'toolInvocations' => [],
+				'rateLimitHeaders' => [],
+			]);
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService
+		);
+
+		$this->assertSame('Current answer.', $service->processMessage(
+			$bot,
+			'Current prompt.',
+			'room-token',
+			'owner',
+			'@personal-bot Current prompt.'
+		));
+		$this->assertSame(['user', 'assistant'], array_map(
+			static fn (Conversation $conversation): string => $conversation->getRole(),
+			array_slice($stored, -2)
+		));
+	}
+
 	public function testProcessMessageDoesNotExposeProviderEndpointInUserFacingError(): void {
 		$bot = $this->createPersonalBot();
 		$conversationMapper = $this->createMock(ConversationMapper::class);
 		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
 		$rateLimitService = $this->createMock(RateLimitService::class);
 		$settingsService = $this->createMock(SettingsService::class);
-		$llmClient = $this->createMock(LLMClient::class);
 		$settings = new Settings();
 
 		$rateLimitService->method('isEnabled')->willReturn(false);
@@ -1121,8 +1630,10 @@ class BotServiceTest extends TestCase {
 		$toolRegistry->method('getToolsForBot')->willReturn([]);
 		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
 
-		$llmClient->expects($this->once())
-			->method('sendChatCompletion')
+		$toolProviderRegistry->expects($this->exactly(2))
+			->method('setInvocationContext');
+		$agentExecutor->expects($this->once())
+			->method('run')
 			->willThrowException(new Exception('Failed to get response from AI: cURL error 7: Failed to connect to https://secret.example.invalid/v1/chat/completions'));
 
 		$service = $this->createBotService(
@@ -1133,15 +1644,10 @@ class BotServiceTest extends TestCase {
 			null,
 			$toolRegistry,
 			$conversationMapper,
-			null,
-			null,
+			$agentExecutor,
+			$toolProviderRegistry,
 			$rateLimitService,
-			$settingsService,
-			null,
-			null,
-			null,
-			null,
-			$llmClient
+			$settingsService
 		);
 
 		$response = $service->processMessage(
@@ -1155,6 +1661,84 @@ class BotServiceTest extends TestCase {
 		$this->assertSame("Sorry, I'm having trouble connecting to the AI service right now. Please try again later.", $response);
 		$this->assertStringNotContainsString('https://secret.example.invalid', $response);
 		$this->assertStringNotContainsString('Error:', $response);
+	}
+
+	public function testProcessMessageMapsTypedBudgetExhaustionToSafeGenericResponse(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$traceService = $this->createMock(TraceService::class);
+		$settings = new Settings();
+		$executionErrors = [];
+		$visiblePartials = [];
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->once())
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options): array {
+				$emit = $options['on_partial_result'] ?? null;
+				$this->assertIsCallable($emit);
+				$emit('Partial');
+				$emit(' answer');
+
+				return [
+					'status' => 'budget_exhausted',
+					'terminalReason' => 'max_turns',
+					'content' => '',
+					'messages' => [],
+					'toolInvocations' => [],
+					'rateLimitHeaders' => [],
+				];
+			});
+		$traceService->expects($this->never())->method('finishRun');
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService,
+			traceService: $traceService
+		);
+
+		$this->assertSame(
+			"Sorry, I'm having trouble connecting to the AI service right now. Please try again later.",
+			$service->processMessage(
+				bot: $bot,
+				message: 'Hello',
+				roomToken: 'room-token',
+				userId: 'owner',
+				onProgress: static function (string $partial) use (&$visiblePartials): void {
+					$visiblePartials[] = $partial;
+				},
+				traceRunId: 71,
+				onExecutionError: static function (?string $errorSummary = null) use (&$executionErrors): void {
+					$executionErrors[] = $errorSummary;
+				}
+			)
+		);
+		$this->assertSame([
+			'Agent execution terminated: max_turns',
+		], $executionErrors);
+		$this->assertSame(['Partial answer'], $visiblePartials);
 	}
 
 	public function testEnableTestingOverwritesPreviousReviewerSlot(): void {
@@ -1202,22 +1786,6 @@ class BotServiceTest extends TestCase {
 		$this->assertTrue($service->canInspectPendingReviewContext($bot, 'tester'));
 		$this->assertTrue($service->canInspectPendingReviewContext($bot, 'approver'));
 		$this->assertFalse($service->canInspectPendingReviewContext($bot, 'audience'));
-	}
-
-	public function testStripXmlToolCallTagsRemovesArtifacts(): void {
-		$service = $this->createBotService(
-			$this->createMock(BotMapper::class),
-			$this->createMock(PermissionService::class)
-		);
-		$method = new \ReflectionMethod(BotService::class, 'stripXmlToolCallTags');
-		$method->setAccessible(true);
-
-		$result = $method->invoke(
-			$service,
-			'Vorher <minimax:tool_call><invoke name="search_test"><parameter name="query">Berlin</parameter></invoke></minimax:tool_call> Nachher'
-		);
-
-		$this->assertSame('Vorher Nachher', $result);
 	}
 
 	public function testShouldForceInitialAudioTranscriptionForSingleAudioOnlyAttachment(): void {
@@ -1393,19 +1961,19 @@ class BotServiceTest extends TestCase {
 		?RoomImageIngestionService $roomImageIngestionService = null,
 		?WikiRootRegistryService $wikiRootRegistryService = null,
 		?WikiLocationService $wikiLocationService = null,
-		?LLMClient $llmClient = null,
+		?EmbeddingMapper $embeddingMapper = null,
+		?TraceService $traceService = null,
 	): BotService {
 		return new BotService(
 			$botMapper,
 			$conversationMapper ?? $this->createMock(ConversationMapper::class),
 			$this->createMock(ChatRoomMapper::class),
-			$llmClient ?? $this->createMock(LLMClient::class),
 			$this->createMock(LoggerInterface::class),
 			$groupManager ?? $this->createMock(IGroupManager::class),
 			$userManager ?? $this->createUserManagerMock(),
 			$appManager ?? $this->createMock(IAppManager::class),
 			$this->createMock(BotSourceMapper::class),
-			$this->createMock(EmbeddingMapper::class),
+			$embeddingMapper ?? $this->createMock(EmbeddingMapper::class),
 			$this->createMock(BotToolMapper::class),
 			$this->createMock(ToolMapper::class),
 			$toolRegistry ?? $this->createMock(ToolRegistry::class),
@@ -1418,7 +1986,8 @@ class BotServiceTest extends TestCase {
 			$this->createMock(RoomDocumentIngestionService::class),
 			$roomImageIngestionService ?? $this->createMock(RoomImageIngestionService::class),
 			$wikiRootRegistryService ?? $this->createMock(WikiRootRegistryService::class),
-			$wikiLocationService ?? $this->createMock(WikiLocationService::class)
+			$wikiLocationService ?? $this->createMock(WikiLocationService::class),
+			$traceService
 		);
 	}
 

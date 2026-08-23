@@ -27,6 +27,7 @@ class TalkHandler {
 	private const IGNORED_TALK_SYSTEM_EVENT_NAMES = [
 		'thread_created',
 	];
+	private const STREAM_MISMATCH_TRACE_SUMMARY = 'Streamed response differed from terminal content';
 
 	private BotService $botService;
 	private SettingsService $settingsService;
@@ -619,11 +620,13 @@ class TalkHandler {
 
 		$alreadySent = false;
 		$isFirstMessage = true;
+		$assistantStreamDeliveryFailed = false;
 		$thinkingMessageSent = false;
 		$thinkingBuffer = '';
 		$isInThinkingMode = false;
-		
+
 		$traceStatus = 'success';
+		$traceErrorSummary = null;
 
 		try {
 			// Process message and get response
@@ -633,13 +636,14 @@ class TalkHandler {
 				$roomToken,
 				$userId,
 				$originalMessage ?? $cleanMessage,
-				function (string $partial) use ($roomToken, $replyTargetId, $threadRootMessageId, &$alreadySent, &$isFirstMessage, &$thinkingMessageSent, &$thinkingBuffer, &$isInThinkingMode) {
+				function (string $partial) use ($roomToken, $replyTargetId, $threadRootMessageId, &$alreadySent, &$isFirstMessage, &$assistantStreamDeliveryFailed, &$thinkingMessageSent, &$thinkingBuffer, &$isInThinkingMode) {
 					$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
 					if ($this->isProgressOnlyPartial($partial)) {
 						$isInThinkingMode = false;
 						$thinkingBuffer = '';
-						$this->sendReplyToTalk($roomToken, $partial, $replyTo);
-						$isFirstMessage = false;
+						if ($this->sendReplyToTalk($roomToken, $partial, $replyTo)) {
+							$isFirstMessage = false;
+						}
 						return;
 					}
 
@@ -657,11 +661,15 @@ class TalkHandler {
 					// Only send if there's actual content after filtering thinking tokens
 					if ($filteredPartial !== null && trim($filteredPartial) !== '') {
 						$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
-						$this->sendReplyToTalk($roomToken, $filteredPartial, $replyTo);
-						if (!$this->isProgressOnlyPartial($filteredPartial)) {
-							$alreadySent = true;
+						$isAssistantPartial = !$this->isProgressOnlyPartial($filteredPartial);
+						if ($this->sendReplyToTalk($roomToken, $filteredPartial, $replyTo)) {
+							if ($isAssistantPartial) {
+								$alreadySent = true;
+							}
+							$isFirstMessage = false;
+						} elseif ($isAssistantPartial) {
+							$assistantStreamDeliveryFailed = true;
 						}
-						$isFirstMessage = false;
 					}
 				},
 				false,
@@ -669,21 +677,32 @@ class TalkHandler {
 				$messageContext,
 				$threadRootMessageId,
 				$replyTargetId,
-				$traceRunId
+				$traceRunId,
+				static function (?string $errorSummary = null) use (&$traceStatus, &$traceErrorSummary): void {
+					$traceStatus = 'error';
+					$traceErrorSummary = $errorSummary;
+				},
+				static function () use (&$traceStatus, &$traceErrorSummary): void {
+					if ($traceStatus !== 'error') {
+						$traceStatus = 'partial';
+						$traceErrorSummary = self::STREAM_MISMATCH_TRACE_SUMMARY;
+					}
+				}
 			);
 
 			$this->logger->info('Got bot response', [
 				'response_length' => strlen($response),
 				'already_streamed' => $alreadySent,
+				'stream_delivery_failed' => $assistantStreamDeliveryFailed,
 				'thinking_message_sent' => $thinkingMessageSent,
 				'trace_run_id' => $traceRunId,
 			]);
 
-				if (!$alreadySent) {
-					// Filter thinking tokens from final response as well
-					$filteredResponse = $this->stripThinkingTokensFromFinal($response);
+			if (!$alreadySent || $assistantStreamDeliveryFailed || $traceStatus === 'error') {
+				// Filter thinking tokens from final response as well
+				$filteredResponse = $this->stripThinkingTokensFromFinal($response);
 
-					// Check if we have actual content to send
+				// Check if we have actual content to send
 				if (trim($filteredResponse) === '') {
 					// The response was only thinking tokens
 					if ($thinkingMessageSent) {
@@ -693,25 +712,28 @@ class TalkHandler {
 							'_(The AI finished thinking but produced no response. Please try again.)_',
 							$this->resolveStreamingReplyTarget(false, $replyTargetId, $threadRootMessageId)
 						);
-						if (!$fallbackSent) {
+						if (!$fallbackSent && $traceStatus !== 'error') {
 							$traceStatus = 'partial';
 						}
 						$this->logger->warning('LLM response contained only thinking tokens with no actual output');
 					} else {
 						// Empty response with no thinking - something went wrong
-						if (!$this->sendReplyToTalk($roomToken, '_(No response received from AI. Please try again.)_', $replyTargetId)) {
+						if (!$this->sendReplyToTalk($roomToken, '_(No response received from AI. Please try again.)_', $replyTargetId) && $traceStatus !== 'error') {
 							$traceStatus = 'partial';
 						}
 						$this->logger->warning('LLM returned empty response');
 					}
 				} else {
 					// Normal case - send the filtered response
-					$result = $this->sendReplyToTalk($roomToken, $filteredResponse, $replyTargetId);
+					$finalReplyTarget = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
+					$result = $this->sendReplyToTalk($roomToken, $filteredResponse, $finalReplyTarget);
 
 					if ($result) {
 						$this->logger->info('Bot response sent successfully to Talk');
 					} else {
-						$traceStatus = 'partial';
+						if ($traceStatus !== 'error') {
+							$traceStatus = 'partial';
+						}
 						$this->logger->error('Failed to send bot response to Talk - check Talk API logs');
 					}
 				}
@@ -719,7 +741,7 @@ class TalkHandler {
 				$this->logger->info('Bot response was streamed to Talk, skipping final reply');
 			}
 
-			$this->traceService?->finishRun($traceRunId, $traceStatus);
+			$this->traceService?->finishRun($traceRunId, $traceStatus, $traceErrorSummary);
 		} catch (\Throwable $e) {
 			$this->traceService?->recordEvent($traceRunId, 'error', [
 				'status' => 'error',
@@ -1070,9 +1092,10 @@ class TalkHandler {
 	 * @param string $roomToken
 	 * @param string $message
 	 * @param int $replyToId
+	 * @param ?string $referenceId Stable caller-provided correlation reference, or null for a random reference
 	 * @return bool
 	 */
-	public function sendReplyToTalk(string $roomToken, string $message, int $replyToId = 0): bool {
+	public function sendReplyToTalk(string $roomToken, string $message, int $replyToId = 0, ?string $referenceId = null): bool {
 		try {
 			// Never send empty messages - Talk API will reject them with 400
 			if (trim($message) === '') {
@@ -1100,9 +1123,12 @@ class TalkHandler {
 				$requestBody['replyTo'] = $replyToId;
 			}
 
-			// Add unique reference ID
+			// Keep the signing nonce random even when the caller supplies a stable
+			// Talk correlation reference.
 			$random = bin2hex(random_bytes(32));
-			$requestBody['referenceId'] = sha1($random);
+			$requestBody['referenceId'] = $referenceId !== null && trim($referenceId) !== ''
+				? $referenceId
+				: sha1($random);
 
 			// Convert to JSON
 			$jsonBody = json_encode($requestBody);
@@ -1218,13 +1244,14 @@ class TalkHandler {
 					
 					// Send thinking placeholder if not already sent
 					if (!$thinkingMessageSent) {
-						$this->sendReplyToTalk(
+						$thinkingMessageSent = $this->sendReplyToTalk(
 							$roomToken,
 							'🤔 _(The AI is thinking... this may take a moment)_',
 							$replyToId
 						);
-						$thinkingMessageSent = true;
-						$isFirstMessage = false;
+						if ($thinkingMessageSent) {
+							$isFirstMessage = false;
+						}
 					}
 					
 					$pos = $openPos + 7; // Skip past <think>

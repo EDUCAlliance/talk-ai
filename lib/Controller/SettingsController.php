@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Controller;
 
 use Exception;
+use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\QueuedRequest;
@@ -14,6 +15,7 @@ use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\SettingsService;
+use OCA\EducAI\Service\TraceService;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Webhook\TalkHandler;
 use OCP\App\IAppManager;
@@ -45,6 +47,7 @@ class SettingsController extends Controller {
 	private IUserSession $userSession;
 	private IAppManager $appManager;
 	private LoggerInterface $logger;
+	private TraceService $traceService;
 
 	public function __construct(
 		string $appName,
@@ -63,7 +66,8 @@ class SettingsController extends Controller {
 		IGroupManager $groupManager,
 		IUserSession $userSession,
 		IAppManager $appManager,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		TraceService $traceService
 	) {
 		parent::__construct($appName, $request);
 		$this->settingsService = $settingsService;
@@ -81,6 +85,7 @@ class SettingsController extends Controller {
 		$this->userSession = $userSession;
 		$this->appManager = $appManager;
 		$this->logger = $logger;
+		$this->traceService = $traceService;
 	}
 
 	/**
@@ -385,7 +390,28 @@ class SettingsController extends Controller {
 	 */
 	public function processQueue(): DataResponse {
 		try {
+			$processedCount = 0;
+			$errors = [];
+			$readyRequests = $this->rateLimitService->getResponseReadyRequests(10);
+			foreach ($readyRequests as $request) {
+				$result = $this->processResponseReadyRequest($request);
+				if ($result['success']) {
+					$processedCount++;
+				} else {
+					$errors[] = $result['error'];
+				}
+			}
+
 			if (!$this->rateLimitService->isEnabled()) {
+				if ($readyRequests !== []) {
+					$remainingStats = $this->rateLimitService->getQueueStats();
+					return new DataResponse([
+						'success' => true,
+						'processed' => $processedCount,
+						'remaining' => $remainingStats['pending'],
+						'errors' => $errors,
+					]);
+				}
 				return new DataResponse([
 					'success' => false,
 					'error' => 'Rate limiting is not enabled',
@@ -394,6 +420,14 @@ class SettingsController extends Controller {
 
 			$stats = $this->rateLimitService->getQueueStats();
 			if ($stats['pending'] === 0) {
+				if ($readyRequests !== []) {
+					return new DataResponse([
+						'success' => true,
+						'processed' => $processedCount,
+						'remaining' => 0,
+						'errors' => $errors,
+					]);
+				}
 				return new DataResponse([
 					'success' => true,
 					'processed' => 0,
@@ -402,9 +436,7 @@ class SettingsController extends Controller {
 			}
 
 			// Process up to 10 requests
-			$maxToProcess = min(10, $stats['pending']);
-			$processedCount = 0;
-			$errors = [];
+			$maxToProcess = min(10 - count($readyRequests), $stats['pending']);
 
 			for ($i = 0; $i < $maxToProcess; $i++) {
 				// Check if we have rate limit capacity
@@ -460,14 +492,26 @@ class SettingsController extends Controller {
 	private function processQueuedRequest(QueuedRequest $request): array {
 		$this->rateLimitService->markProcessing($request);
 		$this->rateLimitService->recordUsage();
+		$traceRunId = null;
+		$traceStatus = null;
+		$traceErrorSummary = null;
+		$agentExecutionStarted = false;
+		$executionFailed = false;
+		$terminalNotification = null;
+		$deliveryFailed = false;
+		$deliverySucceeded = false;
+		$agentExecutionCompleted = false;
 
 		try {
 			$bot = $this->botMapper->findById($request->getBotId());
-			
+
 			if (!$bot->getIsActive()) {
 				throw new Exception('Bot is no longer active');
 			}
 
+			$traceRunId = $this->startQueuedTrace($request, $bot);
+			$executionError = null;
+			$agentExecutionStarted = true;
 			$response = $this->botService->processMessage(
 				$bot,
 				$request->getMessage(),
@@ -475,30 +519,225 @@ class SettingsController extends Controller {
 				$request->getUserId(),
 				$request->getOriginalMessage(),
 				null,
-				true // isFromQueue
+				true, // isFromQueue
+				threadRootMessageId: $request->getThreadRootMessageId(),
+				replyToMessageId: $request->getReplyToMessageId(),
+				traceRunId: $traceRunId,
+				onExecutionError: static function (?string $errorSummary = null) use (&$executionFailed, &$executionError): void {
+					$executionFailed = true;
+					$executionError = $errorSummary;
+				}
 			);
+			if ($executionFailed) {
+				$terminalNotification = $response;
+				throw new Exception($executionError ?? 'Agent execution failed');
+			}
+			$agentExecutionCompleted = true;
 
-			$this->rateLimitService->markCompleted($request, $response);
-
-			$this->talkHandler->sendReplyToTalk(
+			$this->rateLimitService->markResponseReady($request, $response);
+			$request = $this->rateLimitService->markResponseDeliveryAttempt($request);
+			$deliveryFailed = true;
+			$delivered = $this->talkHandler->sendReplyToTalk(
 				$request->getRoomToken(),
 				$response,
-				0
+				$request->getReplyToMessageId() ?? 0,
+				$request->getDeliveryReferenceId()
 			);
+			if (!$delivered) {
+				$traceStatus = 'partial';
+				throw new Exception('Failed to deliver queued response to Talk');
+			}
+			$deliveryFailed = false;
+			$deliverySucceeded = true;
+
+			try {
+				$this->rateLimitService->markCompleted($request, $response);
+			} catch (\Throwable $e) {
+				$traceStatus = 'partial';
+				$traceErrorSummary = 'Queued response delivered, but completion persistence failed: ' . $e->getMessage();
+				$this->traceService->recordEvent($traceRunId, 'queue_persistence', [
+					'status' => 'error',
+					'error_message' => $traceErrorSummary,
+				]);
+				$this->logger->error('Queued response delivered, but completion persistence failed', [
+					'request_id' => $request->getId(),
+					'exception' => $e->getMessage(),
+				]);
+
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+			$traceStatus = 'success';
 
 			return ['success' => true];
 
 		} catch (DoesNotExistException $e) {
+			$traceStatus = 'error';
+			$traceErrorSummary = 'Bot no longer exists';
 			$this->rateLimitService->markFailed($request, 'Bot no longer exists');
 			return ['success' => false, 'error' => 'Bot not found'];
 		} catch (Exception $e) {
-			if ($request->getAttempts() < 3) {
+			if ($deliverySucceeded) {
+				if ($traceStatus !== 'partial') {
+					$traceStatus = 'partial';
+					$traceErrorSummary = 'Queued response was delivered, but post-delivery bookkeeping failed: ' . $e->getMessage();
+				}
+				$this->logger->error('Post-delivery queue bookkeeping failed', [
+					'request_id' => $request->getId(),
+					'exception' => $e->getMessage(),
+				]);
+
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+			if ($deliveryFailed) {
+				$traceStatus = 'partial';
+				$traceErrorSummary = $e->getMessage();
+				$this->rateLimitService->markResponseDeliveryFailed($request, 'Delivery failed: ' . $e->getMessage());
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+			if ($agentExecutionCompleted) {
+				$traceStatus = 'partial';
+				$traceErrorSummary = 'Queued response persistence failed: ' . $e->getMessage();
+				if ($request->getStatus() === QueuedRequest::STATUS_RESPONSE_READY) {
+					$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+				} else {
+					$this->rateLimitService->markFailed($request, $traceErrorSummary);
+				}
+				$this->traceService->recordEvent($traceRunId, 'queue_persistence', [
+					'status' => 'error',
+					'error_message' => $traceErrorSummary,
+				]);
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+			if ($traceStatus !== 'partial') {
+				$traceStatus = 'error';
+			}
+			$traceErrorSummary = $e->getMessage();
+			if ($agentExecutionStarted) {
+				$this->rateLimitService->markFailed($request, 'Agent execution failed: ' . $e->getMessage());
+				if ($terminalNotification !== null) {
+					$this->talkHandler->sendReplyToTalk(
+						$request->getRoomToken(),
+						$terminalNotification,
+						$request->getReplyToMessageId() ?? 0
+					);
+				}
+			} elseif ($request->getAttempts() < QueuedRequest::MAX_ATTEMPTS) {
 				$this->rateLimitService->markForRetry($request, $e->getMessage());
 			} else {
 				$this->rateLimitService->markFailed($request, 'Max retries exceeded: ' . $e->getMessage());
 			}
 			return ['success' => false, 'error' => $e->getMessage()];
+		} finally {
+			if ($traceRunId !== null && $traceStatus !== null) {
+				$this->traceService->finishRun($traceRunId, $traceStatus, $traceErrorSummary);
+			}
 		}
+	}
+
+	/**
+	 * @return array{success: bool, error?: string}
+	 */
+	private function processResponseReadyRequest(QueuedRequest $request): array {
+		$traceRunId = $this->startDeliveryTrace($request);
+		$traceStatus = 'partial';
+		$traceErrorSummary = null;
+		$result = $request->getResult();
+		$referenceId = $request->getDeliveryReferenceId();
+
+		try {
+			if ($result === null || trim($result) === '') {
+				$traceStatus = 'error';
+				$traceErrorSummary = 'Stored queued response is empty';
+				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+
+			if ($request->getAttempts() >= QueuedRequest::MAX_ATTEMPTS) {
+				$traceErrorSummary = 'Queued response delivery attempts exhausted';
+				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+				$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+					'status' => 'error',
+					'error_message' => $traceErrorSummary,
+				]);
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+
+			$request = $this->rateLimitService->markResponseDeliveryAttempt($request);
+
+			$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+				'status' => 'started',
+				'payload' => ['reference_id' => $referenceId],
+			]);
+			$delivered = $this->talkHandler->sendReplyToTalk(
+				$request->getRoomToken(),
+				$result,
+				$request->getReplyToMessageId() ?? 0,
+				$referenceId
+			);
+			if (!$delivered) {
+				$traceErrorSummary = 'Failed to reconcile stored queued response delivery';
+				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+				$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+					'status' => 'error',
+					'error_message' => $traceErrorSummary,
+				]);
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+
+			try {
+				$this->rateLimitService->markCompleted($request, $result);
+			} catch (\Throwable $e) {
+				$traceErrorSummary = 'Queued response delivered, but completion persistence failed: ' . $e->getMessage();
+				$this->traceService->recordEvent($traceRunId, 'queue_persistence', [
+					'status' => 'error',
+					'error_message' => $traceErrorSummary,
+				]);
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+
+			$traceStatus = 'success';
+			$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+				'status' => 'success',
+				'payload' => ['reference_id' => $referenceId],
+			]);
+			return ['success' => true];
+		} catch (\Throwable $e) {
+			$traceErrorSummary ??= 'Queued response delivery reconciliation failed: ' . $e->getMessage();
+			$this->logger->error('Queued response delivery reconciliation failed', [
+				'request_id' => $request->getId(),
+				'exception' => $e->getMessage(),
+			]);
+			return ['success' => false, 'error' => $traceErrorSummary];
+		} finally {
+			$this->traceService->finishRun($traceRunId, $traceStatus, $traceErrorSummary);
+		}
+	}
+
+	private function startQueuedTrace(QueuedRequest $request, Bot $bot): ?int {
+		return $this->traceService->startRun([
+			'user_id' => $request->getUserId(),
+			'bot_id' => $request->getBotId(),
+			'bot_mention_name' => $bot->getMentionName(),
+			'room_token' => $request->getRoomToken(),
+			'talk_message_id' => $request->getReplyToMessageId(),
+			'reply_target_message_id' => $request->getReplyToMessageId(),
+			'thread_root_message_id' => $request->getThreadRootMessageId(),
+			'source' => 'queue',
+			'user_message' => $request->getOriginalMessage() ?? $request->getMessage(),
+		]);
+	}
+
+	private function startDeliveryTrace(QueuedRequest $request): ?int {
+		return $this->traceService->startRun([
+			'user_id' => $request->getUserId(),
+			'bot_id' => $request->getBotId(),
+			'room_token' => $request->getRoomToken(),
+			'talk_message_id' => $request->getReplyToMessageId(),
+			'reply_target_message_id' => $request->getReplyToMessageId(),
+			'thread_root_message_id' => $request->getThreadRootMessageId(),
+			'source' => 'queue_delivery',
+			'user_message' => $request->getOriginalMessage() ?? $request->getMessage(),
+		]);
 	}
 
 	/**

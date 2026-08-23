@@ -58,14 +58,12 @@ use OCA\EducAI\Service\TalkBotRegistrationService;
 use OCA\EducAI\Service\TextSessionResetService;
 use OCA\EducAI\Service\ToolArgumentNormalizer;
 use OCA\EducAI\Service\ToolExecutionPolicyService;
-use OCA\EducAI\Service\ToolIntentService;
 use OCA\EducAI\Service\ToolRegistry;
-use OCA\EducAI\Service\ToolResultFallbackService;
 use OCA\EducAI\Service\TraceService;
 use OCA\EducAI\Service\UrlContentFetcher;
 use OCA\EducAI\Service\VisionClient;
-use OCA\EducAI\Service\WikiLocationService;
 use OCA\EducAI\Service\WikiFileEventSyncService;
+use OCA\EducAI\Service\WikiLocationService;
 use OCA\EducAI\Service\WikiRootRegistryService;
 use OCA\EducAI\Service\WikiService;
 use OCA\EducAI\Webhook\TalkAttachmentNormalizer;
@@ -219,7 +217,8 @@ class Application extends App implements IBootstrap {
 				$c->get(\OCP\Http\Client\IClientService::class),
 				$c->get(SettingsService::class),
 				$c->get(\Psr\Log\LoggerInterface::class),
-				$c->get(\OCP\IConfig::class)
+				$c->get(\OCP\IConfig::class),
+				$c->get(TraceService::class)
 			);
 		});
 
@@ -380,16 +379,8 @@ class Application extends App implements IBootstrap {
 			return new ToolExecutionPolicyService();
 		});
 
-		$context->registerService(ToolIntentService::class, function () {
-			return new ToolIntentService();
-		});
-
 		$context->registerService(ToolArgumentNormalizer::class, function () {
 			return new ToolArgumentNormalizer();
-		});
-
-		$context->registerService(ToolResultFallbackService::class, function () {
-			return new ToolResultFallbackService();
 		});
 
 		$context->registerService(TraceService::class, function (IContainer $c) {
@@ -445,7 +436,6 @@ class Application extends App implements IBootstrap {
 				$c->get(\Psr\Log\LoggerInterface::class),
 				$c->get(ToolExecutionPolicyService::class),
 				$c->get(ToolArgumentNormalizer::class),
-				$c->get(ToolResultFallbackService::class),
 				$c->get(TraceService::class)
 			);
 		});
@@ -474,7 +464,6 @@ class Application extends App implements IBootstrap {
 				$c->get(BotMapper::class),
 				$c->get(ConversationMapper::class),
 				$c->get(ChatRoomMapper::class),
-				$c->get(LLMClient::class),
 				$c->get(\Psr\Log\LoggerInterface::class),
 				$c->get(\OCP\IGroupManager::class),
 				$c->get(\OCP\IUserManager::class),
@@ -494,7 +483,6 @@ class Application extends App implements IBootstrap {
 				$c->get(RoomImageIngestionService::class),
 				$c->get(WikiRootRegistryService::class),
 				$c->get(WikiLocationService::class),
-				$c->get(ToolIntentService::class),
 				$c->get(TraceService::class)
 			);
 		});
@@ -541,7 +529,8 @@ class Application extends App implements IBootstrap {
 				$c->get(BotService::class),
 				$c->get(BotMapper::class),
 				$c->get(TalkHandler::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(TraceService::class)
 			);
 		});
 

@@ -42,8 +42,10 @@ use OCP\AppFramework\Db\Entity;
  * @method void setProcessedAt(?int $processedAt)
  */
 class QueuedRequest extends Entity implements JsonSerializable {
+    public const MAX_ATTEMPTS = 3;
     public const STATUS_PENDING = 'pending';
     public const STATUS_PROCESSING = 'processing';
+    public const STATUS_RESPONSE_READY = 'response_ready';
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_FAILED = 'failed';
 
@@ -76,7 +78,7 @@ class QueuedRequest extends Entity implements JsonSerializable {
     /**
      * Check if request can be retried
      */
-    public function canRetry(int $maxAttempts = 3): bool {
+    public function canRetry(int $maxAttempts = self::MAX_ATTEMPTS): bool {
         return $this->status === self::STATUS_FAILED && $this->attempts < $maxAttempts;
     }
 
@@ -92,6 +94,20 @@ class QueuedRequest extends Entity implements JsonSerializable {
      */
     public function incrementAttempts(): void {
         $this->attempts++;
+    }
+
+    public function getDeliveryReferenceId(): string {
+        $id = $this->getId();
+        if ($id <= 0) {
+            throw new \LogicException('A persisted queue request ID is required for delivery');
+        }
+
+        return sha1(implode(':', [
+            'educai-queue-v1',
+            (string)$id,
+            $this->roomToken,
+            (string)$this->createdAt,
+        ]));
     }
 
     public function jsonSerialize(): array {
@@ -116,7 +132,4 @@ class QueuedRequest extends Entity implements JsonSerializable {
         ];
     }
 }
-
-
-
 

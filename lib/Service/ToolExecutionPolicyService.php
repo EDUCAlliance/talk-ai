@@ -50,28 +50,6 @@ class ToolExecutionPolicyService {
 		'write',
 	];
 
-	private const FORCED_SEARCH_UNSAFE_TERMS = [
-		'create',
-		'update',
-		'delete',
-		'remove',
-		'write',
-		'insert',
-		'post',
-		'put',
-		'patch',
-		'destroy',
-		'extract',
-		'crawl',
-		'scrape',
-		'fetch',
-		'map',
-		'analyze',
-		'transcribe',
-		'read',
-		'log',
-	];
-
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -138,48 +116,6 @@ class ToolExecutionPolicyService {
 		}
 
 		return self::GENERAL_TOOL_LOOP_THRESHOLD;
-	}
-
-	/**
-	 * @param array<string,mixed> $context
-	 */
-	public function scoreForcedSearchToolCandidate(string $name, array $context): int {
-		$lcName = strtolower($name);
-		$rawName = strtolower((string)($context['invokeName'] ?? $name));
-		$description = strtolower((string)($context['definition']['function']['description'] ?? ''));
-		$combined = $lcName . ' ' . $rawName . ' ' . $description;
-		$policy = $context['policy'] ?? null;
-
-		if (is_array($policy) && (!($policy['read_only'] ?? false) || !empty($policy['destructive']))) {
-			return 0;
-		}
-		if (!$this->hasQuerySchema($context)) {
-			return 0;
-		}
-
-		foreach (self::FORCED_SEARCH_UNSAFE_TERMS as $term) {
-			if ($term !== '' && str_contains($combined, $term)) {
-				return 0;
-			}
-		}
-
-		$score = 0;
-		if (str_contains($lcName, 'search') || str_contains($rawName, 'search')) {
-			$score += 60;
-		}
-		if (str_contains($description, 'search')) {
-			$score += 40;
-		}
-		foreach (['web', 'internet', 'lookup', 'browser'] as $term) {
-			if (str_contains($combined, $term)) {
-				$score += 20;
-			}
-		}
-		if (str_contains($combined, 'research')) {
-			$score += 10;
-		}
-
-		return $score;
 	}
 
 	/**
@@ -268,35 +204,6 @@ class ToolExecutionPolicyService {
 		}
 
 		return false;
-	}
-
-	/**
-	 * @param array<string,mixed> $context
-	 */
-	private function hasQuerySchema(array $context): bool {
-		$schema = $context['definition']['function']['parameters'] ?? null;
-		if ($schema instanceof \stdClass) {
-			$schema = (array)$schema;
-		}
-		if (!is_array($schema)) {
-			return false;
-		}
-		$properties = $schema['properties'] ?? null;
-		if ($properties instanceof \stdClass) {
-			$properties = (array)$properties;
-		}
-		if (!is_array($properties) || !array_key_exists('query', $properties)) {
-			return false;
-		}
-		$querySchema = $properties['query'];
-		if ($querySchema instanceof \stdClass) {
-			$querySchema = (array)$querySchema;
-		}
-		if (!is_array($querySchema)) {
-			return true;
-		}
-		$type = $querySchema['type'] ?? null;
-		return $type === null || $type === 'string' || (is_array($type) && in_array('string', $type, true));
 	}
 
 	/**

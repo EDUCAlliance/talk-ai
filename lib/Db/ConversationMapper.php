@@ -58,10 +58,11 @@ class ConversationMapper extends QBMapper {
 		}
 
 		$qb->orderBy('created_at', 'DESC')
+			->addOrderBy('id', 'DESC')
 			->setMaxResults($limit);
 
 		$entities = $this->findEntities($qb);
-		
+
 		// Return in chronological order (oldest first)
 		return array_reverse($entities);
 	}
@@ -121,4 +122,3 @@ class ConversationMapper extends QBMapper {
 		$qb->executeStatement();
 	}
 }
-

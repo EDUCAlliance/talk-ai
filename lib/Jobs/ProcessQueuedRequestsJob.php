@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Jobs;
 
+use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\RateLimitService;
+use OCA\EducAI\Service\TraceService;
 use OCA\EducAI\Webhook\TalkHandler;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -37,13 +39,14 @@ class ProcessQueuedRequestsJob extends TimedJob {
     /**
      * Maximum retry attempts for failed requests
      */
-    private const MAX_RETRY_ATTEMPTS = 3;
+    private const MAX_RETRY_ATTEMPTS = QueuedRequest::MAX_ATTEMPTS;
 
     private RateLimitService $rateLimitService;
     private BotService $botService;
     private BotMapper $botMapper;
     private TalkHandler $talkHandler;
     private LoggerInterface $logger;
+    private TraceService $traceService;
 
     public function __construct(
         ITimeFactory $time,
@@ -51,7 +54,8 @@ class ProcessQueuedRequestsJob extends TimedJob {
         BotService $botService,
         BotMapper $botMapper,
         TalkHandler $talkHandler,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        TraceService $traceService
     ) {
         parent::__construct($time);
         $this->rateLimitService = $rateLimitService;
@@ -59,6 +63,7 @@ class ProcessQueuedRequestsJob extends TimedJob {
         $this->botMapper = $botMapper;
         $this->talkHandler = $talkHandler;
         $this->logger = $logger;
+        $this->traceService = $traceService;
 
         // Run every minute (60 seconds)
         $this->setInterval(60);
@@ -71,9 +76,19 @@ class ProcessQueuedRequestsJob extends TimedJob {
      * @param array<string,mixed> $arguments
      */
     protected function run($arguments): void {
-        // Check if rate limiting is enabled
+        $processedCount = 0;
+        $readyRequests = $this->rateLimitService->getResponseReadyRequests(self::MAX_REQUESTS_PER_RUN);
+        foreach ($readyRequests as $request) {
+            if ($this->processResponseReadyRequest($request)) {
+                $processedCount++;
+            }
+        }
+
+        $remainingLimit = self::MAX_REQUESTS_PER_RUN - count($readyRequests);
         if (!$this->rateLimitService->isEnabled()) {
-            $this->logger->debug('EducAI: Rate limiting disabled, skipping queue processing');
+            $this->logger->debug('EducAI: Rate limiting disabled, skipping pending queue processing', [
+                'delivery_only_processed' => $processedCount,
+            ]);
             return;
         }
 
@@ -94,8 +109,8 @@ class ProcessQueuedRequestsJob extends TimedJob {
         $this->rateLimitService->cleanup(self::MAX_REQUEST_AGE_SECONDS);
 
         // Process pending requests
-        $processedCount = 0;
-        $maxToProcess = min(self::MAX_REQUESTS_PER_RUN, $stats['pending']);
+        $maxToProcess = min($remainingLimit, $stats['pending']);
+        $pendingProcessedCount = 0;
 
         for ($i = 0; $i < $maxToProcess; $i++) {
             // Check if we have rate limit capacity
@@ -124,6 +139,7 @@ class ProcessQueuedRequestsJob extends TimedJob {
             // Process the request
             $this->processQueuedRequest($request);
             $processedCount++;
+            $pendingProcessedCount++;
 
             // Small delay between requests to respect rate limits
             usleep(100000); // 100ms
@@ -131,7 +147,7 @@ class ProcessQueuedRequestsJob extends TimedJob {
 
         $this->logger->info('EducAI: Queue processing completed', [
             'processed_count' => $processedCount,
-            'remaining_pending' => $stats['pending'] - $processedCount,
+            'remaining_pending' => $stats['pending'] - $pendingProcessedCount,
         ]);
     }
 
@@ -152,16 +168,28 @@ class ProcessQueuedRequestsJob extends TimedJob {
 
         // Record rate limit usage
         $this->rateLimitService->recordUsage();
+        $traceRunId = null;
+        $traceStatus = null;
+        $traceErrorSummary = null;
+        $agentExecutionStarted = false;
+        $executionFailed = false;
+        $terminalNotification = null;
+        $deliveryFailed = false;
+        $deliverySucceeded = false;
+        $agentExecutionCompleted = false;
 
         try {
             // Get the bot
             $bot = $this->botMapper->findById($request->getBotId());
-            
+
             if (!$bot->getIsActive()) {
                 throw new \Exception('Bot is no longer active');
             }
 
             // Process the message (with isFromQueue=true to skip rate limit check)
+            $traceRunId = $this->startQueuedTrace($request, $bot);
+            $executionError = null;
+            $agentExecutionStarted = true;
             $response = $this->botService->processMessage(
                 $bot,
                 $request->getMessage(),
@@ -173,26 +201,64 @@ class ProcessQueuedRequestsJob extends TimedJob {
                 null,
                 null,
                 $request->getThreadRootMessageId(),
-                $request->getReplyToMessageId()
+                $request->getReplyToMessageId(),
+                traceRunId: $traceRunId,
+                onExecutionError: static function (?string $errorSummary = null) use (&$executionFailed, &$executionError): void {
+                    $executionFailed = true;
+                    $executionError = $errorSummary;
+                }
             );
+            if ($executionFailed) {
+                $terminalNotification = $response;
+                throw new \Exception($executionError ?? 'Agent execution failed');
+            }
+            $agentExecutionCompleted = true;
 
-            // Mark as completed
-            $this->rateLimitService->markCompleted($request, $response);
-
+            $this->rateLimitService->markResponseReady($request, $response);
+            $request = $this->rateLimitService->markResponseDeliveryAttempt($request);
             // Send the response to Talk
-            $this->talkHandler->sendReplyToTalk(
+            $deliveryFailed = true;
+            $delivered = $this->talkHandler->sendReplyToTalk(
                 $request->getRoomToken(),
                 $response,
-                $request->getReplyToMessageId() ?? 0
+                $request->getReplyToMessageId() ?? 0,
+                $request->getDeliveryReferenceId()
             );
+            if (!$delivered) {
+                $traceStatus = 'partial';
+                throw new \Exception('Failed to deliver queued response to Talk');
+            }
+            $deliveryFailed = false;
+            $deliverySucceeded = true;
+
+            // Mark as completed. A failure here happens after the user already received
+            // the response, so it must never trigger another provider run or Talk reply.
+            try {
+                $this->rateLimitService->markCompleted($request, $response);
+            } catch (\Throwable $e) {
+                $traceStatus = 'partial';
+                $traceErrorSummary = 'Queued response delivered, but completion persistence failed: ' . $e->getMessage();
+                $this->traceService->recordEvent($traceRunId, 'queue_persistence', [
+                    'status' => 'error',
+                    'error_message' => $traceErrorSummary,
+                ]);
+                $this->logger->error('EducAI: Queued response delivered, but completion persistence failed', [
+                    'request_id' => $requestId,
+                    'exception' => $e->getMessage(),
+                ]);
+                return;
+            }
 
             $this->logger->info('EducAI: Successfully processed queued request', [
                 'request_id' => $requestId,
                 'response_length' => strlen($response),
             ]);
+            $traceStatus = 'success';
 
         } catch (DoesNotExistException $e) {
             $error = 'Bot no longer exists';
+            $traceStatus = 'error';
+            $traceErrorSummary = $error;
             $this->rateLimitService->markFailed($request, $error);
             $this->sendFailureNotification($request, 'The bot is no longer available.');
             
@@ -203,9 +269,58 @@ class ProcessQueuedRequestsJob extends TimedJob {
 
         } catch (\Exception $e) {
             $error = $e->getMessage();
-            
-            // Check if we should retry (note: attempts already incremented in markProcessing)
-            if ($request->getAttempts() < self::MAX_RETRY_ATTEMPTS) {
+            if ($deliverySucceeded) {
+                if ($traceStatus !== 'partial') {
+                    $traceStatus = 'partial';
+                    $traceErrorSummary = 'Queued response was delivered, but post-delivery bookkeeping failed: ' . $error;
+                }
+                $this->logger->error('EducAI: Post-delivery queue bookkeeping failed', [
+                    'request_id' => $requestId,
+                    'exception' => $error,
+                ]);
+                return;
+            }
+            if ($deliveryFailed) {
+                $traceStatus = 'partial';
+                $traceErrorSummary = $error;
+                $this->rateLimitService->markResponseDeliveryFailed($request, 'Delivery failed: ' . $error);
+                return;
+            }
+            if ($agentExecutionCompleted) {
+                $traceStatus = 'partial';
+                $traceErrorSummary = 'Queued response persistence failed: ' . $error;
+                if ($request->getStatus() === QueuedRequest::STATUS_RESPONSE_READY) {
+                    $this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+                } else {
+                    $this->rateLimitService->markFailed($request, $traceErrorSummary);
+                }
+                $this->traceService->recordEvent($traceRunId, 'queue_persistence', [
+                    'status' => 'error',
+                    'error_message' => $traceErrorSummary,
+                ]);
+                $this->sendFailureNotification(
+                    $request,
+                    'The AI response was generated but could not be queued for delivery. Please try again.'
+                );
+                return;
+            }
+            if ($traceStatus !== 'partial') {
+                $traceStatus = 'error';
+            }
+            $traceErrorSummary = $error;
+
+            if ($agentExecutionStarted) {
+                $this->rateLimitService->markFailed($request, 'Agent execution failed: ' . $error);
+                if ($terminalNotification !== null) {
+                    $this->talkHandler->sendReplyToTalk(
+                        $request->getRoomToken(),
+                        $terminalNotification,
+                        $request->getReplyToMessageId() ?? 0
+                    );
+                } else {
+                    $this->sendFailureNotification($request, self::GENERIC_FAILURE_NOTIFICATION);
+                }
+            } elseif ($request->getAttempts() < self::MAX_RETRY_ATTEMPTS) {
                 // Reset to pending so it will be picked up again
                 $this->rateLimitService->markForRetry($request, $error);
                 
@@ -229,7 +344,114 @@ class ProcessQueuedRequestsJob extends TimedJob {
                     'error' => $error,
                 ]);
             }
+        } finally {
+            if ($traceRunId !== null && $traceStatus !== null) {
+                $this->traceService->finishRun($traceRunId, $traceStatus, $traceErrorSummary);
+            }
         }
+    }
+
+    private function processResponseReadyRequest(QueuedRequest $request): bool {
+        $traceRunId = $this->startDeliveryTrace($request);
+        $traceStatus = 'partial';
+        $traceErrorSummary = null;
+        $result = $request->getResult();
+        $referenceId = $request->getDeliveryReferenceId();
+
+        try {
+            if ($result === null || trim($result) === '') {
+                $traceStatus = 'error';
+                $traceErrorSummary = 'Stored queued response is empty';
+                $this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+                return false;
+            }
+
+            if ($request->getAttempts() >= QueuedRequest::MAX_ATTEMPTS) {
+                $traceErrorSummary = 'Queued response delivery attempts exhausted';
+                $this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+                $this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+                    'status' => 'error',
+                    'error_message' => $traceErrorSummary,
+                ]);
+                return false;
+            }
+
+            $request = $this->rateLimitService->markResponseDeliveryAttempt($request);
+
+            $this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+                'status' => 'started',
+                'payload' => ['reference_id' => $referenceId],
+            ]);
+            $delivered = $this->talkHandler->sendReplyToTalk(
+                $request->getRoomToken(),
+                $result,
+                $request->getReplyToMessageId() ?? 0,
+                $referenceId
+            );
+            if (!$delivered) {
+                $traceErrorSummary = 'Failed to reconcile stored queued response delivery';
+                $this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+                $this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+                    'status' => 'error',
+                    'error_message' => $traceErrorSummary,
+                ]);
+                return false;
+            }
+
+            try {
+                $this->rateLimitService->markCompleted($request, $result);
+            } catch (\Throwable $e) {
+                $traceErrorSummary = 'Queued response delivered, but completion persistence failed: ' . $e->getMessage();
+                $this->traceService->recordEvent($traceRunId, 'queue_persistence', [
+                    'status' => 'error',
+                    'error_message' => $traceErrorSummary,
+                ]);
+                return false;
+            }
+
+            $traceStatus = 'success';
+            $this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+                'status' => 'success',
+                'payload' => ['reference_id' => $referenceId],
+            ]);
+            return true;
+        } catch (\Throwable $e) {
+            $traceErrorSummary ??= 'Queued response delivery reconciliation failed: ' . $e->getMessage();
+            $this->logger->error('EducAI: Queued response delivery reconciliation failed', [
+                'request_id' => $request->getId(),
+                'exception' => $e->getMessage(),
+            ]);
+            return false;
+        } finally {
+            $this->traceService->finishRun($traceRunId, $traceStatus, $traceErrorSummary);
+        }
+    }
+
+    private function startQueuedTrace(QueuedRequest $request, Bot $bot): ?int {
+        return $this->traceService->startRun([
+            'user_id' => $request->getUserId(),
+            'bot_id' => $request->getBotId(),
+            'bot_mention_name' => $bot->getMentionName(),
+            'room_token' => $request->getRoomToken(),
+            'talk_message_id' => $request->getReplyToMessageId(),
+            'reply_target_message_id' => $request->getReplyToMessageId(),
+            'thread_root_message_id' => $request->getThreadRootMessageId(),
+            'source' => 'queue',
+            'user_message' => $request->getOriginalMessage() ?? $request->getMessage(),
+        ]);
+    }
+
+    private function startDeliveryTrace(QueuedRequest $request): ?int {
+        return $this->traceService->startRun([
+            'user_id' => $request->getUserId(),
+            'bot_id' => $request->getBotId(),
+            'room_token' => $request->getRoomToken(),
+            'talk_message_id' => $request->getReplyToMessageId(),
+            'reply_target_message_id' => $request->getReplyToMessageId(),
+            'thread_root_message_id' => $request->getThreadRootMessageId(),
+            'source' => 'queue_delivery',
+            'user_message' => $request->getOriginalMessage() ?? $request->getMessage(),
+        ]);
     }
 
     /**

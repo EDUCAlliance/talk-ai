@@ -83,18 +83,6 @@ class ToolExecutionPolicyServiceTest extends TestCase {
 		$this->assertSame(ToolExecutionPolicyService::MUTATING_TOOL_LOOP_THRESHOLD, $policy['loop_threshold']);
 	}
 
-	public function testForcedSearchScoringUsesGenericSearchSchemaWithoutTavilyBonus(): void {
-		$service = new ToolExecutionPolicyService();
-
-		$tavilyScore = $service->scoreForcedSearchToolCandidate('tavily_search', $this->searchContext('tavily_search', 'Search the web and internet using Tavily.'));
-		$genericScore = $service->scoreForcedSearchToolCandidate('web_search', $this->searchContext('web_search', 'Search the web and internet.'));
-		$extractScore = $service->scoreForcedSearchToolCandidate('tavily_extract', $this->searchContext('tavily_extract', 'Extract page content from URLs.'));
-
-		$this->assertSame($genericScore, $tavilyScore);
-		$this->assertGreaterThan(0, $genericScore);
-		$this->assertSame(0, $extractScore);
-	}
-
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -103,33 +91,6 @@ class ToolExecutionPolicyServiceTest extends TestCase {
 			'function' => [
 				'name' => $name,
 				'arguments' => '{}',
-			],
-		];
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function searchContext(string $name, string $description): array {
-		return [
-			'invokeName' => $name,
-			'policy' => [
-				'kind' => ToolExecutionPolicyService::KIND_SEARCH,
-				'read_only' => true,
-				'idempotent' => true,
-				'destructive' => false,
-			],
-			'definition' => [
-				'function' => [
-					'description' => $description,
-					'parameters' => [
-						'type' => 'object',
-						'properties' => [
-							'query' => ['type' => 'string'],
-						],
-						'required' => ['query'],
-					],
-				],
 			],
 		];
 	}

@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace OCA\EducAI\Service;
 
 use OCA\EducAI\AppInfo\Application;
+use OCA\EducAI\Exception\AgentRunInterruptedException;
+use OCA\EducAI\Exception\IncompleteProviderStreamException;
+use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
+use OCA\EducAI\Exception\ProviderContractException;
 use OCP\Http\Client\IClientService;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
@@ -18,24 +22,42 @@ class LLMClient {
 	private const STREAM_FAILURE_MESSAGE = 'Failed to stream response from AI';
 	private const CONTINUED_USER_PLACEHOLDER = '(continued)';
 	private const PROVIDER_ERROR_BODY_LIMIT = 500;
+	private const FALLBACK_CAUSE_OPTION = '_fallback_cause';
+	private const FALLBACK_CAUSES = [
+		'timeout',
+		'network',
+		'rate_limit',
+		'http_5xx',
+		'http_4xx',
+		'availability',
+		'other',
+	];
 
 	private IClientService $clientService;
 	private SettingsService $settingsService;
 	private LoggerInterface $logger;
 	private ?IConfig $config;
+	private ?TraceService $traceService;
+	private ProviderResponseNormalizer $responseNormalizer;
 	/** @var array<int,array{id:string,label:string,model:string,endpoint:string}>|null */
 	private ?array $modelOptionsCache = null;
+	/** @var \WeakMap<ProviderAttemptBudget,bool> */
+	private \WeakMap $modelDiscoveryFailures;
 
 	public function __construct(
 		IClientService $clientService,
 		SettingsService $settingsService,
 		LoggerInterface $logger,
-		?IConfig $config = null
+		?IConfig $config = null,
+		?TraceService $traceService = null,
 	) {
 		$this->clientService = $clientService;
 		$this->settingsService = $settingsService;
 		$this->logger = $logger;
 		$this->config = $config;
+		$this->traceService = $traceService;
+		$this->responseNormalizer = new ProviderResponseNormalizer(new ToolCallIdGenerator());
+		$this->modelDiscoveryFailures = new \WeakMap();
 	}
 
 	/**
@@ -48,20 +70,31 @@ class LLMClient {
 	 * @throws \Exception
 	 */
 	public function sendChatCompletion(string $systemPrompt, array $messages, ?string $modelOverride = null, array $options = []): array {
+		$options = $this->withProviderAttemptBudget($options);
 		$settings = $this->settingsService->getSettings();
 		$fullMessages = $this->prepareMessages($systemPrompt, $messages);
-		$modelConfig = $this->resolveModelConfig($settings, $modelOverride ?: $settings->getDefaultModel());
+		$modelConfig = $this->resolveModelConfig(
+			$settings,
+			$modelOverride ?: $settings->getDefaultModel(),
+			$options,
+			false,
+		);
 
 		try {
 			return $this->sendResolvedChatCompletionWithReasoningRetry(
 				$fullMessages,
 				$modelConfig,
 				$settings,
-				$options
+				$options,
+				'selected',
 			);
 		} catch (\Exception $e) {
+			if ($this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
+			$fallbackOptions = $this->withFallbackCause($options, $e);
 			$fallbackConfig = $this->isFallbackEligibleException($e)
-				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e)
+				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e, $fallbackOptions, false)
 				: null;
 			if ($fallbackConfig !== null) {
 				$this->logger->warning('LLM API request failed, retrying with fallback model', [
@@ -75,9 +108,13 @@ class LLMClient {
 						$fullMessages,
 						$fallbackConfig,
 						$settings,
-						$options
+						$fallbackOptions,
+						'fallback',
 					);
 				} catch (\Exception $fallbackException) {
+					if ($this->isNonRetryableProviderException($fallbackException)) {
+						throw $fallbackException;
+					}
 					$this->logger->error('LLM fallback request failed: ' . $fallbackException->getMessage(), [
 						'exception' => $fallbackException,
 						'fallback_model' => $fallbackConfig['id'],
@@ -95,6 +132,22 @@ class LLMClient {
 	}
 
 	/**
+	 * @param array<int,array<string,mixed>> $messages
+	 * @param array<int,string> $knownToolNames
+	 * @param array<string,mixed> $options
+	 */
+	public function sendAgentTurn(
+		string $systemPrompt,
+		array $messages,
+		array $knownToolNames,
+		?string $modelOverride = null,
+		array $options = [],
+	): AgentTurn {
+		$response = $this->sendChatCompletion($systemPrompt, $messages, $modelOverride, $options);
+		return $this->normalizeAgentTurn($response, $knownToolNames, $options);
+	}
+
+	/**
 	 * Send a streaming chat completion request
 	 *
 	 * @param string $systemPrompt
@@ -106,9 +159,15 @@ class LLMClient {
 	 * @throws \Exception
 	 */
 	public function streamChatCompletion(string $systemPrompt, array $messages, callable $onChunk, ?string $modelOverride = null, array $options = []): array {
+		$options = $this->withProviderAttemptBudget($options);
 		$settings = $this->settingsService->getSettings();
 		$fullMessages = $this->prepareMessages($systemPrompt, $messages);
-		$modelConfig = $this->resolveModelConfig($settings, $modelOverride ?: $settings->getDefaultModel());
+		$modelConfig = $this->resolveModelConfig(
+			$settings,
+			$modelOverride ?: $settings->getDefaultModel(),
+			$options,
+			true,
+		);
 		$streamStarted = false;
 		$trackedOnChunk = function (array $delta) use ($onChunk, &$streamStarted): void {
 			if ($delta !== []) {
@@ -124,11 +183,16 @@ class LLMClient {
 				$modelConfig,
 				$settings,
 				$options,
-				$streamStarted
+				$streamStarted,
+				'selected',
 			);
 		} catch (\Exception $e) {
+			if ($this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
+			$fallbackOptions = $this->withFallbackCause($options, $e);
 			$fallbackConfig = !$streamStarted && $this->isFallbackEligibleException($e)
-				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e)
+				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e, $fallbackOptions, true)
 				: null;
 			if ($fallbackConfig !== null) {
 				$this->logger->warning('LLM streaming failed before first chunk, retrying with fallback model', [
@@ -143,10 +207,14 @@ class LLMClient {
 						$trackedOnChunk,
 						$fallbackConfig,
 						$settings,
-						$options,
-						$streamStarted
+						$fallbackOptions,
+						$streamStarted,
+						'fallback',
 					);
 				} catch (\Exception $fallbackException) {
+					if ($this->isNonRetryableProviderException($fallbackException)) {
+						throw $fallbackException;
+					}
 					$this->logger->error('LLM fallback streaming failed: ' . $fallbackException->getMessage(), [
 						'exception' => $fallbackException,
 						'fallback_model' => $fallbackConfig['id'],
@@ -164,6 +232,23 @@ class LLMClient {
 	}
 
 	/**
+	 * @param array<int,array<string,mixed>> $messages
+	 * @param array<int,string> $knownToolNames
+	 * @param array<string,mixed> $options
+	 */
+	public function streamAgentTurn(
+		string $systemPrompt,
+		array $messages,
+		array $knownToolNames,
+		callable $onChunk,
+		?string $modelOverride = null,
+		array $options = [],
+	): AgentTurn {
+		$response = $this->streamChatCompletion($systemPrompt, $messages, $onChunk, $modelOverride, $options);
+		return $this->normalizeAgentTurn($response, $knownToolNames, $options);
+	}
+
+	/**
 	 * Build the provider JSON payload used for a chat completion request without sending it.
 	 *
 	 * @param array<int,array<string,mixed>> $messages
@@ -171,15 +256,92 @@ class LLMClient {
 	 * @return array{endpoint:string,model_reference:string,payload:array<string,mixed>}
 	 */
 	public function buildTraceChatCompletionPayload(string $systemPrompt, array $messages, ?string $modelOverride = null, array $options = [], bool $stream = false): array {
+		$options = $this->withProviderAttemptBudget($options);
 		$settings = $this->settingsService->getSettings();
 		$fullMessages = $this->prepareMessages($systemPrompt, $messages);
-		$modelConfig = $this->resolveModelConfig($settings, $modelOverride ?: $settings->getDefaultModel());
+		$modelConfig = $this->resolveModelConfig(
+			$settings,
+			$modelOverride ?: $settings->getDefaultModel(),
+			$options,
+			$stream,
+		);
 
 		return [
 			'endpoint' => $modelConfig['endpoint_key'],
 			'model_reference' => $modelConfig['id'],
 			'payload' => $this->buildPayload($modelConfig['model'], $fullMessages, $options, $stream),
 		];
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 * @param array<int,string> $knownToolNames
+	 * @param array<string,mixed> $options
+	 */
+	private function normalizeAgentTurn(array $response, array $knownToolNames, array $options): AgentTurn {
+		$compatibilityMode = is_string($options['legacy_tool_call_compatibility'] ?? null)
+			? $options['legacy_tool_call_compatibility']
+			: ProviderResponseNormalizer::COMPATIBILITY_OFF;
+		$turn = $this->responseNormalizer->normalize($response, $knownToolNames, $compatibilityMode);
+
+		if ($turn->getCompatibilitySource() !== AgentTurn::COMPATIBILITY_NATIVE) {
+			$telemetry = [
+				'source' => $turn->getCompatibilitySource(),
+				'model_reference' => $turn->getModelReference(),
+				'endpoint_key' => $turn->getModelEndpoint(),
+				'tool_call_count' => count($turn->getToolCalls()),
+			];
+			$this->logger->info('LLM provider compatibility parsing used', $telemetry);
+			$this->traceService?->recordEvent($this->traceRunId($options), 'provider_compatibility', [
+				'status' => 'used',
+				'payload' => $telemetry,
+			]);
+		}
+
+		return $turn;
+	}
+
+	/**
+	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>
+	 */
+	private function withProviderAttemptBudget(array $options): array {
+		if (!($options['provider_attempt_budget'] ?? null) instanceof ProviderAttemptBudget) {
+			$options['provider_attempt_budget'] = new ProviderAttemptBudget();
+		}
+
+		return $options;
+	}
+
+	/**
+	 * @param array<string,mixed> $options
+	 */
+	private function providerAttemptBudget(array $options): ?ProviderAttemptBudget {
+		$budget = $options['provider_attempt_budget'] ?? null;
+		return $budget instanceof ProviderAttemptBudget ? $budget : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $options
+	 */
+	private function agentRunControl(array $options): ?AgentRunControl {
+		$runControl = $options['agent_run_control'] ?? null;
+		return $runControl instanceof AgentRunControl ? $runControl : null;
+	}
+
+	private function isNonRetryableProviderException(\Exception $exception): bool {
+		return $exception instanceof ProviderAttemptBudgetExceededException
+			|| $exception instanceof AgentRunInterruptedException
+			|| $exception instanceof IncompleteProviderStreamException
+			|| $exception instanceof ProviderContractException;
+	}
+
+	/**
+	 * @param array<string,mixed> $options
+	 */
+	private function traceRunId(array $options): ?int {
+		$runId = $options['trace_run_id'] ?? null;
+		return is_numeric($runId) && (int)$runId > 0 ? (int)$runId : null;
 	}
 
 	/**
@@ -283,7 +445,12 @@ class LLMClient {
 	 *     model: string
 	 * }
 	 */
-	private function resolveModelConfig($settings, ?string $modelReference): array {
+	private function resolveModelConfig(
+		$settings,
+		?string $modelReference,
+		array $requestOptions = [],
+		bool $streaming = false,
+	): array {
 		$reference = trim((string)($modelReference ?: $settings->getDefaultModel()));
 		if ($reference === '') {
 			throw new \Exception('Model is not configured');
@@ -295,7 +462,12 @@ class LLMClient {
 			$endpointKey = $matches[1];
 			$model = $matches[2];
 		} else {
-			$endpointKey = $this->resolveEndpointKeyForUnprefixedModel($settings, $reference);
+			$endpointKey = $this->resolveEndpointKeyForUnprefixedModel(
+				$settings,
+				$reference,
+				$requestOptions,
+				$streaming,
+			);
 		}
 
 		$model = trim($model);
@@ -337,7 +509,12 @@ class LLMClient {
 		];
 	}
 
-	private function resolveEndpointKeyForUnprefixedModel($settings, string $model): string {
+	private function resolveEndpointKeyForUnprefixedModel(
+		$settings,
+		string $model,
+		array $requestOptions,
+		bool $streaming,
+	): string {
 		$model = trim($model);
 		if ($model === '') {
 			return 'primary';
@@ -345,9 +522,22 @@ class LLMClient {
 
 		$primaryHasModel = false;
 		$secondaryHasModel = false;
+		$budget = $this->providerAttemptBudget($requestOptions);
+		if ($budget !== null && isset($this->modelDiscoveryFailures[$budget])) {
+			return 'primary';
+		}
 		try {
-			$options = $this->getCachedModelOptions($settings);
-		} catch (\Exception $e) {
+			$options = $this->getCachedModelOptions($settings, $requestOptions, $model, $streaming);
+		} catch (\Throwable $e) {
+			if ($e instanceof \Exception && $this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
+			if ($budget !== null) {
+				$this->modelDiscoveryFailures[$budget] = true;
+			}
+			if (!($e instanceof \Exception)) {
+				throw $e;
+			}
 			$this->logger->warning('LLM model lookup failed, defaulting unprefixed model to primary endpoint', [
 				'exception' => $e,
 				'model' => $model,
@@ -378,13 +568,18 @@ class LLMClient {
 	 * @param array{id:string} $currentModelConfig
 	 * @return array{id:string,endpoint_key:string,endpoint:string,api_key:string,model:string}|null
 	 */
-	private function resolveFallbackModelConfig($settings, array $currentModelConfig): ?array {
+	private function resolveFallbackModelConfig(
+		$settings,
+		array $currentModelConfig,
+		array $requestOptions,
+		bool $streaming,
+	): ?array {
 		$fallbackModel = trim((string)$settings->getFallbackModel());
 		if ($fallbackModel === '') {
 			return null;
 		}
 
-		$fallbackConfig = $this->resolveModelConfig($settings, $fallbackModel);
+		$fallbackConfig = $this->resolveModelConfig($settings, $fallbackModel, $requestOptions, $streaming);
 		if ($fallbackConfig['id'] === $currentModelConfig['id']) {
 			return null;
 		}
@@ -396,10 +591,19 @@ class LLMClient {
 	 * @param array{id:string} $currentModelConfig
 	 * @return array{id:string,endpoint_key:string,endpoint:string,api_key:string,model:string}|null
 	 */
-	private function tryResolveFallbackModelConfig($settings, array $currentModelConfig, \Exception $originalException): ?array {
+	private function tryResolveFallbackModelConfig(
+		$settings,
+		array $currentModelConfig,
+		\Exception $originalException,
+		array $requestOptions,
+		bool $streaming,
+	): ?array {
 		try {
-			return $this->resolveFallbackModelConfig($settings, $currentModelConfig);
+			return $this->resolveFallbackModelConfig($settings, $currentModelConfig, $requestOptions, $streaming);
 		} catch (\Exception $fallbackConfigException) {
+			if ($this->isNonRetryableProviderException($fallbackConfigException)) {
+				throw $fallbackConfigException;
+			}
 			$this->logger->warning('LLM fallback model is configured but could not be resolved', [
 				'exception' => $fallbackConfigException,
 				'original_exception' => $originalException,
@@ -420,10 +624,14 @@ class LLMClient {
 		array $modelConfig,
 		$settings,
 		array $options,
+		string $route,
 	): array {
 		try {
-			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options);
+			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options, $route, 'initial');
 		} catch (\Exception $e) {
+			if ($this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
 			if (!$this->shouldRetryWithReasoningParameters($e, $options, $modelConfig['model'])) {
 				throw $e;
 			}
@@ -433,9 +641,14 @@ class LLMClient {
 					$fullMessages,
 					$modelConfig,
 					$settings,
-					array_merge($options, ['_use_reasoning_parameters' => true])
+					array_merge($options, ['_use_reasoning_parameters' => true]),
+					$route,
+					'reasoning_retry',
 				);
 			} catch (\Exception $retryException) {
+				if ($this->isNonRetryableProviderException($retryException)) {
+					throw $retryException;
+				}
 				$this->logger->warning('LLM reasoning-parameter retry failed, keeping original error', [
 					'exception' => $retryException,
 					'model' => $modelConfig['id'],
@@ -459,11 +672,23 @@ class LLMClient {
 		$settings,
 		array $options,
 		bool &$streamStarted,
+		string $route,
 	): array {
 		$retryOptions = $options;
 		try {
-			return $this->streamResolvedChatCompletion($fullMessages, $onChunk, $modelConfig, $settings, $retryOptions);
+			return $this->streamResolvedChatCompletion(
+				$fullMessages,
+				$onChunk,
+				$modelConfig,
+				$settings,
+				$retryOptions,
+				$route,
+				'initial',
+			);
 		} catch (\Exception $e) {
+			if ($this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
 			if (!$streamStarted && $this->shouldRetryStreamingWithoutUsage($e, $retryOptions)) {
 				$retryOptions = array_merge($retryOptions, ['_disable_stream_usage' => true]);
 				try {
@@ -472,9 +697,14 @@ class LLMClient {
 						$onChunk,
 						$modelConfig,
 						$settings,
-						$retryOptions
+						$retryOptions,
+						$route,
+						'stream_without_usage',
 					);
 				} catch (\Exception $retryException) {
+					if ($this->isNonRetryableProviderException($retryException)) {
+						throw $retryException;
+					}
 					$e = $retryException;
 				}
 			}
@@ -487,9 +717,14 @@ class LLMClient {
 						$onChunk,
 						$modelConfig,
 						$settings,
-						$retryOptions
+						$retryOptions,
+						$route,
+						'reasoning_retry',
 					);
 				} catch (\Exception $retryException) {
+					if ($this->isNonRetryableProviderException($retryException)) {
+						throw $retryException;
+					}
 					$this->logger->warning('LLM streaming reasoning-parameter retry failed, keeping original error', [
 						'exception' => $retryException,
 						'model' => $modelConfig['id'],
@@ -508,7 +743,14 @@ class LLMClient {
 	 * @param array<string,mixed> $options
 	 * @return array<string,mixed>
 	 */
-	private function sendResolvedChatCompletion(array $fullMessages, array $modelConfig, $settings, array $options): array {
+	private function sendResolvedChatCompletion(
+		array $fullMessages,
+		array $modelConfig,
+		$settings,
+		array $options,
+		string $route,
+		string $reason,
+	): array {
 		$client = $this->clientService->newClient();
 		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, false);
 
@@ -516,41 +758,34 @@ class LLMClient {
 			'model' => $modelConfig['id'],
 			'endpoint' => $modelConfig['endpoint_key'],
 			'message_count' => count($fullMessages),
-			'message_roles' => array_map(fn($m) => $m['role'] ?? 'unknown', $fullMessages),
+			'message_roles' => array_map(fn ($m) => $m['role'] ?? 'unknown', $fullMessages),
 			'has_tools' => isset($payload['tools']) && count($payload['tools']) > 0,
 		]);
 
-		$response = $this->executeProviderRequest(fn () => $client->post($modelConfig['endpoint'], [
+		$requestedTimeout = $this->requestTimeout(
+			$options['timeout'] ?? null,
+			$this->settingsService->normalizePositiveInteger(
+				$settings->getLlmChatTimeout(),
+				SettingsService::DEFAULT_LLM_CHAT_TIMEOUT
+			),
+		);
+		return $this->executeProviderRequest(fn (int|float $timeout) => $client->post($modelConfig['endpoint'], [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $modelConfig['api_key'],
 				'Content-Type' => 'application/json',
 			],
 			'json' => $payload,
-			'timeout' => $options['timeout'] ?? $this->settingsService->normalizePositiveInteger(
-				$settings->getLlmChatTimeout(),
-				SettingsService::DEFAULT_LLM_CHAT_TIMEOUT
-			),
-		]));
-
-		$body = json_decode($response->getBody(), true);
-		$rateLimitHeaders = $this->extractRateLimitHeaders($response);
-
-		if (isset($body['choices'][0]['message'])) {
-			$message = $body['choices'][0]['message'];
-			return [
-				'content' => $message['content'] ?? '',
-				'model' => $body['model'] ?? $modelConfig['model'],
-				'model_reference' => $modelConfig['id'],
-				'model_endpoint' => $modelConfig['endpoint_key'],
-				'usage' => $body['usage'] ?? null,
-				'tool_calls' => $message['tool_calls'] ?? [],
-				'finish_reason' => $body['choices'][0]['finish_reason'] ?? null,
-				'raw' => $body,
-				'rate_limit_headers' => $rateLimitHeaders,
-			];
-		}
-
-		throw new \Exception('Invalid response from LLM provider');
+			'timeout' => $timeout,
+		]), $this->providerAttemptBudget($options), $this->traceRunId($options), $this->withFallbackAttemptMetadata([
+			'route' => $route,
+			'reason' => $reason,
+			'model_reference' => $modelConfig['id'],
+			'endpoint_key' => $modelConfig['endpoint_key'],
+			'streaming' => false,
+		], $options), $requestedTimeout, $this->agentRunControl($options), fn (object $response): array => $this->parseChatCompletionResponse(
+			$response,
+			$modelConfig,
+		));
 	}
 
 	/**
@@ -560,7 +795,15 @@ class LLMClient {
 	 * @param array<string,mixed> $options
 	 * @return array<string,mixed>
 	 */
-	private function streamResolvedChatCompletion(array $fullMessages, callable $onChunk, array $modelConfig, $settings, array $options): array {
+	private function streamResolvedChatCompletion(
+		array $fullMessages,
+		callable $onChunk,
+		array $modelConfig,
+		$settings,
+		array $options,
+		string $route,
+		string $reason,
+	): array {
 		$client = $this->clientService->newClient();
 		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, true);
 
@@ -570,19 +813,96 @@ class LLMClient {
 			'message_count' => count($fullMessages),
 		]);
 
-		$response = $this->executeProviderRequest(fn () => $client->post($modelConfig['endpoint'], [
+		$requestedTimeout = $this->requestTimeout(
+			$options['timeout'] ?? null,
+			$this->settingsService->normalizePositiveInteger(
+				$settings->getLlmStreamTimeout(),
+				SettingsService::DEFAULT_LLM_STREAM_TIMEOUT
+			),
+		);
+		return $this->executeProviderRequest(fn (int|float $timeout) => $client->post($modelConfig['endpoint'], [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $modelConfig['api_key'],
 				'Content-Type' => 'application/json',
 			],
 			'json' => $payload,
-			'timeout' => $options['timeout'] ?? $this->settingsService->normalizePositiveInteger(
-				$settings->getLlmStreamTimeout(),
-				SettingsService::DEFAULT_LLM_STREAM_TIMEOUT
-			),
+			'timeout' => $timeout,
 			'stream' => true,
-		]));
+		]), $this->providerAttemptBudget($options), $this->traceRunId($options), $this->withFallbackAttemptMetadata([
+			'route' => $route,
+			'reason' => $reason,
+			'model_reference' => $modelConfig['id'],
+			'endpoint_key' => $modelConfig['endpoint_key'],
+			'streaming' => true,
+		], $options), $requestedTimeout, $this->agentRunControl($options), fn (object $response): array => $this->parseStreamingResponse(
+			$response,
+			$onChunk,
+			$modelConfig,
+		));
+	}
 
+	/**
+	 * @param array{id:string,endpoint_key:string,model:string} $modelConfig
+	 * @return array<string,mixed>
+	 */
+	private function parseChatCompletionResponse(object $response, array $modelConfig): array {
+		$rawBody = $this->readResponseBody($response);
+		if (trim($rawBody) === '') {
+			throw new IncompleteProviderStreamException();
+		}
+
+		try {
+			$body = json_decode($rawBody, true, 512, JSON_THROW_ON_ERROR);
+		} catch (\JsonException) {
+			throw new ProviderContractException();
+		}
+		$rateLimitHeaders = $this->extractRateLimitHeaders($response);
+		if (!is_array($body)) {
+			throw new ProviderContractException();
+		}
+		$choices = $body['choices'] ?? null;
+		if ($choices === null || $choices === []) {
+			throw new IncompleteProviderStreamException();
+		}
+		if (!is_array($choices) || !array_is_list($choices) || !is_array($choices[0] ?? null)) {
+			throw new ProviderContractException();
+		}
+		$choice = $choices[0];
+		if (!array_key_exists('message', $choice)) {
+			throw new IncompleteProviderStreamException();
+		}
+
+		$message = $choice['message'];
+		if (!is_array($message)) {
+			throw new ProviderContractException();
+		}
+		$content = $message['content'] ?? '';
+		$this->responseNormalizer->assertContentShape($content);
+		$toolCalls = $message['tool_calls'] ?? [];
+		$this->responseNormalizer->assertNativeToolCallsShape($toolCalls);
+		$finishReason = $this->validFinishReason($choice['finish_reason'] ?? null);
+		if ($finishReason === null) {
+			throw new IncompleteProviderStreamException();
+		}
+
+		return [
+			'content' => $content,
+			'model' => $body['model'] ?? $modelConfig['model'],
+			'model_reference' => $modelConfig['id'],
+			'model_endpoint' => $modelConfig['endpoint_key'],
+			'usage' => $body['usage'] ?? null,
+			'tool_calls' => $toolCalls,
+			'finish_reason' => $finishReason,
+			'raw' => $body,
+			'rate_limit_headers' => $rateLimitHeaders,
+		];
+	}
+
+	/**
+	 * @param array{id:string,endpoint_key:string,model:string} $modelConfig
+	 * @return array<string,mixed>
+	 */
+	private function parseStreamingResponse(object $response, callable $onChunk, array $modelConfig): array {
 		$rateLimitHeaders = $this->extractRateLimitHeaders($response);
 		$body = $response->getBody();
 		if (!is_resource($body)) {
@@ -595,6 +915,8 @@ class LLMClient {
 		$finalContent = '';
 		$finalToolCalls = [];
 		$usage = null;
+		$finishReason = null;
+		$responseModel = $modelConfig['model'];
 
 		while (!feof($body)) {
 			$line = fgets($body);
@@ -607,59 +929,126 @@ class LLMClient {
 				continue;
 			}
 
-			if (str_starts_with($line, 'data: ')) {
-				$data = substr($line, 6);
+			if (str_starts_with($line, 'data:')) {
+				$data = ltrim(substr($line, 5));
 				if ($data === '[DONE]') {
 					break;
 				}
 
-				$chunk = json_decode($data, true);
-				if (is_array($chunk)) {
-					if (isset($chunk['usage']) && is_array($chunk['usage'])) {
-						$usage = $chunk['usage'];
-					}
+				try {
+					$chunk = json_decode($data, true, 512, JSON_THROW_ON_ERROR);
+				} catch (\JsonException) {
+					throw new ProviderContractException();
+				}
+				if (!is_array($chunk)) {
+					throw new ProviderContractException();
+				}
 
-					$delta = $chunk['choices'][0]['delta'] ?? [];
-					$onChunk($delta);
+				if (is_string($chunk['model'] ?? null) && $chunk['model'] !== '') {
+					$responseModel = $chunk['model'];
+				}
+				$hasUsage = isset($chunk['usage']) && is_array($chunk['usage']);
+				if ($hasUsage) {
+					$usage = $chunk['usage'];
+				}
 
-					if (isset($delta['content'])) {
-						$finalContent .= $delta['content'];
+				$hasChoices = array_key_exists('choices', $chunk);
+				$choices = $hasChoices ? $chunk['choices'] : null;
+				if ($hasChoices && (!is_array($choices) || !array_is_list($choices))) {
+					throw new ProviderContractException();
+				}
+				if (!$hasChoices || $choices === []) {
+					if (!$hasUsage) {
+						throw new ProviderContractException();
 					}
-					if (isset($delta['tool_calls'])) {
-						foreach ($delta['tool_calls'] as $toolCallChunk) {
-							$index = $toolCallChunk['index'];
-							if (!isset($finalToolCalls[$index])) {
-								$finalToolCalls[$index] = [
-									'id' => $toolCallChunk['id'] ?? '',
-									'type' => 'function',
-									'function' => ['name' => '', 'arguments' => '']
-								];
+					$choice = [];
+				} else {
+					$choice = $choices[0] ?? null;
+					if (!is_array($choice)) {
+						throw new ProviderContractException();
+					}
+				}
+				$chunkFinishReason = $this->validFinishReason($choice['finish_reason'] ?? null);
+				if ($chunkFinishReason !== null) {
+					$finishReason = $chunkFinishReason;
+				}
+				$deltaValue = $choice['delta'] ?? null;
+				if ($deltaValue !== null && !is_array($deltaValue)) {
+					throw new ProviderContractException();
+				}
+				$delta = $deltaValue ?? [];
+				$this->responseNormalizer->assertContentShape($delta['content'] ?? null);
+				if (array_key_exists('tool_calls', $delta)) {
+					$this->responseNormalizer->assertNativeToolCallsShape($delta['tool_calls'], true);
+				}
+				$onChunk($delta);
+
+				if (isset($delta['content'])) {
+					$finalContent .= $delta['content'];
+				}
+				if (isset($delta['tool_calls'])) {
+					foreach ($delta['tool_calls'] as $toolCallChunk) {
+						if (!is_array($toolCallChunk)) {
+							continue;
+						}
+						$index = isset($toolCallChunk['index']) && is_numeric($toolCallChunk['index'])
+							? (int)$toolCallChunk['index']
+							: 0;
+						if (!isset($finalToolCalls[$index])) {
+							$finalToolCalls[$index] = [
+								'id' => $toolCallChunk['id'] ?? '',
+								'type' => 'function',
+								'function' => ['name' => ''],
+							];
+						}
+						if (isset($toolCallChunk['id'])) {
+							$finalToolCalls[$index]['id'] = $toolCallChunk['id'];
+						}
+						$functionChunk = is_array($toolCallChunk['function'] ?? null)
+							? $toolCallChunk['function']
+							: [];
+						if (isset($functionChunk['name'])) {
+							$finalToolCalls[$index]['function']['name'] .= (string)$functionChunk['name'];
+						}
+						if (array_key_exists('arguments', $functionChunk)) {
+							$argumentFragment = $functionChunk['arguments'];
+							if (!is_string($argumentFragment)) {
+								$argumentFragment = json_encode(
+									$argumentFragment,
+									JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+								);
+								if ($argumentFragment === false) {
+									throw new ProviderContractException();
+								}
 							}
-							if (isset($toolCallChunk['id'])) {
-								$finalToolCalls[$index]['id'] = $toolCallChunk['id'];
-							}
-							if (isset($toolCallChunk['function']['name'])) {
-								$finalToolCalls[$index]['function']['name'] .= $toolCallChunk['function']['name'];
-							}
-							if (isset($toolCallChunk['function']['arguments'])) {
-								$finalToolCalls[$index]['function']['arguments'] .= $toolCallChunk['function']['arguments'];
-							}
+							$finalToolCalls[$index]['function']['arguments'] ??= '';
+							$finalToolCalls[$index]['function']['arguments'] .= $argumentFragment;
 						}
 					}
 				}
 			}
 		}
+		if ($finishReason === null) {
+			throw new IncompleteProviderStreamException();
+		}
+		ksort($finalToolCalls, SORT_NUMERIC);
+		$finalToolCalls = array_values($finalToolCalls);
+		$this->responseNormalizer->assertNativeToolCallsShape($finalToolCalls);
 
 		return [
 			'content' => $finalContent,
-			'model' => $modelConfig['model'],
+			'model' => $responseModel,
 			'model_reference' => $modelConfig['id'],
 			'model_endpoint' => $modelConfig['endpoint_key'],
 			'usage' => $usage,
-			'tool_calls' => array_values($finalToolCalls),
-			'finish_reason' => 'stop',
+			'tool_calls' => $finalToolCalls,
+			'finish_reason' => $finishReason,
 			'rate_limit_headers' => $rateLimitHeaders,
 		];
+	}
+
+	private function validFinishReason(mixed $finishReason): ?string {
+		return is_string($finishReason) && trim($finishReason) !== '' ? $finishReason : null;
 	}
 
 	/**
@@ -798,20 +1187,174 @@ class LLMClient {
 		return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
 	}
 
+	private function requestTimeout(mixed $requested, int $fallback): int|float {
+		if (is_numeric($requested)) {
+			return max(0.001, (float)$requested);
+		}
+
+		return $fallback;
+	}
+
 	/**
-	 * @template T of object
-	 * @param callable():T $request
-	 * @return T
+	 * @template TResponse of object
+	 * @template TResult
+	 * @param callable(int|float):TResponse $request
+	 * @param array{route?:string,reason?:string,model_reference?:string,endpoint_key?:string,streaming?:bool,fallback_cause?:string} $attemptMetadata
+	 * @param (callable(TResponse):TResult)|null $responseHandler
+	 * @return TResponse|TResult
 	 */
-	private function executeProviderRequest(callable $request): object {
+	private function executeProviderRequest(
+		callable $request,
+		?ProviderAttemptBudget $budget = null,
+		?int $traceRunId = null,
+		array $attemptMetadata = [],
+		int|float $requestedTimeout = SettingsService::DEFAULT_LLM_CHAT_TIMEOUT,
+		?AgentRunControl $runControl = null,
+		?callable $responseHandler = null,
+	): mixed {
+		$effectiveTimeout = $runControl !== null
+			? $runControl->clampTimeout($requestedTimeout)
+			: $requestedTimeout;
+		$attempt = null;
+		if ($budget !== null) {
+			try {
+				$attempt = $budget->consume();
+			} catch (ProviderAttemptBudgetExceededException $e) {
+				$this->recordProviderAttemptBudgetExhausted($traceRunId, $e, $attemptMetadata);
+				throw $e;
+			}
+		}
+		$startedAt = microtime(true);
+		$statusCode = null;
+
 		try {
-			$response = $request();
-		} catch (\Exception $e) {
+			$response = $request($effectiveTimeout);
+			$statusCode = $this->httpStatusFromResponse($response);
+			if ($statusCode !== null && $statusCode >= 400) {
+				$this->throwForHttpError($response);
+			}
+			$result = $responseHandler !== null ? $responseHandler($response) : $response;
+		} catch (\Throwable $e) {
+			if ($attempt !== null && $budget !== null) {
+				$this->recordProviderAttempt(
+					$traceRunId,
+					$attempt,
+					$budget->getLimit(),
+					$attemptMetadata,
+					'error',
+					$startedAt,
+					$statusCode ?? $this->httpStatusFromException($e),
+				);
+			}
+			if (!($e instanceof \Exception) || $this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
 			$this->throwForCaughtHttpException($e);
 		}
 
-		$this->throwForHttpError($response);
-		return $response;
+		if ($attempt !== null && $budget !== null) {
+			$this->recordProviderAttempt(
+				$traceRunId,
+				$attempt,
+				$budget->getLimit(),
+				$attemptMetadata,
+				'ok',
+				$startedAt,
+				$statusCode,
+			);
+		}
+		return $result;
+	}
+
+	/**
+	 * @param array{route?:string,reason?:string,model_reference?:string,endpoint_key?:string,streaming?:bool,fallback_cause?:string} $metadata
+	 */
+	private function recordProviderAttempt(
+		?int $traceRunId,
+		int $attempt,
+		int $limit,
+		array $metadata,
+		string $status,
+		float $startedAt,
+		?int $httpStatus,
+	): void {
+		$payload = [
+			'attempt' => $attempt,
+			'limit' => $limit,
+			'route' => $metadata['route'] ?? 'selected',
+			'reason' => $metadata['reason'] ?? 'initial',
+			'model_reference' => $metadata['model_reference'] ?? null,
+			'endpoint_key' => $metadata['endpoint_key'] ?? null,
+			'streaming' => $metadata['streaming'] ?? false,
+		];
+		if ($httpStatus !== null) {
+			$payload['http_status'] = $httpStatus;
+		}
+		if (in_array($metadata['fallback_cause'] ?? null, self::FALLBACK_CAUSES, true)) {
+			$payload['fallback_cause'] = $metadata['fallback_cause'];
+		}
+
+		$this->traceService?->recordEvent($traceRunId, 'provider_attempt', [
+			'status' => $status,
+			'duration_ms' => max(0, (int)round((microtime(true) - $startedAt) * 1000)),
+			'payload' => $payload,
+		]);
+	}
+
+	/**
+	 * @param array{route?:string,reason?:string,model_reference?:string,endpoint_key?:string,streaming?:bool,fallback_cause?:string} $metadata
+	 */
+	private function recordProviderAttemptBudgetExhausted(
+		?int $traceRunId,
+		ProviderAttemptBudgetExceededException $exception,
+		array $metadata,
+	): void {
+		$payload = [
+			'attempt' => $exception->getConsumed() + 1,
+			'limit' => $exception->getLimit(),
+			'route' => $metadata['route'] ?? 'selected',
+			'reason' => $metadata['reason'] ?? 'initial',
+			'model_reference' => $metadata['model_reference'] ?? null,
+			'endpoint_key' => $metadata['endpoint_key'] ?? null,
+			'streaming' => $metadata['streaming'] ?? false,
+		];
+		if (in_array($metadata['fallback_cause'] ?? null, self::FALLBACK_CAUSES, true)) {
+			$payload['fallback_cause'] = $metadata['fallback_cause'];
+		}
+
+		$this->traceService?->recordEvent($traceRunId, 'provider_attempt_budget_exhausted', [
+			'status' => 'error',
+			'payload' => $payload,
+		]);
+	}
+
+	private function httpStatusFromResponse(mixed $response): ?int {
+		if (!is_object($response) || !method_exists($response, 'getStatusCode')) {
+			return null;
+		}
+
+		$statusCode = (int)$response->getStatusCode();
+		return $statusCode > 0 ? $statusCode : null;
+	}
+
+	private function httpStatusFromException(\Throwable $exception): ?int {
+		$candidate = $exception;
+		while ($candidate instanceof \Throwable) {
+			if (
+				method_exists($candidate, 'hasResponse')
+				&& method_exists($candidate, 'getResponse')
+				&& $candidate->hasResponse()
+			) {
+				$statusCode = $this->httpStatusFromResponse($candidate->getResponse());
+				if ($statusCode !== null) {
+					return $statusCode;
+				}
+			}
+			$candidate = $candidate->getPrevious();
+		}
+
+		$statusCode = (int)$exception->getCode();
+		return $statusCode >= 100 && $statusCode <= 599 ? $statusCode : null;
 	}
 
 	private function throwForHttpError($response): void {
@@ -898,6 +1441,10 @@ class LLMClient {
 	}
 
 	private function isFallbackEligibleException(\Exception $e): bool {
+		if ($this->isNonRetryableProviderException($e)) {
+			return false;
+		}
+
 		$code = (int)$e->getCode();
 		$message = strtolower($e->getMessage());
 
@@ -952,6 +1499,73 @@ class LLMClient {
 
 	/**
 	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>
+	 */
+	private function withFallbackCause(array $options, \Exception $exception): array {
+		$options[self::FALLBACK_CAUSE_OPTION] = $this->fallbackCauseCategory($exception);
+		return $options;
+	}
+
+	private function fallbackCauseCategory(\Exception $exception): string {
+		$message = strtolower($exception->getMessage());
+		$status = $this->httpStatusFromException($exception);
+
+		foreach (['timeout', 'timed out', 'curl error 28'] as $needle) {
+			if ($status === 408 || str_contains($message, $needle)) {
+				return 'timeout';
+			}
+		}
+		foreach (['connection', 'connect', 'network', 'could not resolve', 'dns', 'ssl', 'curl error 6', 'curl error 7'] as $needle) {
+			if (str_contains($message, $needle)) {
+				return 'network';
+			}
+		}
+		if ($status === 429) {
+			return 'rate_limit';
+		}
+		if ($status !== null && $status >= 500) {
+			return 'http_5xx';
+		}
+		if ($status !== null && $status >= 400) {
+			return 'http_4xx';
+		}
+		foreach ([
+			'not found',
+			'notfounderror',
+			'model_not_found',
+			'no deployments available',
+			'no healthy deployment',
+			'overloaded',
+			'service unavailable',
+			'temporarily unavailable',
+			'bad gateway',
+			'gateway timeout',
+			'try again in',
+		] as $needle) {
+			if (str_contains($message, $needle)) {
+				return 'availability';
+			}
+		}
+
+		return 'other';
+	}
+
+	/**
+	 * @param array{route?:string,reason?:string,model_reference?:string,endpoint_key?:string,streaming?:bool} $metadata
+	 * @param array<string,mixed> $options
+	 * @return array{route?:string,reason?:string,model_reference?:string,endpoint_key?:string,streaming?:bool,fallback_cause?:string}
+	 */
+	private function withFallbackAttemptMetadata(array $metadata, array $options): array {
+		$cause = $options[self::FALLBACK_CAUSE_OPTION] ?? null;
+		if (in_array($cause, self::FALLBACK_CAUSES, true)) {
+			$metadata['fallback_cause'] = $cause;
+		}
+
+		return $metadata;
+	}
+
+	/**
+	 * @param array<string,mixed> $options
 	 */
 	private function shouldRetryStreamingWithoutUsage(\Exception $e, array $options): bool {
 		if (array_key_exists('stream_options', $options) || !empty($options['_disable_stream_usage'])) {
@@ -991,19 +1605,19 @@ class LLMClient {
 	 * @param ?string $customEndpoint
 	 * @return string
 	 */
-    private function getEndpoint(string $provider, ?string $customEndpoint): string {
-        switch ($provider) {
-            case 'openai':
-            case 'gwdg':
-                return self::GWDG_CHAT_COMPLETIONS_ENDPOINT;
-            case 'azure':
-                return $customEndpoint ?? ''; // Azure requires custom endpoint
-            case 'custom':
-                return $customEndpoint ?? '';
-            default:
-                throw new \Exception('Unknown or unconfigured API provider: ' . $provider);
-        }
-    }
+	private function getEndpoint(string $provider, ?string $customEndpoint): string {
+		switch ($provider) {
+			case 'openai':
+			case 'gwdg':
+				return self::GWDG_CHAT_COMPLETIONS_ENDPOINT;
+			case 'azure':
+				return $customEndpoint ?? ''; // Azure requires custom endpoint
+			case 'custom':
+				return $customEndpoint ?? '';
+			default:
+				throw new \Exception('Unknown or unconfigured API provider: ' . $provider);
+		}
+	}
 
 	/**
 	 * List available endpoint-specific model identifiers.
@@ -1035,7 +1649,13 @@ class LLMClient {
 	/**
 	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
 	 */
-	private function fetchConfiguredModelOptions($settings, int $timeout): array {
+	private function fetchConfiguredModelOptions(
+		$settings,
+		int $timeout,
+		array $requestOptions = [],
+		?string $modelReference = null,
+		bool $streaming = false,
+	): array {
 		$options = [];
 		$options = array_merge(
 			$options,
@@ -1044,7 +1664,10 @@ class LLMClient {
 				'Primary',
 				$this->getModelsEndpoint($settings->getApiProvider(), $settings->getApiEndpoint()),
 				$this->settingsService->getApiKey(),
-				$timeout
+				$timeout,
+				$requestOptions,
+				$modelReference,
+				$streaming,
 			)
 		);
 
@@ -1057,7 +1680,10 @@ class LLMClient {
 					'Secondary',
 					$this->getModelsEndpoint('custom', $secondaryEndpoint),
 					(string)($this->settingsService->getSecondaryApiKey() ?? ''),
-					$timeout
+					$timeout,
+					$requestOptions,
+					$modelReference,
+					$streaming,
 				)
 			);
 		}
@@ -1068,7 +1694,12 @@ class LLMClient {
 	/**
 	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
 	 */
-	private function getCachedModelOptions($settings): array {
+	private function getCachedModelOptions(
+		$settings,
+		array $requestOptions = [],
+		?string $modelReference = null,
+		bool $streaming = false,
+	): array {
 		if ($this->modelOptionsCache !== null) {
 			return $this->modelOptionsCache;
 		}
@@ -1093,7 +1724,13 @@ class LLMClient {
 			$settings->getLlmModelsTimeout(),
 			SettingsService::DEFAULT_LLM_MODELS_TIMEOUT
 		);
-		$options = $this->fetchConfiguredModelOptions($settings, $timeout);
+		$options = $this->fetchConfiguredModelOptions(
+			$settings,
+			$timeout,
+			$requestOptions,
+			$modelReference,
+			$streaming,
+		);
 		$this->storeModelOptionsCache($settings, $options);
 
 		return $options;
@@ -1154,20 +1791,35 @@ class LLMClient {
 	/**
 	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
 	 */
-	private function fetchModelOptionsForEndpoint(string $endpointKey, string $labelPrefix, string $modelsEndpoint, string $apiKey, int $timeout): array {
+	private function fetchModelOptionsForEndpoint(
+		string $endpointKey,
+		string $labelPrefix,
+		string $modelsEndpoint,
+		string $apiKey,
+		int $timeout,
+		array $requestOptions = [],
+		?string $modelReference = null,
+		bool $streaming = false,
+	): array {
 		if ($apiKey === '') {
 			throw new \Exception($labelPrefix . ' API key not configured');
 		}
 
 		$client = $this->clientService->newClient();
 		try {
-			$response = $this->executeProviderRequest(fn () => $client->get($modelsEndpoint, [
+			$response = $this->executeProviderRequest(fn (int|float $effectiveTimeout) => $client->get($modelsEndpoint, [
 				'headers' => [
 					'Authorization' => 'Bearer ' . $apiKey,
 					'Accept' => 'application/json',
 				],
-				'timeout' => $timeout,
-			]));
+				'timeout' => $effectiveTimeout,
+			]), $this->providerAttemptBudget($requestOptions), $this->traceRunId($requestOptions), $this->withFallbackAttemptMetadata([
+				'route' => 'model_discovery',
+				'reason' => 'model_discovery',
+				'model_reference' => $modelReference,
+				'endpoint_key' => $endpointKey,
+				'streaming' => $streaming,
+			], $requestOptions), $timeout, $this->agentRunControl($requestOptions));
 
 			$body = json_decode($response->getBody(), true);
 			$models = $this->extractModelIds($body);
@@ -1183,6 +1835,9 @@ class LLMClient {
 				array_values(array_unique($models))
 			));
 		} catch (\Exception $e) {
+			if ($this->isNonRetryableProviderException($e)) {
+				throw $e;
+			}
 			$this->logger->error('LLM list models failed: ' . $e->getMessage(), [
 				'exception' => $e,
 				'endpoint' => $endpointKey,
@@ -1218,92 +1873,92 @@ class LLMClient {
 		return $models;
 	}
 
-    private function getModelsEndpoint(string $provider, ?string $customEndpoint): string {
-        switch ($provider) {
-            case 'openai':
-            case 'gwdg':
-                return self::GWDG_MODELS_ENDPOINT;
-            case 'azure':
-            case 'custom':
-                // For custom endpoints, we try to infer base URL if a chat/completions path is provided
-                if (!empty($customEndpoint)) {
-                    $u = rtrim($customEndpoint, '/');
-                    // If ends with /v1/chat/completions -> /v1/models
-                    if (preg_match('#/v1/chat/completions$#', $u)) {
-                        return (string)preg_replace('#/v1/chat/completions$#', '/v1/models', $u);
-                    }
-                    // If ends with /chat/completions -> /models
-                    if (preg_match('#/chat/completions$#', $u)) {
-                        return (string)preg_replace('#/chat/completions$#', '/models', $u);
-                    }
-                    // If ends with /v1 -> append /models
-                    if (preg_match('#/v1$#', $u)) {
-                        return $u . '/models';
-                    }
-                    // Otherwise, append /v1/models
-                    return rtrim($u, '/') . '/v1/models';
-                }
-                // Fallback
-                if (empty($customEndpoint)) {
-                    throw new \Exception('Custom API endpoint is not configured');
-                }
-                return rtrim($customEndpoint, '/') . '/models';
-            default:
-                throw new \Exception('Unknown or unconfigured API provider: ' . $provider);
-        }
-    }
+	private function getModelsEndpoint(string $provider, ?string $customEndpoint): string {
+		switch ($provider) {
+			case 'openai':
+			case 'gwdg':
+				return self::GWDG_MODELS_ENDPOINT;
+			case 'azure':
+			case 'custom':
+				// For custom endpoints, we try to infer base URL if a chat/completions path is provided
+				if (!empty($customEndpoint)) {
+					$u = rtrim($customEndpoint, '/');
+					// If ends with /v1/chat/completions -> /v1/models
+					if (preg_match('#/v1/chat/completions$#', $u)) {
+						return (string)preg_replace('#/v1/chat/completions$#', '/v1/models', $u);
+					}
+					// If ends with /chat/completions -> /models
+					if (preg_match('#/chat/completions$#', $u)) {
+						return (string)preg_replace('#/chat/completions$#', '/models', $u);
+					}
+					// If ends with /v1 -> append /models
+					if (preg_match('#/v1$#', $u)) {
+						return $u . '/models';
+					}
+					// Otherwise, append /v1/models
+					return rtrim($u, '/') . '/v1/models';
+				}
+				// Fallback
+				if (empty($customEndpoint)) {
+					throw new \Exception('Custom API endpoint is not configured');
+				}
+				return rtrim($customEndpoint, '/') . '/models';
+			default:
+				throw new \Exception('Unknown or unconfigured API provider: ' . $provider);
+		}
+	}
 
-    /**
-     * Extract rate limit headers from HTTP response
-     * 
-     * Supports GWDG/AcademicCloud format:
-     * - x-ratelimit-limit-second, x-ratelimit-limit-minute, x-ratelimit-limit-hour, x-ratelimit-limit-day
-     * - x-ratelimit-remaining-second, x-ratelimit-remaining-minute, x-ratelimit-remaining-hour, x-ratelimit-remaining-day
-     * - ratelimit-reset (seconds until window resets)
-     * 
-     * @param \OCP\Http\Client\IResponse $response
-     * @return array<string,int|string>
-     */
-    private function extractRateLimitHeaders($response): array {
-        $headers = [];
-        
-        $headerNames = [
-            'x-ratelimit-limit-second',
-            'x-ratelimit-limit-minute',
-            'x-ratelimit-limit-hour',
-            'x-ratelimit-limit-day',
-            'x-ratelimit-limit-month',
-            'x-ratelimit-remaining-second',
-            'x-ratelimit-remaining-minute',
-            'x-ratelimit-remaining-hour',
-            'x-ratelimit-remaining-day',
-            'x-ratelimit-remaining-month',
-            'ratelimit-limit',
-            'ratelimit-remaining',
-            'ratelimit-reset',
-        ];
-        
-        foreach ($headerNames as $name) {
-            try {
-                $value = $response->getHeader($name);
-                if ($value !== '' && $value !== null) {
-                    // Handle case where getHeader returns array
-                    if (is_array($value)) {
-                        $value = $value[0] ?? '';
-                    }
-                    $headers[$name] = is_numeric($value) ? (int)$value : $value;
-                }
-            } catch (\Exception $e) {
-                // Header not present, skip
-            }
-        }
-        
-        if (count($headers) > 0) {
-            $this->logger->debug('Extracted rate limit headers', [
-                'headers' => $headers,
-            ]);
-        }
-        
-        return $headers;
-    }
+	/**
+	 * Extract rate limit headers from HTTP response
+	 *
+	 * Supports GWDG/AcademicCloud format:
+	 * - x-ratelimit-limit-second, x-ratelimit-limit-minute, x-ratelimit-limit-hour, x-ratelimit-limit-day
+	 * - x-ratelimit-remaining-second, x-ratelimit-remaining-minute, x-ratelimit-remaining-hour, x-ratelimit-remaining-day
+	 * - ratelimit-reset (seconds until window resets)
+	 *
+	 * @param \OCP\Http\Client\IResponse $response
+	 * @return array<string,int|string>
+	 */
+	private function extractRateLimitHeaders($response): array {
+		$headers = [];
+
+		$headerNames = [
+			'x-ratelimit-limit-second',
+			'x-ratelimit-limit-minute',
+			'x-ratelimit-limit-hour',
+			'x-ratelimit-limit-day',
+			'x-ratelimit-limit-month',
+			'x-ratelimit-remaining-second',
+			'x-ratelimit-remaining-minute',
+			'x-ratelimit-remaining-hour',
+			'x-ratelimit-remaining-day',
+			'x-ratelimit-remaining-month',
+			'ratelimit-limit',
+			'ratelimit-remaining',
+			'ratelimit-reset',
+		];
+
+		foreach ($headerNames as $name) {
+			try {
+				$value = $response->getHeader($name);
+				if ($value !== '' && $value !== null) {
+					// Handle case where getHeader returns array
+					if (is_array($value)) {
+						$value = $value[0] ?? '';
+					}
+					$headers[$name] = is_numeric($value) ? (int)$value : $value;
+				}
+			} catch (\Exception $e) {
+				// Header not present, skip
+			}
+		}
+
+		if (count($headers) > 0) {
+			$this->logger->debug('Extracted rate limit headers', [
+				'headers' => $headers,
+			]);
+		}
+
+		return $headers;
+	}
 }

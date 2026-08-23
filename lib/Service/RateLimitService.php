@@ -276,6 +276,13 @@ class RateLimitService {
     }
 
     /**
+     * @return QueuedRequest[]
+     */
+    public function getResponseReadyRequests(int $limit = 10): array {
+        return $this->queuedRequestMapper->findResponseReady($limit);
+    }
+
+    /**
      * Mark a request as processing
      */
     public function markProcessing(QueuedRequest $request): QueuedRequest {
@@ -285,13 +292,101 @@ class RateLimitService {
     }
 
     /**
+     * Persist a completed agent response before attempting external delivery.
+     * Recovery retries only this stored response and never re-runs the agent.
+     */
+    public function markResponseReady(QueuedRequest $request, string $result): QueuedRequest {
+        $previousStatus = $request->getStatus();
+        $previousResult = $request->getResult();
+        $previousError = $request->getError();
+        $previousAttempts = $request->getAttempts();
+        $previousProcessedAt = $request->getProcessedAt();
+        $request->setStatus(QueuedRequest::STATUS_RESPONSE_READY);
+        $request->setResult($result);
+        $request->setError(null);
+        $request->setAttempts(0);
+        $request->setProcessedAt(null);
+        try {
+            return $this->queuedRequestMapper->update($request);
+        } catch (\Throwable $e) {
+            $request->setStatus($previousStatus);
+            $request->setResult($previousResult);
+            $request->setError($previousError);
+            $request->setAttempts($previousAttempts);
+            $request->setProcessedAt($previousProcessedAt);
+            throw $e;
+        }
+    }
+
+    public function markResponseDeliveryAttempt(QueuedRequest $request): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_RESPONSE_READY) {
+            throw new \LogicException('Only response-ready requests can enter delivery');
+        }
+
+        $claimed = $this->queuedRequestMapper->claimResponseDeliveryAttempt(
+            $request->getId(),
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if (!$claimed) {
+            throw new \LogicException('Queued response delivery attempt was not claimed');
+        }
+
+        $stored = $this->queuedRequestMapper->findById($request->getId());
+        if ($stored->getStatus() !== QueuedRequest::STATUS_RESPONSE_READY) {
+            throw new \LogicException('Queued response changed state before delivery');
+        }
+
+        return $stored;
+    }
+
+    /**
      * Mark a request as completed with result
      */
     public function markCompleted(QueuedRequest $request, string $result): QueuedRequest {
+        $processedAt = time();
+        $completed = $this->queuedRequestMapper->completeResponseDelivery(
+            $request->getId(),
+            $result,
+            $processedAt
+        );
+        if (!$completed) {
+            $stored = $this->queuedRequestMapper->findById($request->getId());
+            if ($stored->getStatus() === QueuedRequest::STATUS_COMPLETED) {
+                return $stored;
+            }
+            throw new \RuntimeException('Queued response completion was not persisted');
+        }
+
         $request->setStatus(QueuedRequest::STATUS_COMPLETED);
         $request->setResult($result);
-        $request->setProcessedAt(time());
-        return $this->queuedRequestMapper->update($request);
+        $request->setError(null);
+        $request->setProcessedAt($processedAt);
+        return $request;
+    }
+
+    public function markResponseDeliveryFailed(QueuedRequest $request, string $error): QueuedRequest {
+        $processedAt = time();
+        $failed = $this->queuedRequestMapper->failResponseDelivery(
+            $request->getId(),
+            $error,
+            $processedAt,
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if (!$failed) {
+            $stored = $this->queuedRequestMapper->findById($request->getId());
+            if ($stored->getStatus() === QueuedRequest::STATUS_COMPLETED
+                || $stored->getStatus() === QueuedRequest::STATUS_FAILED
+            ) {
+                return $stored;
+            }
+            throw new \RuntimeException('Queued response delivery failure was not persisted');
+        }
+
+        $request->setStatus(QueuedRequest::STATUS_FAILED);
+        $request->setError($error);
+        $request->setAttempts(QueuedRequest::MAX_ATTEMPTS);
+        $request->setProcessedAt($processedAt);
+        return $request;
     }
 
     /**
@@ -300,6 +395,7 @@ class RateLimitService {
     public function markFailed(QueuedRequest $request, string $error): QueuedRequest {
         $request->setStatus(QueuedRequest::STATUS_FAILED);
         $request->setError($error);
+        $request->setAttempts(max(QueuedRequest::MAX_ATTEMPTS, $request->getAttempts()));
         $request->setProcessedAt(time());
         return $this->queuedRequestMapper->update($request);
     }
@@ -318,7 +414,7 @@ class RateLimitService {
     /**
      * Get queue statistics
      * 
-     * @return array{pending: int, processing: int, completed: int, failed: int, total: int}
+     * @return array{pending: int, processing: int, response_ready: int, completed: int, failed: int, total: int}
      */
     public function getQueueStats(): array {
         return $this->queuedRequestMapper->getQueueStats();
