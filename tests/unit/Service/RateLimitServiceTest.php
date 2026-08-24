@@ -9,6 +9,7 @@ use OCA\EducAI\Db\QueuedRequestMapper;
 use OCA\EducAI\Db\RateLimitState;
 use OCA\EducAI\Db\RateLimitStateMapper;
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\SettingsService;
 use OCP\AppFramework\Db\DoesNotExistException;
@@ -17,6 +18,32 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class RateLimitServiceTest extends TestCase {
+    public function testProcessingLeaseExceedsTheAgentHardWallClockByItsDocumentedMargin(): void {
+        $this->assertSame(
+            AgentExecutor::HARD_MAX_WALL_CLOCK_SECONDS + RateLimitService::PROCESSING_LEASE_MARGIN_SECONDS,
+            RateLimitService::PROCESSING_LEASE_SECONDS
+        );
+        $this->assertGreaterThan(
+            AgentExecutor::HARD_MAX_WALL_CLOCK_SECONDS,
+            RateLimitService::PROCESSING_LEASE_SECONDS
+        );
+
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('resetStaleProcessing')
+            ->with(RateLimitService::PROCESSING_LEASE_SECONDS, QueuedRequest::MAX_ATTEMPTS)
+            ->willReturn(0);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        $service->cleanup();
+    }
+
     public function testGetStatusReturnsSeparateChatAndEmbeddingStates(): void {
         $settings = new Settings();
         $settings->setRateLimitEnabled(true);
@@ -315,22 +342,16 @@ class RateLimitServiceTest extends TestCase {
 
     public function testMarkResponseReadyPersistsAStoredNonRetryableResponse(): void {
         $request = new QueuedRequest();
+        $request->setId(99);
         $request->setStatus(QueuedRequest::STATUS_PROCESSING);
         $request->setAttempts(2);
         $request->setError('previous retry');
 
         $queueMapper = $this->createMock(QueuedRequestMapper::class);
         $queueMapper->expects($this->once())
-            ->method('update')
-            ->with($this->callback(function (QueuedRequest $updated): bool {
-                $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $updated->getStatus());
-                $this->assertSame('Queued answer.', $updated->getResult());
-                $this->assertSame(0, $updated->getAttempts());
-                $this->assertNull($updated->getError());
-                $this->assertNull($updated->getProcessedAt());
-                return true;
-            }))
-            ->willReturnArgument(0);
+            ->method('storeResponseReady')
+            ->with(99, 2, 'Queued answer.')
+            ->willReturn(true);
 
         $service = new RateLimitService(
             $this->createMock(RateLimitStateMapper::class),
@@ -344,6 +365,107 @@ class RateLimitServiceTest extends TestCase {
 
         $this->assertSame($request, $stored);
         $this->assertFalse($stored->canRetry());
+        $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $stored->getStatus());
+        $this->assertSame('Queued answer.', $stored->getResult());
+        $this->assertSame(0, $stored->getAttempts());
+        $this->assertNull($stored->getError());
+        $this->assertNull($stored->getProcessedAt());
+    }
+
+    public function testAtomicProcessingClaimAllowsOnlyOneOwnerAndMutatesOnlyWinner(): void {
+        $first = $this->pendingRequestIdentityFixture();
+        $second = $this->pendingRequestIdentityFixture();
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->exactly(2))
+            ->method('claimProcessingAttempt')
+            ->with(99, 0, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
+            ->willReturnOnConsecutiveCalls(true, false);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        $this->assertSame($first, $service->markProcessing($first));
+        $this->assertSame(QueuedRequest::STATUS_PROCESSING, $first->getStatus());
+        $this->assertSame(1, $first->getAttempts());
+        $this->assertNotNull($first->getProcessedAt());
+
+        try {
+            $service->markProcessing($second);
+            $this->fail('The second processing owner was expected to lose the claim');
+        } catch (\LogicException $e) {
+            $this->assertSame(RateLimitService::PROCESSING_CLAIM_LOST_MESSAGE, $e->getMessage());
+        }
+        $this->assertSame(QueuedRequest::STATUS_PENDING, $second->getStatus());
+        $this->assertSame(0, $second->getAttempts());
+        $this->assertNull($second->getProcessedAt());
+    }
+
+    public function testProcessingClaimRejectsSnapshotFromBeforeOwnedRetryRelease(): void {
+        $current = $this->pendingRequestIdentityFixture();
+        $current->setAttempts(1);
+        $stale = $this->pendingRequestIdentityFixture();
+        $stale->setAttempts(1);
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->exactly(2))
+            ->method('claimProcessingAttempt')
+            ->with(99, 1, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
+            ->willReturnOnConsecutiveCalls(true, false);
+        $queueMapper->expects($this->once())
+            ->method('releaseProcessingForRetry')
+            ->with(99, 2, 'retry', QueuedRequest::MAX_ATTEMPTS)
+            ->willReturn(true);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        $service->markProcessing($current);
+        $service->markProcessingRetry($current, 'retry');
+        $this->assertSame(QueuedRequest::STATUS_PENDING, $current->getStatus());
+        $this->assertSame(2, $current->getAttempts());
+
+        try {
+            $service->markProcessing($stale);
+            $this->fail('The stale pre-retry snapshot was expected to lose the claim');
+        } catch (\LogicException $e) {
+            $this->assertSame(RateLimitService::PROCESSING_CLAIM_LOST_MESSAGE, $e->getMessage());
+        }
+        $this->assertSame(QueuedRequest::STATUS_PENDING, $stale->getStatus());
+        $this->assertSame(1, $stale->getAttempts());
+        $this->assertNull($stale->getProcessedAt());
+    }
+
+    public function testProcessingRetryIsBoundToTheOwnedAttempt(): void {
+        $request = $this->pendingRequestIdentityFixture();
+        $request->setStatus(QueuedRequest::STATUS_PROCESSING);
+        $request->setAttempts(2);
+        $request->setProcessedAt(time());
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('releaseProcessingForRetry')
+            ->with(99, 2, 'temporary lookup failure', QueuedRequest::MAX_ATTEMPTS)
+            ->willReturn(true);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        $stored = $service->markProcessingRetry($request, 'temporary lookup failure');
+
+        $this->assertSame(QueuedRequest::STATUS_PENDING, $stored->getStatus());
+        $this->assertSame(2, $stored->getAttempts());
+        $this->assertSame('temporary lookup failure', $stored->getError());
+        $this->assertNull($stored->getProcessedAt());
     }
 
     public function testFailedAtomicDeliveryClaimLeavesStaleAttemptCountUntouched(): void {
@@ -352,7 +474,7 @@ class RateLimitServiceTest extends TestCase {
         $queueMapper = $this->createMock(QueuedRequestMapper::class);
         $queueMapper->expects($this->once())
             ->method('claimResponseDeliveryAttempt')
-            ->with(99, QueuedRequest::MAX_ATTEMPTS)
+            ->with(99, 1, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
             ->willThrowException(new \RuntimeException('database unavailable'));
         $queueMapper->expects($this->never())
             ->method('findById');
@@ -375,32 +497,19 @@ class RateLimitServiceTest extends TestCase {
         $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
     }
 
-    public function testAtomicDeliveryClaimsBoundStaleWorkersToThreeAttempts(): void {
-        $storedAttempts = 0;
-        $storedStatus = QueuedRequest::STATUS_RESPONSE_READY;
+    public function testAtomicDeliveryClaimAllowsOnlyOneOwner(): void {
+        $stored = $this->readyRequestIdentityFixture();
+        $stored->setAttempts(1);
+        $stored->setStatus(QueuedRequest::STATUS_DELIVERING);
         $queueMapper = $this->createMock(QueuedRequestMapper::class);
-        $queueMapper->expects($this->exactly(4))
+        $queueMapper->expects($this->exactly(2))
             ->method('claimResponseDeliveryAttempt')
-            ->with(99, QueuedRequest::MAX_ATTEMPTS)
-            ->willReturnCallback(function () use (&$storedAttempts, &$storedStatus): bool {
-                if ($storedStatus !== QueuedRequest::STATUS_RESPONSE_READY
-                    || $storedAttempts >= QueuedRequest::MAX_ATTEMPTS
-                ) {
-                    return false;
-                }
-
-                $storedAttempts++;
-                return true;
-            });
-        $queueMapper->expects($this->exactly(3))
+            ->with(99, 0, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
+            ->willReturnOnConsecutiveCalls(true, false);
+        $queueMapper->expects($this->once())
             ->method('findById')
             ->with(99)
-            ->willReturnCallback(function () use (&$storedAttempts, &$storedStatus): QueuedRequest {
-                $stored = $this->readyRequestIdentityFixture();
-                $stored->setAttempts($storedAttempts);
-                $stored->setStatus($storedStatus);
-                return $stored;
-            });
+            ->willReturn($stored);
         $service = new RateLimitService(
             $this->createMock(RateLimitStateMapper::class),
             $queueMapper,
@@ -409,25 +518,166 @@ class RateLimitServiceTest extends TestCase {
             $this->createMock(LoggerInterface::class)
         );
 
-        $claimedAttempts = [];
-        for ($i = 0; $i < QueuedRequest::MAX_ATTEMPTS; $i++) {
-            $staleWorkerRequest = $this->readyRequestIdentityFixture();
-            $staleWorkerRequest->setAttempts(0);
-            $claimedAttempts[] = $service->markResponseDeliveryAttempt($staleWorkerRequest)->getAttempts();
-        }
 
-        $fourthStaleWorkerRequest = $this->readyRequestIdentityFixture();
-        $fourthStaleWorkerRequest->setAttempts(0);
+        $firstWorkerRequest = $this->readyRequestIdentityFixture();
+        $secondWorkerRequest = $this->readyRequestIdentityFixture();
+        $this->assertSame($stored, $service->markResponseDeliveryAttempt($firstWorkerRequest));
         try {
-            $service->markResponseDeliveryAttempt($fourthStaleWorkerRequest);
-            $this->fail('A fourth delivery claim was expected to be rejected');
+            $service->markResponseDeliveryAttempt($secondWorkerRequest);
+            $this->fail('A concurrent delivery claim was expected to be rejected');
         } catch (\LogicException $e) {
-            $this->assertSame('Queued response delivery attempt was not claimed', $e->getMessage());
+            $this->assertSame(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE, $e->getMessage());
         }
 
-        $this->assertSame([1, 2, 3], $claimedAttempts);
-        $this->assertSame(QueuedRequest::MAX_ATTEMPTS, $storedAttempts);
-        $this->assertSame(0, $fourthStaleWorkerRequest->getAttempts());
+        $this->assertSame(QueuedRequest::STATUS_DELIVERING, $stored->getStatus());
+        $this->assertSame(1, $stored->getAttempts());
+        $this->assertSame(0, $secondWorkerRequest->getAttempts());
+    }
+
+    public function testDeliveryClaimRejectsRehydratedLeaseOwnedByANewerAttempt(): void {
+        $request = $this->readyRequestIdentityFixture();
+        $request->setAttempts(0);
+        $newerLease = $this->readyRequestIdentityFixture();
+        $newerLease->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $newerLease->setAttempts(2);
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('claimResponseDeliveryAttempt')
+            ->with(99, 0, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
+            ->willReturn(true);
+        $queueMapper->expects($this->once())
+            ->method('findById')
+            ->with(99)
+            ->willReturn($newerLease);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        try {
+            $service->markResponseDeliveryAttempt($request);
+            $this->fail('A delivery lease from a newer attempt must not be adopted');
+        } catch (\LogicException $e) {
+            $this->assertSame(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE, $e->getMessage());
+        }
+        $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
+        $this->assertSame(0, $request->getAttempts());
+    }
+
+    public function testDeliveryClaimReadFailureAfterSuccessfulCasLeavesLeaseForRecovery(): void {
+        $request = $this->readyRequestIdentityFixture();
+        $request->setAttempts(0);
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('claimResponseDeliveryAttempt')
+            ->with(99, 0, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
+            ->willReturn(true);
+        $queueMapper->expects($this->once())
+            ->method('findById')
+            ->with(99)
+            ->willThrowException(new \RuntimeException('database unavailable'));
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        try {
+            $service->markResponseDeliveryAttempt($request);
+            $this->fail('Post-claim read failure was expected');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('database unavailable', $e->getMessage());
+        }
+        $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
+        $this->assertSame(0, $request->getAttempts());
+    }
+
+    public function testRetryFromOldDeliveryOwnerIsTypedAsOwnershipTransfer(): void {
+        $request = $this->readyRequestIdentityFixture();
+        $request->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $request->setAttempts(1);
+        $newerOwner = $this->readyRequestIdentityFixture();
+        $newerOwner->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $newerOwner->setAttempts(2);
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('releaseResponseDeliveryForRetry')
+            ->with(99, 1, 'HTTP 503', QueuedRequest::MAX_ATTEMPTS)
+            ->willReturn(false);
+        $queueMapper->expects($this->once())->method('findById')->with(99)->willReturn($newerOwner);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        try {
+            $service->markResponseDeliveryRetry($request, 'HTTP 503');
+            $this->fail('The old delivery owner was expected to lose retry persistence');
+        } catch (\LogicException $e) {
+            $this->assertSame(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE, $e->getMessage());
+        }
+        $this->assertSame(QueuedRequest::STATUS_DELIVERING, $request->getStatus());
+        $this->assertSame(1, $request->getAttempts());
+    }
+
+    public function testPermanentFailureFromOldDeliveryOwnerIsTypedAsOwnershipTransfer(): void {
+        $request = $this->readyRequestIdentityFixture();
+        $request->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $request->setAttempts(1);
+        $newerOwner = $this->readyRequestIdentityFixture();
+        $newerOwner->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $newerOwner->setAttempts(2);
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('failResponseDelivery')
+            ->with(99, 1, 'HTTP 400', $this->isType('int'), QueuedRequest::MAX_ATTEMPTS)
+            ->willReturn(false);
+        $queueMapper->expects($this->once())->method('findById')->with(99)->willReturn($newerOwner);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        try {
+            $service->markResponseDeliveryFailed($request, 'HTTP 400');
+            $this->fail('The old delivery owner was expected to lose failure persistence');
+        } catch (\LogicException $e) {
+            $this->assertSame(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE, $e->getMessage());
+        }
+        $this->assertSame(QueuedRequest::STATUS_DELIVERING, $request->getStatus());
+        $this->assertSame(1, $request->getAttempts());
+    }
+
+    public function testExhaustedPendingRequestsAreTerminalizedBeforeSelection(): void {
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('failExhaustedPending')
+            ->with(QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
+            ->willReturn(2);
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with('Reconciled exhausted pending queue requests', ['count' => 2]);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $logger
+        );
+
+        $this->assertSame(2, $service->failExhaustedPendingRequests());
     }
 
     public function testStateTransitionRejectsAStaleResponseReadyDeliveryClaim(): void {
@@ -436,7 +686,7 @@ class RateLimitServiceTest extends TestCase {
         $queueMapper = $this->createMock(QueuedRequestMapper::class);
         $queueMapper->expects($this->once())
             ->method('claimResponseDeliveryAttempt')
-            ->with(99, QueuedRequest::MAX_ATTEMPTS)
+            ->with(99, 0, QueuedRequest::MAX_ATTEMPTS, $this->isType('int'))
             ->willReturn(false);
         $queueMapper->expects($this->never())
             ->method('findById');
@@ -452,7 +702,7 @@ class RateLimitServiceTest extends TestCase {
             $service->markResponseDeliveryAttempt($staleWorkerRequest);
             $this->fail('A stale response-ready delivery claim was expected to be rejected');
         } catch (\LogicException $e) {
-            $this->assertSame('Queued response delivery attempt was not claimed', $e->getMessage());
+            $this->assertSame(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE, $e->getMessage());
         }
 
         $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $staleWorkerRequest->getStatus());
@@ -482,6 +732,91 @@ class RateLimitServiceTest extends TestCase {
         $this->assertFalse($failed->canRetry());
     }
 
+    public function testRetryableDeliveryReturnsOwnedResponseToDeliveryLaneWithoutResettingAttemptCount(): void {
+        $request = $this->readyRequestIdentityFixture();
+        $request->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $request->setAttempts(1);
+        $request->setProcessedAt(time());
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('releaseResponseDeliveryForRetry')
+            ->with(99, 1, 'Talk API returned retryable HTTP 503', QueuedRequest::MAX_ATTEMPTS)
+            ->willReturn(true);
+
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        $stored = $service->markResponseDeliveryRetry($request, 'Talk API returned retryable HTTP 503');
+
+        $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $stored->getStatus());
+        $this->assertSame(1, $stored->getAttempts());
+        $this->assertSame('Talk API returned retryable HTTP 503', $stored->getError());
+        $this->assertNull($stored->getProcessedAt());
+    }
+
+    public function testRetryableDeliveryBecomesTerminalWhenAttemptBudgetIsExhausted(): void {
+        $request = $this->readyRequestIdentityFixture();
+        $request->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $request->setAttempts(QueuedRequest::MAX_ATTEMPTS);
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->never())->method('releaseResponseDeliveryForRetry');
+        $queueMapper->expects($this->once())
+            ->method('failResponseDelivery')
+            ->with(
+                99,
+                QueuedRequest::MAX_ATTEMPTS,
+                'Talk delivery attempts exhausted after: Talk API returned retryable HTTP 503',
+                $this->isType('int'),
+                QueuedRequest::MAX_ATTEMPTS
+            )
+            ->willReturn(true);
+
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $this->createMock(LoggerInterface::class)
+        );
+
+        $stored = $service->markResponseDeliveryRetry($request, 'Talk API returned retryable HTTP 503');
+
+        $this->assertSame(QueuedRequest::STATUS_FAILED, $stored->getStatus());
+        $this->assertSame(QueuedRequest::MAX_ATTEMPTS, $stored->getAttempts());
+        $this->assertStringStartsWith('Talk delivery attempts exhausted', (string)$stored->getError());
+    }
+
+    public function testStaleDeliveryRecoveryUsesLeaseCutoffAndReportsRecoveredRows(): void {
+        $before = time();
+        $queueMapper = $this->createMock(QueuedRequestMapper::class);
+        $queueMapper->expects($this->once())
+            ->method('recoverStaleResponseDeliveries')
+            ->willReturnCallback(function (int $cutoff, int $recoveredAt, int $maxAttempts) use ($before): int {
+                $this->assertGreaterThanOrEqual($before, $recoveredAt);
+                $this->assertSame(120, $recoveredAt - $cutoff);
+                $this->assertSame(QueuedRequest::MAX_ATTEMPTS, $maxAttempts);
+                return 2;
+            });
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with('Recovered stale queued Talk deliveries', ['count' => 2, 'lease_seconds' => 120]);
+        $service = new RateLimitService(
+            $this->createMock(RateLimitStateMapper::class),
+            $queueMapper,
+            $this->createMock(SettingsService::class),
+            $this->createMock(IJobList::class),
+            $logger
+        );
+
+        $this->assertSame(2, $service->recoverStaleResponseDeliveries());
+    }
+
     public function testLateDeliveryFailureReturnsCompletedStateWithoutOverwritingIt(): void {
         $staleFailure = $this->readyRequestIdentityFixture();
         $completed = $this->readyRequestIdentityFixture();
@@ -491,7 +826,7 @@ class RateLimitServiceTest extends TestCase {
         $queueMapper = $this->createMock(QueuedRequestMapper::class);
         $queueMapper->expects($this->once())
             ->method('failResponseDelivery')
-            ->with(99, 'Late Talk failure', $this->isType('int'), QueuedRequest::MAX_ATTEMPTS)
+            ->with(99, 0, 'Late Talk failure', $this->isType('int'), QueuedRequest::MAX_ATTEMPTS)
             ->willReturn(false);
         $queueMapper->expects($this->once())
             ->method('findById')
@@ -547,16 +882,17 @@ class RateLimitServiceTest extends TestCase {
         $this->assertNotSame($first->getDeliveryReferenceId(), $different->getDeliveryReferenceId());
     }
 
-    public function testFailedCompletionPersistenceRestoresResponseReadyState(): void {
+    public function testFailedCompletionPersistenceLeavesOwnedDeliveryForLeaseRecovery(): void {
         $request = new QueuedRequest();
         $request->setId(99);
-        $request->setStatus(QueuedRequest::STATUS_RESPONSE_READY);
+        $request->setStatus(QueuedRequest::STATUS_DELIVERING);
+        $request->setAttempts(1);
         $request->setResult('Queued answer.');
 
         $queueMapper = $this->createMock(QueuedRequestMapper::class);
         $queueMapper->expects($this->once())
             ->method('completeResponseDelivery')
-            ->with(99, 'Queued answer.', $this->isType('int'))
+            ->with(99, 1, 'Queued answer.', $this->isType('int'))
             ->willThrowException(new \RuntimeException('database unavailable'));
         $queueMapper->expects($this->never())
             ->method('findById');
@@ -576,7 +912,7 @@ class RateLimitServiceTest extends TestCase {
             $this->assertSame('database unavailable', $e->getMessage());
         }
 
-        $this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
+        $this->assertSame(QueuedRequest::STATUS_DELIVERING, $request->getStatus());
         $this->assertSame('Queued answer.', $request->getResult());
         $this->assertNull($request->getProcessedAt());
     }
@@ -618,6 +954,15 @@ class RateLimitServiceTest extends TestCase {
         $request->setCreatedAt(1770000000);
         $request->setStatus(QueuedRequest::STATUS_RESPONSE_READY);
         $request->setResult('Queued answer.');
+        return $request;
+    }
+
+    private function pendingRequestIdentityFixture(): QueuedRequest {
+        $request = new QueuedRequest();
+        $request->setId(99);
+        $request->setStatus(QueuedRequest::STATUS_PENDING);
+        $request->setAttempts(0);
+        $request->setCreatedAt(1770000000);
         return $request;
     }
 }

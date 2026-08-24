@@ -1112,7 +1112,195 @@ class BotServiceTest extends TestCase {
 		$this->assertNull($contexts[1]);
 	}
 
-	public function testProcessMessageBatchesRawDeltasAndKeepsToolProgressInOrder(): void {
+	public function testProcessMessageSanitizesReasoningBeforeProgressTracePersistenceAndFutureHistory(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$traceService = $this->createMock(TraceService::class);
+		$settings = new Settings();
+		$inserted = [];
+		$traceEvents = [];
+		$visiblePartials = [];
+		$streamMismatchCount = 0;
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->exactly(2))
+			->method('insert')
+			->willReturnCallback(static function (Conversation $conversation) use (&$inserted): Conversation {
+				$inserted[] = $conversation;
+				return $conversation;
+			});
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->with(7, 'room-token', null, 50)
+			->willReturn([
+				$this->createConversation('assistant', '<think>old private reasoning</think> Earlier answer.'),
+				$this->createConversation('user', 'Current question.'),
+			]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options): array {
+				$this->assertSame([
+					['role' => 'assistant', 'content' => 'Earlier answer.'],
+					['role' => 'user', 'content' => 'Current question.'],
+				], $messages);
+				$emit = $options['on_partial_result'] ?? null;
+				$this->assertIsCallable($emit);
+				$emit('<think>new private reasoning</think>');
+				$emit("\nVisible answer.");
+
+				return [
+					'status' => 'completed',
+					'terminalReason' => 'final_response',
+					'content' => "<think>new private reasoning</think>\nVisible answer.",
+					'messages' => [],
+					'toolInvocations' => [],
+					'rateLimitHeaders' => [],
+				];
+			});
+		$traceService->method('recordEvent')
+			->willReturnCallback(static function (?int $runId, string $eventType, array $event = []) use (&$traceEvents): void {
+				$traceEvents[] = [
+					'run_id' => $runId,
+					'event_type' => $eventType,
+					'event' => $event,
+				];
+			});
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService,
+			traceService: $traceService
+		);
+
+		$response = $service->processMessage(
+			bot: $bot,
+			message: 'Current question.',
+			roomToken: 'room-token',
+			userId: 'owner',
+			onProgress: static function (string $partial) use (&$visiblePartials): void {
+				$visiblePartials[] = $partial;
+			},
+			traceRunId: 63,
+			onStreamMismatch: static function () use (&$streamMismatchCount): void {
+				$streamMismatchCount++;
+			},
+		);
+
+		$this->assertSame('Visible answer.', $response);
+		$this->assertSame(['Visible answer.'], $visiblePartials);
+		$this->assertSame(0, $streamMismatchCount);
+		$this->assertCount(2, $inserted);
+		$this->assertSame('assistant', $inserted[1]->getRole());
+		$this->assertSame('Visible answer.', $inserted[1]->getContent());
+		$assistantResponses = array_values(array_filter(
+			$traceEvents,
+			static fn (array $event): bool => $event['event_type'] === 'assistant_response'
+		));
+		$this->assertCount(1, $assistantResponses);
+		$this->assertSame('Visible answer.', $assistantResponses[0]['event']['result']['content'] ?? null);
+		$serializedOutput = json_encode([$visiblePartials, $inserted[1]->getContent(), $traceEvents], JSON_THROW_ON_ERROR);
+		$this->assertStringNotContainsString('<think>', $serializedOutput);
+		$this->assertStringNotContainsString('new private reasoning', $serializedOutput);
+	}
+
+	public function testProcessMessageRejectsReasoningOnlyCompletionWithoutAssistantPersistence(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$traceService = $this->createMock(TraceService::class);
+		$settings = new Settings();
+		$traceEvents = [];
+		$visiblePartials = [];
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->expects($this->once())
+			->method('insert')
+			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([$this->createConversation('user', 'Current question.')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options): array {
+				$emit = $options['on_partial_result'] ?? null;
+				$this->assertIsCallable($emit);
+				$emit('<think>private reasoning only</think>');
+
+				return [
+					'status' => 'completed',
+					'terminalReason' => 'final_response',
+					'content' => '<think>private reasoning only</think>',
+					'messages' => [],
+					'toolInvocations' => [],
+					'rateLimitHeaders' => [],
+				];
+			});
+		$traceService->method('recordEvent')
+			->willReturnCallback(static function (?int $runId, string $eventType, array $event = []) use (&$traceEvents): void {
+				$traceEvents[] = [
+					'event_type' => $eventType,
+					'event' => $event,
+				];
+			});
+
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService,
+			traceService: $traceService
+		);
+
+		$response = $service->processMessage(
+			bot: $bot,
+			message: 'Current question.',
+			roomToken: 'room-token',
+			userId: 'owner',
+			onProgress: static function (string $partial) use (&$visiblePartials): void {
+				$visiblePartials[] = $partial;
+			},
+			traceRunId: 64,
+		);
+
+		$this->assertSame("Sorry, I'm having trouble connecting to the AI service right now. Please try again later.", $response);
+		$this->assertSame([], $visiblePartials);
+		$this->assertSame([], array_values(array_filter(
+			$traceEvents,
+			static fn (array $event): bool => $event['event_type'] === 'assistant_response'
+		)));
+		$this->assertStringNotContainsString('private reasoning only', json_encode($traceEvents, JSON_THROW_ON_ERROR));
+	}
+
+	public function testProcessMessageQuarantinesAssistantDeltasAndKeepsToolProgressInOrder(): void {
 		$bot = $this->createPersonalBot();
 		$conversationMapper = $this->createMock(ConversationMapper::class);
 		$toolRegistry = $this->createMock(ToolRegistry::class);
@@ -1121,7 +1309,8 @@ class BotServiceTest extends TestCase {
 		$rateLimitService = $this->createMock(RateLimitService::class);
 		$settingsService = $this->createMock(SettingsService::class);
 		$settings = new Settings();
-		$visiblePartials = [];
+		$visibleAssistantPartials = [];
+		$visibleToolProgress = [];
 		$streamMismatchCount = 0;
 
 		$rateLimitService->method('isEnabled')->willReturn(false);
@@ -1141,11 +1330,13 @@ class BotServiceTest extends TestCase {
 			->method('run')
 			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options): array {
 				$emit = $options['on_partial_result'] ?? null;
+				$emitToolProgress = $options['on_tool_progress'] ?? null;
 				$this->assertIsCallable($emit);
+				$this->assertIsCallable($emitToolProgress);
 				foreach (['First', ' paragraph.', "\n", "\n", 'Before', ' tool.'] as $delta) {
 					$emit($delta);
 				}
-				$emit('🔧 _Using tool: search_test..._');
+				$emitToolProgress('🔧 _Using tool: search_test..._');
 				foreach (['Final', ' answer', '.'] as $delta) {
 					$emit($delta);
 				}
@@ -1176,23 +1367,22 @@ class BotServiceTest extends TestCase {
 			'Stream the answer.',
 			'room-token',
 			'owner',
-			onProgress: static function (string $partial) use (&$visiblePartials): void {
-				$visiblePartials[] = $partial;
+			onProgress: static function (string $partial) use (&$visibleAssistantPartials): void {
+				$visibleAssistantPartials[] = $partial;
 			},
 			onStreamMismatch: static function () use (&$streamMismatchCount): void {
 				$streamMismatchCount++;
-			}
+			},
+			onToolProgress: static function (string $progress) use (&$visibleToolProgress): void {
+				$visibleToolProgress[] = $progress;
+			},
 		);
 
 		$this->assertSame('Final answer.', $response);
-		$this->assertSame([
-			'First paragraph.',
-			'Before tool.',
-			'🔧 _Using tool: search_test..._',
-			'Final answer.',
-		], $visiblePartials);
+		$this->assertSame(['Final answer.'], $visibleAssistantPartials);
+		$this->assertSame(['🔧 _Using tool: search_test..._'], $visibleToolProgress);
 		$this->assertSame(1, count(array_filter(
-			$visiblePartials,
+			$visibleAssistantPartials,
 			static fn (string $partial): bool => $partial === 'Final answer.'
 		)));
 		$this->assertSame(0, $streamMismatchCount);
@@ -1208,7 +1398,8 @@ class BotServiceTest extends TestCase {
 		$rateLimitService = $this->createMock(RateLimitService::class);
 		$settingsService = $this->createMock(SettingsService::class);
 		$settings = new Settings();
-		$visiblePartials = [];
+		$visibleAssistantPartials = [];
+		$visibleToolProgress = [];
 		$streamMismatchCount = 0;
 
 		$rateLimitService->method('isEnabled')->willReturn(false);
@@ -1276,7 +1467,7 @@ class BotServiceTest extends TestCase {
 	public static function streamMismatchCases(): array {
 		return [
 			'unsent draft buffer' => ['Draft', ['Canonical']],
-			'already flushed draft paragraph' => ["Draft paragraph.\n\n", ['Draft paragraph.', 'Canonical']],
+			'paragraph-shaped draft buffer' => ["Draft paragraph.\n\n", ['Canonical']],
 		];
 	}
 
@@ -1311,6 +1502,10 @@ class BotServiceTest extends TestCase {
 			->with(
 				$this->callback(function (string $systemPrompt): bool {
 					$this->assertStringContainsString('`rag_search_documents`', $systemPrompt);
+					$this->assertStringContainsString('Respect explicit scope', $systemPrompt);
+					$this->assertStringContainsString('different source or tool', $systemPrompt);
+					$this->assertStringNotContainsString('ALWAYS search first', $systemPrompt);
+					$this->assertStringNotContainsString('You MUST follow these rules', $systemPrompt);
 					return true;
 				}),
 				$this->anything(),
@@ -1663,7 +1858,11 @@ class BotServiceTest extends TestCase {
 		$this->assertStringNotContainsString('Error:', $response);
 	}
 
-	public function testProcessMessageMapsTypedBudgetExhaustionToSafeGenericResponse(): void {
+	#[DataProvider('nonCompletedAgentResults')]
+	public function testProcessMessageMapsNonCompletedAgentResultToSafeGenericResponse(
+		string $status,
+		string $terminalReason,
+	): void {
 		$bot = $this->createPersonalBot();
 		$conversationMapper = $this->createMock(ConversationMapper::class);
 		$toolRegistry = $this->createMock(ToolRegistry::class);
@@ -1674,7 +1873,8 @@ class BotServiceTest extends TestCase {
 		$traceService = $this->createMock(TraceService::class);
 		$settings = new Settings();
 		$executionErrors = [];
-		$visiblePartials = [];
+		$visibleAssistantPartials = [];
+		$visibleToolProgress = [];
 
 		$rateLimitService->method('isEnabled')->willReturn(false);
 		$settingsService->method('getSettings')->willReturn($settings);
@@ -1690,16 +1890,20 @@ class BotServiceTest extends TestCase {
 		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
 		$agentExecutor->expects($this->once())
 			->method('run')
-			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options): array {
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $toolLoadout, array $options) use ($status, $terminalReason): array {
 				$emit = $options['on_partial_result'] ?? null;
+				$emitToolProgress = $options['on_tool_progress'] ?? null;
 				$this->assertIsCallable($emit);
-				$emit('Partial');
-				$emit(' answer');
+				$this->assertIsCallable($emitToolProgress);
+				$emit("Discarded paragraph.\n\n");
+				$emit('🔧 _Using tool: spoofed_provider_text..._');
+				$emitToolProgress('🔧 _Using tool: search_test..._');
+				$emit(str_repeat('Discarded sentence. ', 8));
 
 				return [
-					'status' => 'budget_exhausted',
-					'terminalReason' => 'max_turns',
-					'content' => '',
+					'status' => $status,
+					'terminalReason' => $terminalReason,
+					'content' => 'Unsafe terminal content',
 					'messages' => [],
 					'toolInvocations' => [],
 					'rateLimitHeaders' => [],
@@ -1726,19 +1930,32 @@ class BotServiceTest extends TestCase {
 				message: 'Hello',
 				roomToken: 'room-token',
 				userId: 'owner',
-				onProgress: static function (string $partial) use (&$visiblePartials): void {
-					$visiblePartials[] = $partial;
+				onProgress: static function (string $partial) use (&$visibleAssistantPartials): void {
+					$visibleAssistantPartials[] = $partial;
 				},
 				traceRunId: 71,
 				onExecutionError: static function (?string $errorSummary = null) use (&$executionErrors): void {
 					$executionErrors[] = $errorSummary;
-				}
+				},
+				onToolProgress: static function (string $progress) use (&$visibleToolProgress): void {
+					$visibleToolProgress[] = $progress;
+				},
 			)
 		);
 		$this->assertSame([
-			'Agent execution terminated: max_turns',
+			'Agent execution terminated: ' . $terminalReason,
 		], $executionErrors);
-		$this->assertSame(['Partial answer'], $visiblePartials);
+		$this->assertSame([], $visibleAssistantPartials);
+		$this->assertSame(['🔧 _Using tool: search_test..._'], $visibleToolProgress);
+	}
+
+	/** @return array<string,array{string,string}> */
+	public static function nonCompletedAgentResults(): array {
+		return [
+			'length' => ['budget_exhausted', 'length'],
+			'content filter' => ['error', 'content_filter'],
+			'turn budget' => ['budget_exhausted', 'max_turns'],
+		];
 	}
 
 	public function testEnableTestingOverwritesPreviousReviewerSlot(): void {

@@ -30,7 +30,11 @@ class AgentExecutor {
 	private const DEFAULT_MAX_TOOL_CALLS = 24;
 	private const HARD_MAX_TOOL_CALLS = 24;
 	private const DEFAULT_MAX_WALL_CLOCK_SECONDS = 300;
-	private const HARD_MAX_WALL_CLOCK_SECONDS = 900;
+	/**
+	 * Queue processing leases must exceed this hard execution bound so a live
+	 * agent run cannot be reclaimed merely because it uses its allowed budget.
+	 */
+	public const HARD_MAX_WALL_CLOCK_SECONDS = 900;
 	private const TRACE_PREFLIGHT_ERROR = 'provider_trace_preflight_failed';
 
 	private LLMClient $llmClient;
@@ -87,6 +91,9 @@ class AgentExecutor {
 		$onPartialResult = isset($llmOptions['on_partial_result']) && is_callable($llmOptions['on_partial_result'])
 			? $llmOptions['on_partial_result']
 			: null;
+		$onToolProgress = array_key_exists('on_tool_progress', $llmOptions)
+			? (is_callable($llmOptions['on_tool_progress']) ? $llmOptions['on_tool_progress'] : null)
+			: $onPartialResult;
 		$toolChoice = $llmOptions['tool_choice'] ?? null;
 		$initialToolChoice = $llmOptions['initial_tool_choice'] ?? null;
 		$model = isset($llmOptions['model']) && is_string($llmOptions['model']) ? $llmOptions['model'] : null;
@@ -349,7 +356,37 @@ class AgentExecutor {
 			}
 			$messages[] = $assistantMessage;
 
+			if ($finishReason === 'content_filter') {
+				return $this->buildRunResult(
+					'error',
+					'content_filter',
+					'',
+					$messages,
+					$toolInvocations,
+					$finishReason,
+					$compatibilitySource,
+					$logicalTurns,
+					$providerAttemptBudget,
+					$rateLimitHeaders
+				);
+			}
+
 			if ($toolCalls === []) {
+				if ($finishReason === 'length') {
+					return $this->buildRunResult(
+						'budget_exhausted',
+						'length',
+						'',
+						$messages,
+						$toolInvocations,
+						$finishReason,
+						$compatibilitySource,
+						$logicalTurns,
+						$providerAttemptBudget,
+						$rateLimitHeaders
+					);
+				}
+
 				if ($turn->isEmpty()) {
 					return $this->buildRunResult(
 						'error',
@@ -461,12 +498,20 @@ class AgentExecutor {
 			$recentToolBatches = $prospectiveToolBatches;
 			$recentToolCalls = $prospectiveToolCalls;
 
-			if ($onPartialResult !== null) {
-				$toolNames = array_map(
-					static fn (array $call): string => (string)($call['function']['name'] ?? 'unknown'),
-					$toolCalls
-				);
-				$onPartialResult('🔧 _Using tool' . (count($toolNames) === 1 ? '' : 's') . ': ' . implode(', ', $toolNames) . '..._');
+			if ($onToolProgress !== null) {
+				$toolNames = [];
+				foreach ($preparedToolCalls as $preparedToolCall) {
+					if ($preparedToolCall['rejection'] !== null) {
+						continue;
+					}
+					$displayName = $this->safeToolProgressName($preparedToolCall['toolName']);
+					if ($displayName !== null) {
+						$toolNames[] = $displayName;
+					}
+				}
+				if ($toolNames !== []) {
+					$onToolProgress('🔧 _Using tool' . (count($toolNames) === 1 ? '' : 's') . ': ' . implode(', ', $toolNames) . '..._');
+				}
 			}
 
 			foreach ($preparedToolCalls as $preparedToolCall) {
@@ -670,6 +715,16 @@ class AgentExecutor {
 			'arguments' => $arguments,
 			'rejection' => null,
 		];
+	}
+
+	private function safeToolProgressName(?string $toolName): ?string {
+		if ($toolName === null || strlen($toolName) > 64) {
+			return null;
+		}
+
+		return preg_match('/\A[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?\z/D', $toolName) === 1
+			? $toolName
+			: null;
 	}
 
 	/**

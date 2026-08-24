@@ -959,7 +959,62 @@ class LLMClientTest extends TestCase {
 		$this->assertArrayNotHasKey('temperature', $calls[2]);
 	}
 
-	public function testStreamChatCompletionRetriesFallbackOnServerErrorBeforeFirstChunk(): void {
+	public function testInvalidModelHttpErrorsDoNotTriggerStreamingCompatibilityRetries(): void {
+		foreach ([400, 422] as $status) {
+			$settings = new Settings();
+			$settings->setApiProvider('custom');
+			$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+			$settings->setDefaultModel('primary:stale-model');
+			$settings->setLlmStreamTimeout(240);
+
+			$settingsService = $this->createMock(SettingsService::class);
+			$settingsService->method('getSettings')->willReturn($settings);
+			$settingsService->method('getApiKey')->willReturn('primary-key');
+			$settingsService->method('normalizePositiveInteger')
+				->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->once())
+				->method('post')
+				->willReturn($this->rawResponse('{"error":{"message":"Invalid model name passed in model=stale-model"}}', $status));
+
+			$events = [];
+			$budget = new ProviderAttemptBudget(4);
+			$llmClient = new LLMClient(
+				$this->clientService($client),
+				$settingsService,
+				$this->logger(),
+				null,
+				$this->recordingTraceService($events),
+			);
+
+			try {
+				$llmClient->streamChatCompletion(
+					'system',
+					[['role' => 'user', 'content' => 'hi']],
+					static function (): void {},
+					null,
+					['provider_attempt_budget' => $budget, 'trace_run_id' => 71],
+				);
+				$this->fail('Expected the invalid model request to fail');
+			} catch (\Exception $e) {
+				$this->assertSame('Failed to stream response from AI', $e->getMessage());
+				$this->assertSame($status, $e->getPrevious()?->getCode());
+			}
+
+			$this->assertSame(1, $budget->getConsumed());
+			$attemptEvents = array_values(array_filter(
+				$events,
+				static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
+			));
+			$this->assertCount(1, $attemptEvents);
+			$this->assertSame('initial', $attemptEvents[0]['event']['payload']['reason']);
+			$this->assertSame('error', $attemptEvents[0]['event']['status']);
+			$this->assertSame($status, $attemptEvents[0]['event']['payload']['http_status']);
+		}
+	}
+
+	public function testStreamChatCompletionRetriesSelectedServerErrorSynchronouslyBeforeFallback(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
@@ -977,12 +1032,20 @@ class LLMClientTest extends TestCase {
 
 		$calls = [];
 		$client = $this->createMock(IClient::class);
-		$client->expects($this->exactly(2))
+		$client->expects($this->exactly(3))
 			->method('post')
 			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
-				$calls[] = [$uri, $options['json']['model'] ?? null, $options['headers']['Authorization'] ?? null];
+				$calls[] = [
+					'uri' => $uri,
+					'model' => $options['json']['model'] ?? null,
+					'authorization' => $options['headers']['Authorization'] ?? null,
+					'streaming' => !empty($options['stream']),
+				];
 				if (count($calls) === 1) {
 					return $this->rawResponse('{"error":"temporary provider failure"}', 500);
+				}
+				if (count($calls) === 2) {
+					return $this->jsonResponse(['error' => 'temporary provider failure'], 503);
 				}
 				return $this->rawResponse("data: {\"choices\":[{\"delta\":{\"content\":\"fallback answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
 			});
@@ -998,18 +1061,132 @@ class LLMClientTest extends TestCase {
 		$this->assertSame('fallback answer', $result['content']);
 		$this->assertSame('secondary:model-b', $result['model_reference']);
 		$this->assertSame([
-			['https://primary.example.invalid/v1/chat/completions', 'model-a', 'Bearer primary-key'],
-			['https://secondary.example.invalid/v1/chat/completions', 'model-b', 'Bearer secondary-key'],
+			[
+				'uri' => 'https://primary.example.invalid/v1/chat/completions',
+				'model' => 'model-a',
+				'authorization' => 'Bearer primary-key',
+				'streaming' => true,
+			],
+			[
+				'uri' => 'https://primary.example.invalid/v1/chat/completions',
+				'model' => 'model-a',
+				'authorization' => 'Bearer primary-key',
+				'streaming' => false,
+			],
+			[
+				'uri' => 'https://secondary.example.invalid/v1/chat/completions',
+				'model' => 'model-b',
+				'authorization' => 'Bearer secondary-key',
+				'streaming' => true,
+			],
 		], $calls);
 	}
 
-	public function testSendChatCompletionRetriesFallbackWithReasoningParametersWhenClassicRejected(): void {
+	public function testSelectedStreamServerErrorRetriesSynchronouslyWithBudgetAndTrace(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
 		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
-		$settings->setDefaultModel('primary:qwen3-30b');
-		$settings->setFallbackModel('secondary:gpt-5.6-luna');
+		$settings->setDefaultModel('primary:model-a');
+		$settings->setFallbackModel('secondary:model-b');
+		$settings->setLlmStreamTimeout(240);
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
+				$calls[] = [
+					'uri' => $uri,
+					'payload_stream' => $options['json']['stream'] ?? null,
+					'request_stream' => $options['stream'] ?? null,
+				];
+				if (count($calls) === 1) {
+					return $this->rawResponse('{"error":"temporary provider failure"}', 500);
+				}
+
+				return $this->jsonResponse([
+					'model' => 'model-a',
+					'choices' => [[
+						'message' => ['content' => 'selected sync answer'],
+						'finish_reason' => 'stop',
+					]],
+				]);
+			});
+
+		$events = [];
+		$budget = new ProviderAttemptBudget(3);
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger(),
+			null,
+			$this->recordingTraceService($events),
+		);
+
+		$result = $llmClient->streamChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			static function (): void {},
+			null,
+			['provider_attempt_budget' => $budget, 'trace_run_id' => 72],
+		);
+
+		$this->assertSame('selected sync answer', $result['content']);
+		$this->assertSame('primary:model-a', $result['model_reference']);
+		$this->assertSame([
+			[
+				'uri' => 'https://primary.example.invalid/v1/chat/completions',
+				'payload_stream' => true,
+				'request_stream' => true,
+			],
+			[
+				'uri' => 'https://primary.example.invalid/v1/chat/completions',
+				'payload_stream' => null,
+				'request_stream' => null,
+			],
+		], $calls);
+		$this->assertSame(2, $budget->getConsumed());
+
+		$attemptEvents = array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
+		));
+		$this->assertCount(2, $attemptEvents);
+		$this->assertSame(['initial', 'stream_to_sync_retry'], array_map(
+			static fn (array $event): string => $event['event']['payload']['reason'],
+			$attemptEvents
+		));
+		$this->assertSame(['error', 'ok'], array_map(
+			static fn (array $event): string => $event['event']['status'],
+			$attemptEvents
+		));
+		$this->assertSame([true, false], array_map(
+			static fn (array $event): bool => $event['event']['payload']['streaming'],
+			$attemptEvents
+		));
+		$this->assertSame(['selected', 'selected'], array_map(
+			static fn (array $event): string => $event['event']['payload']['route'],
+			$attemptEvents
+		));
+	}
+
+	public function testFallbackStreamServerErrorRetriesFallbackSynchronouslyWithBudgetAndTrace(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:model-a');
+		$settings->setFallbackModel('secondary:model-b');
+		$settings->setLlmStreamTimeout(240);
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
@@ -1027,13 +1204,202 @@ class LLMClientTest extends TestCase {
 				$calls[] = [
 					'uri' => $uri,
 					'model' => $options['json']['model'] ?? null,
+					'payload_stream' => $options['json']['stream'] ?? null,
+					'request_stream' => $options['stream'] ?? null,
+				];
+				if (count($calls) === 1) {
+					throw new \Exception('cURL error 7: Failed to connect');
+				}
+				if (count($calls) === 2) {
+					return $this->rawResponse('{"error":"temporary fallback stream failure"}', 502);
+				}
+
+				return $this->jsonResponse([
+					'model' => 'model-b',
+					'choices' => [[
+						'message' => ['content' => 'fallback sync answer'],
+						'finish_reason' => 'stop',
+					]],
+				]);
+			});
+
+		$events = [];
+		$observedDeltas = [];
+		$budget = new ProviderAttemptBudget(3);
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger(),
+			null,
+			$this->recordingTraceService($events),
+		);
+
+		$result = $llmClient->streamChatCompletion(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+			null,
+			['provider_attempt_budget' => $budget, 'trace_run_id' => 73],
+		);
+
+		$this->assertSame('fallback sync answer', $result['content']);
+		$this->assertSame('secondary:model-b', $result['model_reference']);
+		$this->assertSame([], $observedDeltas);
+		$this->assertSame(3, $budget->getConsumed());
+		$this->assertSame([
+			['https://primary.example.invalid/v1/chat/completions', 'model-a', true, true],
+			['https://secondary.example.invalid/v1/chat/completions', 'model-b', true, true],
+			['https://secondary.example.invalid/v1/chat/completions', 'model-b', null, null],
+		], array_map(
+			static fn (array $call): array => [
+				$call['uri'],
+				$call['model'],
+				$call['payload_stream'],
+				$call['request_stream'],
+			],
+			$calls
+		));
+
+		$attemptEvents = array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
+		));
+		$this->assertCount(3, $attemptEvents);
+		$this->assertSame([1, 2, 3], array_map(
+			static fn (array $event): int => $event['event']['payload']['attempt'],
+			$attemptEvents
+		));
+		$this->assertSame(['selected', 'fallback', 'fallback'], array_map(
+			static fn (array $event): string => $event['event']['payload']['route'],
+			$attemptEvents
+		));
+		$this->assertSame(['initial', 'initial', 'stream_to_sync_retry'], array_map(
+			static fn (array $event): string => $event['event']['payload']['reason'],
+			$attemptEvents
+		));
+		$this->assertSame([true, true, false], array_map(
+			static fn (array $event): bool => $event['event']['payload']['streaming'],
+			$attemptEvents
+		));
+		$this->assertSame(['error', 'error', 'ok'], array_map(
+			static fn (array $event): string => $event['event']['status'],
+			$attemptEvents
+		));
+		$this->assertArrayNotHasKey('fallback_cause', $attemptEvents[0]['event']['payload']);
+		$this->assertSame('network', $attemptEvents[1]['event']['payload']['fallback_cause']);
+		$this->assertSame('network', $attemptEvents[2]['event']['payload']['fallback_cause']);
+	}
+
+	public function testFallbackRouteDoesNotRetrySynchronouslyAfterPublicDelta(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:model-a');
+		$settings->setFallbackModel('secondary:model-b');
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$posts = 0;
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function () use (&$posts): IResponse {
+				$posts++;
+				if ($posts === 1) {
+					throw new \Exception('cURL error 7: Failed to connect');
+				}
+
+				return $this->rawResponse(
+					"data: {\"choices\":[{\"delta\":{\"content\":\"public fallback delta\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+				);
+			});
+
+		$budget = new ProviderAttemptBudget(3);
+		$observedDeltas = [];
+		$llmClient = new LLMClient($this->clientService($client), $settingsService, $this->logger());
+
+		try {
+			$llmClient->streamChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				static function (array $delta) use (&$observedDeltas): void {
+					$observedDeltas[] = $delta;
+					throw new \Exception('consumer failed after public fallback delta', 500);
+				},
+				null,
+				['provider_attempt_budget' => $budget],
+			);
+			$this->fail('Expected the callback exception to fail the fallback stream');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to stream response from AI', $e->getMessage());
+			$this->assertSame('consumer failed after public fallback delta', $e->getPrevious()?->getMessage());
+		}
+
+		$this->assertSame([['content' => 'public fallback delta']], $observedDeltas);
+		$this->assertSame(2, $budget->getConsumed());
+	}
+
+	public function testStreamChatCompletionDoesNotRetrySynchronouslyAfterPublicDelta(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->rawResponse(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"public delta\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+			));
+
+		$llmClient = $this->chatLlmClient($client);
+
+		try {
+			$llmClient->streamChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				static function (): void {
+					throw new \Exception('consumer failed after public delta', 500);
+				},
+			);
+			$this->fail('Expected the callback exception to fail the stream');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to stream response from AI', $e->getMessage());
+			$this->assertSame('consumer failed after public delta', $e->getPrevious()?->getMessage());
+		}
+	}
+
+	public function testSendChatCompletionUsesReasoningParametersOnFirstGpt5FallbackAttempt(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:qwen3-30b');
+		$settings->setFallbackModel('secondary:gpt-5.6-luna');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
+				$calls[] = [
+					'uri' => $uri,
+					'model' => $options['json']['model'] ?? null,
 					'payload' => $options['json'],
 				];
 				if (count($calls) === 1) {
 					throw new \Exception('cURL error 28: Operation timed out');
-				}
-				if (count($calls) === 2) {
-					return $this->jsonResponse(['error' => 'gpt-5 models don\'t support temperature'], 400);
 				}
 				return $this->jsonResponse([
 					'model' => 'gpt-5.6-luna',
@@ -1063,14 +1429,12 @@ class LLMClientTest extends TestCase {
 		$this->assertSame(0.7, $calls[0]['payload']['temperature'] ?? null);
 		$this->assertSame('https://secondary.example.invalid/v1/chat/completions', $calls[1]['uri']);
 		$this->assertSame('gpt-5.6-luna', $calls[1]['model']);
-		$this->assertSame(0.7, $calls[1]['payload']['temperature'] ?? null);
-		$this->assertArrayNotHasKey('max_completion_tokens', $calls[1]['payload']);
-		$this->assertSame(800, $calls[2]['payload']['max_completion_tokens'] ?? null);
-		$this->assertArrayNotHasKey('temperature', $calls[2]['payload']);
-		$this->assertArrayNotHasKey('max_tokens', $calls[2]['payload']);
+		$this->assertSame(800, $calls[1]['payload']['max_completion_tokens'] ?? null);
+		$this->assertArrayNotHasKey('temperature', $calls[1]['payload']);
+		$this->assertArrayNotHasKey('max_tokens', $calls[1]['payload']);
 	}
 
-	public function testStreamChatCompletionRetriesFallbackWithReasoningParametersWhenClassicRejected(): void {
+	public function testStreamChatCompletionUsesReasoningParametersOnFirstGpt5FallbackAttempt(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
@@ -1088,7 +1452,7 @@ class LLMClientTest extends TestCase {
 
 		$calls = [];
 		$client = $this->createMock(IClient::class);
-		$client->expects($this->exactly(3))
+		$client->expects($this->exactly(2))
 			->method('post')
 			->willReturnCallback(function (string $uri, array $options) use (&$calls): IResponse {
 				$calls[] = [
@@ -1097,10 +1461,7 @@ class LLMClientTest extends TestCase {
 					'payload' => $options['json'],
 				];
 				if (count($calls) === 1) {
-					return $this->rawResponse('{"error":"temporary provider failure"}', 500);
-				}
-				if (count($calls) === 2) {
-					return $this->rawResponse('{"error":"gpt-5 models don\'t support temperature"}', 400);
+					throw new \Exception('cURL error 28: Operation timed out');
 				}
 				return $this->rawResponse("data: {\"choices\":[{\"delta\":{\"content\":\"luna stream\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
 			});
@@ -1127,14 +1488,17 @@ class LLMClientTest extends TestCase {
 		$this->assertSame('secondary:gpt-5.6-luna', $result['model_reference']);
 		$this->assertSame('qwen3-30b', $calls[0]['model']);
 		$this->assertSame('gpt-5.6-luna', $calls[1]['model']);
-		$this->assertSame(0.7, $calls[1]['payload']['temperature'] ?? null);
-		$this->assertArrayNotHasKey('max_completion_tokens', $calls[1]['payload']);
-		$this->assertSame(800, $calls[2]['payload']['max_completion_tokens'] ?? null);
-		$this->assertArrayNotHasKey('temperature', $calls[2]['payload']);
+		$this->assertSame(800, $calls[1]['payload']['max_completion_tokens'] ?? null);
+		$this->assertArrayNotHasKey('temperature', $calls[1]['payload']);
+		$this->assertArrayNotHasKey('max_tokens', $calls[1]['payload']);
 	}
 
-	public function testSendChatCompletionDropsSamplingExtrasForGpt5AndClaude(): void {
-		foreach (['primary:microsoft/gpt-5.6-luna', 'primary:microsoft/claude-sonnet-5'] as $model) {
+	public function testSendChatCompletionUsesModelSpecificTokenAndSamplingProfiles(): void {
+		foreach ([
+			'primary:microsoft/gpt-5.6-luna' => true,
+			'primary:microsoft/claude-sonnet-5' => true,
+			'primary:microsoft/claude-sonnet-4-6' => false,
+		] as $model => $usesReasoningTokenParameters) {
 			$settings = new Settings();
 			$settings->setApiProvider('custom');
 			$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
@@ -1179,10 +1543,116 @@ class LLMClientTest extends TestCase {
 				]
 			);
 
-			$this->assertSame(0.2, $captured['temperature'] ?? null, $model);
+			if ($usesReasoningTokenParameters) {
+				$this->assertSame(1000, $captured['max_completion_tokens'] ?? null, $model);
+				$this->assertArrayNotHasKey('temperature', $captured, $model);
+				$this->assertArrayNotHasKey('max_tokens', $captured, $model);
+			} else {
+				$this->assertSame(0.2, $captured['temperature'] ?? null, $model);
+				$this->assertSame(1000, $captured['max_tokens'] ?? null, $model);
+				$this->assertArrayNotHasKey('max_completion_tokens', $captured, $model);
+			}
 			$this->assertArrayNotHasKey('top_p', $captured, $model);
 			$this->assertArrayNotHasKey('presence_penalty', $captured, $model);
 			$this->assertArrayNotHasKey('frequency_penalty', $captured, $model);
+		}
+	}
+
+	public function testGpt5ReasoningFirstHttp400DoesNotRepeatTheSameParameterProfile(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:microsoft/gpt-5.6-luna');
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->with(
+				'https://primary.example.invalid/v1/chat/completions',
+				$this->callback(function (array $options): bool {
+					$this->assertSame(800, $options['json']['max_completion_tokens'] ?? null);
+					$this->assertArrayNotHasKey('temperature', $options['json']);
+					$this->assertArrayNotHasKey('max_tokens', $options['json']);
+					return true;
+				}),
+			)
+			->willReturn($this->jsonResponse(['error' => 'unsupported reasoning option'], 400));
+
+		$llmClient = new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger(),
+		);
+
+		try {
+			$llmClient->sendChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				null,
+				['temperature' => 0.2, 'max_tokens' => 800],
+			);
+			$this->fail('Expected the provider request to fail');
+		} catch (\Exception $e) {
+			$this->assertSame('Failed to get response from AI', $e->getMessage());
+			$this->assertSame(400, $e->getPrevious()?->getCode());
+		}
+	}
+
+	public function testReasoningModelsStreamingAndTracePayloadUseReasoningParametersOnFirstAttempt(): void {
+		foreach (['primary:microsoft/gpt-5.4', 'primary:microsoft/claude-sonnet-5'] as $model) {
+			$settings = new Settings();
+			$settings->setApiProvider('custom');
+			$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+			$settings->setDefaultModel($model);
+			$settings->setLlmStreamTimeout(240);
+
+			$settingsService = $this->createMock(SettingsService::class);
+			$settingsService->method('getSettings')->willReturn($settings);
+			$settingsService->method('getApiKey')->willReturn('primary-key');
+			$settingsService->method('normalizePositiveInteger')
+				->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+			$captured = [];
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->once())
+				->method('post')
+				->willReturnCallback(function (string $uri, array $options) use (&$captured): IResponse {
+					$captured = $options['json'];
+					return $this->rawResponse(
+						"data: {\"choices\":[{\"delta\":{\"content\":\"reasoning stream\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+					);
+				});
+
+			$llmClient = new LLMClient(
+				$this->clientService($client),
+				$settingsService,
+				$this->logger(),
+			);
+			$options = ['temperature' => 0.2, 'max_tokens' => 800];
+
+			$tracePayload = $llmClient->buildTraceChatCompletionPayload('system', [], null, $options, true);
+			$result = $llmClient->streamChatCompletion(
+				'system',
+				[['role' => 'user', 'content' => 'hi']],
+				static function (): void {},
+				null,
+				$options,
+			);
+
+			$this->assertSame('reasoning stream', $result['content'], $model);
+			$this->assertSame(800, $captured['max_completion_tokens'] ?? null, $model);
+			$this->assertArrayNotHasKey('temperature', $captured, $model);
+			$this->assertArrayNotHasKey('max_tokens', $captured, $model);
+			$this->assertSame(800, $tracePayload['payload']['max_completion_tokens'] ?? null, $model);
+			$this->assertArrayNotHasKey('temperature', $tracePayload['payload'], $model);
+			$this->assertArrayNotHasKey('max_tokens', $tracePayload['payload'], $model);
 		}
 	}
 
@@ -1713,6 +2183,10 @@ class LLMClientTest extends TestCase {
 			'{"choices":[{"delta":{"content":"secret-corrupt-text"}}',
 			'"secret-scalar-tool-arguments"',
 			'{"choices":{"unexpected":{"delta":{"content":"secret-associative-choice"}}}}',
+			'{"choices":[]}',
+			'{"choices":[],"unknown":"secret-unknown-metadata"}',
+			'{"choices":[],"created":"secret-invalid-created"}',
+			'{"model":"provider-model","object":"chat.completion.chunk"}',
 		];
 
 		foreach ($invalidFrames as $index => $invalidFrame) {
@@ -1753,6 +2227,8 @@ class LLMClientTest extends TestCase {
 				$this->assertStringNotContainsString('secret-corrupt-text', $e->getMessage());
 				$this->assertStringNotContainsString('secret-scalar-tool-arguments', $e->getMessage());
 				$this->assertStringNotContainsString('secret-associative-choice', $e->getMessage());
+				$this->assertStringNotContainsString('secret-unknown-metadata', $e->getMessage());
+				$this->assertStringNotContainsString('secret-invalid-created', $e->getMessage());
 				$this->assertStringNotContainsString('secret-record', $e->getMessage());
 			}
 
@@ -1768,8 +2244,36 @@ class LLMClientTest extends TestCase {
 			$this->assertStringNotContainsString('secret-corrupt-text', json_encode($attemptEvents) ?: '');
 			$this->assertStringNotContainsString('secret-scalar-tool-arguments', json_encode($attemptEvents) ?: '');
 			$this->assertStringNotContainsString('secret-associative-choice', json_encode($attemptEvents) ?: '');
+			$this->assertStringNotContainsString('secret-unknown-metadata', json_encode($attemptEvents) ?: '');
+			$this->assertStringNotContainsString('secret-invalid-created', json_encode($attemptEvents) ?: '');
 			$this->assertStringNotContainsString('secret-record', json_encode($attemptEvents) ?: '');
 		}
+	}
+
+	public function testStreamingAcceptsStrictMetadataPreambleBeforeCompletionFrames(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->rawResponse(
+				"data: {\"id\":\"chatcmpl-preamble\",\"created\":1787529600,\"model\":\"provider-model\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"system_fingerprint\":null,\"service_tier\":null,\"obfuscation\":\"opaque\"}\n\n"
+				. "data: {\"choices\":[{\"delta\":{\"content\":\"PONG\"},\"finish_reason\":\"stop\"}]}\n\n"
+				. "data: [DONE]\n\n"
+			));
+		$observedDeltas = [];
+
+		$turn = $this->chatLlmClient($client)->streamAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			[],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+		);
+
+		$this->assertSame([['content' => 'PONG']], $observedDeltas);
+		$this->assertSame('PONG', $turn->getText());
+		$this->assertSame('stop', $turn->getStopReason());
+		$this->assertSame('provider-model', $turn->getModel());
 	}
 
 	public function testEmptyTwoHundredBodiesFailWithSameTypedOutcomeAndAttemptTrace(): void {
@@ -2196,15 +2700,21 @@ class LLMClientTest extends TestCase {
 			));
 
 			$syncTurn = $this->chatLlmClient($syncClient)->sendAgentTurn('system', [], []);
+			$observedContent = [];
 			$streamTurn = $this->chatLlmClient($streamClient)->streamAgentTurn(
 				'system',
 				[],
 				[],
-				static function (): void {}
+				static function (array $delta) use (&$observedContent): void {
+					if (is_string($delta['content'] ?? null)) {
+						$observedContent[] = $delta['content'];
+					}
+				}
 			);
 
 			$this->assertSame($finishReason, $syncTurn->getStopReason());
 			$this->assertSame($finishReason, $streamTurn->getStopReason());
+			$this->assertSame(['answer'], $observedContent);
 		}
 	}
 
@@ -2333,7 +2843,7 @@ class LLMClientTest extends TestCase {
 		}
 	}
 
-	public function testLegacyCompatibilityDefaultsOffAndRejectsMixedUnknownOrNamelessContent(): void {
+	public function testLegacyCompatibilityDefaultsOffAndRejectsMixedOrNamelessContent(): void {
 		$cases = [
 			[
 				'{"name":"search_test","arguments":{"query":"Berlin"}}',
@@ -2342,10 +2852,6 @@ class LLMClientTest extends TestCase {
 			[
 				'Before {"name":"search_test","arguments":{"query":"Berlin"}} after',
 				ProviderResponseNormalizer::COMPATIBILITY_JSON_XML,
-			],
-			[
-				'{"name":"unknown_tool","arguments":{}}',
-				ProviderResponseNormalizer::COMPATIBILITY_JSON,
 			],
 			[
 				'{"arguments":{"query":"Berlin"}}',
@@ -2393,6 +2899,334 @@ class LLMClientTest extends TestCase {
 			)));
 			$this->assertSame([], $logger->infos);
 		}
+	}
+
+	public function testLegacyCompatibilityNormalizesUnknownWholeMessageCallsWithoutLeakingArtifacts(): void {
+		$jsonContent = '{"name":"unknown_tool","arguments":{"query":"secret-json"}}';
+		$jsonClient = $this->createMock(IClient::class);
+		$jsonClient->expects($this->once())
+			->method('post')
+			->willReturn($this->jsonResponse([
+				'choices' => [[
+					'message' => ['content' => $jsonContent],
+					'finish_reason' => 'stop',
+				]],
+			]));
+
+		$jsonTurn = $this->chatLlmClient($jsonClient)->sendAgentTurn(
+			'system',
+			[],
+			['search_test'],
+			null,
+			['legacy_tool_call_compatibility' => ProviderResponseNormalizer::COMPATIBILITY_JSON]
+		);
+
+		$xmlContent = '<minimax:tool_call><invoke name="unknown_tool"><parameter name="query">secret-xml</parameter></invoke></minimax:tool_call>';
+		$streamClient = $this->createMock(IClient::class);
+		$streamClient->expects($this->once())
+			->method('post')
+			->willReturn($this->rawResponse(
+				'data: ' . json_encode([
+					'model' => 'up/minimax-m2-5',
+					'choices' => [[
+						'delta' => ['content' => $xmlContent],
+						'finish_reason' => 'stop',
+					]],
+				], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n\ndata: [DONE]\n\n"
+			));
+		$observedDeltas = [];
+		$xmlTurn = $this->chatLlmClient($streamClient)->streamAgentTurn(
+			'system',
+			[],
+			['search_test'],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+			'primary:up/minimax-m2-5',
+		);
+
+		$this->assertSame('', $jsonTurn->getText());
+		$this->assertSame('unknown_tool', $jsonTurn->getToolCalls()[0]['function']['name']);
+		$this->assertSame(AgentTurn::COMPATIBILITY_LEGACY_JSON, $jsonTurn->getCompatibilitySource());
+		$this->assertSame([], $observedDeltas);
+		$this->assertSame('', $xmlTurn->getText());
+		$this->assertSame('unknown_tool', $xmlTurn->getToolCalls()[0]['function']['name']);
+		$this->assertSame(AgentTurn::COMPATIBILITY_LEGACY_XML, $xmlTurn->getCompatibilitySource());
+	}
+
+	public function testMiniMaxCapabilityEnablesLegacyXmlUnlessExplicitlyDisabled(): void {
+		$content = '<minimax:tool_call><invoke name="search_test"><parameter name="query">secret-query-value</parameter></invoke></minimax:tool_call>';
+		$events = [];
+		$logger = new RecordingLogger();
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturn($this->jsonResponse([
+				'choices' => [[
+					'message' => ['content' => $content],
+					'finish_reason' => 'stop',
+				]],
+			]));
+		$llmClient = $this->chatLlmClient(
+			$client,
+			$logger,
+			$this->recordingTraceService($events),
+		);
+
+		$compatibleTurn = $llmClient->sendAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			['search_test'],
+			'primary:up/minimax-m2-5',
+			['trace_run_id' => 93]
+		);
+		$disabledTurn = $llmClient->sendAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			['search_test'],
+			'primary:up/minimax-m2-5',
+			['legacy_tool_call_compatibility' => ProviderResponseNormalizer::COMPATIBILITY_OFF]
+		);
+
+		$this->assertSame(AgentTurn::COMPATIBILITY_LEGACY_XML, $compatibleTurn->getCompatibilitySource());
+		$this->assertSame('', $compatibleTurn->getText());
+		$this->assertSame('search_test', $compatibleTurn->getToolCalls()[0]['function']['name']);
+		$this->assertSame(AgentTurn::COMPATIBILITY_NATIVE, $disabledTurn->getCompatibilitySource());
+		$this->assertSame($content, $disabledTurn->getText());
+		$this->assertSame([], $disabledTurn->getToolCalls());
+
+		$compatibilityEvents = array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'provider_compatibility'
+		));
+		$this->assertCount(1, $compatibilityEvents);
+		$this->assertSame('primary:up/minimax-m2-5', $compatibilityEvents[0]['event']['payload']['model_reference']);
+		$telemetryJson = json_encode([$compatibilityEvents, $logger->infos]) ?: '';
+		$this->assertStringNotContainsString('secret-query-value', $telemetryJson);
+	}
+
+	public function testLegacyFallbackStreamContentIsQuarantinedUntilNormalization(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:model-a');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setFallbackModel('secondary:minimax-m2-5');
+		$settings->setLlmStreamTimeout(240);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$content = '<minimax:tool_call><invoke name="search_test"><parameter name="query">secret-query-value</parameter></invoke></minimax:tool_call>';
+		$posts = 0;
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function () use (&$posts, $content): IResponse {
+				$posts++;
+				if ($posts === 1) {
+					throw new \Exception('cURL error 28: Operation timed out');
+				}
+
+				$payload = json_encode([
+					'model' => 'minimax-m2-5',
+					'choices' => [[
+						'delta' => ['content' => $content],
+						'finish_reason' => 'stop',
+					]],
+				], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+				return $this->rawResponse("data: {$payload}\n\ndata: [DONE]\n\n");
+			});
+
+		$events = [];
+		$observedDeltas = [];
+		$turn = (new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger(),
+			null,
+			$this->recordingTraceService($events),
+		))->streamAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			['search_test'],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+		);
+
+		$this->assertSame([], $observedDeltas);
+		$this->assertSame('', $turn->getText());
+		$this->assertSame(AgentTurn::COMPATIBILITY_LEGACY_XML, $turn->getCompatibilitySource());
+		$this->assertSame('secondary:minimax-m2-5', $turn->getModelReference());
+		$this->assertSame('search_test', $turn->getToolCalls()[0]['function']['name']);
+		$this->assertStringNotContainsString('secret-query-value', json_encode($events) ?: '');
+	}
+
+	public function testMiniMaxOrdinaryStreamTextIsReleasedOnceAfterNormalization(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->rawResponse(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"Safe MiniMax answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+			));
+		$observedDeltas = [];
+
+		$turn = $this->chatLlmClient($client)->streamAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			['search_test'],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+			'primary:up/minimax-m2-5',
+		);
+
+		$this->assertSame([['content' => 'Safe MiniMax answer']], $observedDeltas);
+		$this->assertSame('Safe MiniMax answer', $turn->getText());
+		$this->assertSame([], $turn->getToolCalls());
+		$this->assertSame(AgentTurn::COMPATIBILITY_NATIVE, $turn->getCompatibilitySource());
+	}
+
+	public function testMiniMaxReasoningArtifactsAreRemovedBeforeOrdinaryStreamRelease(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->rawResponse(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"<think>private reasoning\"},\"finish_reason\":null}]}\n\n"
+				. "data: {\"choices\":[{\"delta\":{\"content\":\"</think>\\nVisible answer.\"},\"finish_reason\":\"stop\"}]}\n\n"
+				. "data: [DONE]\n\n"
+			));
+		$observedDeltas = [];
+
+		$turn = $this->chatLlmClient($client)->streamAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			[],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+			'primary:up/minimax-m2-5',
+		);
+
+		$this->assertSame([['content' => 'Visible answer.']], $observedDeltas);
+		$this->assertSame('Visible answer.', $turn->getText());
+		$this->assertStringNotContainsString('<think>', json_encode([$observedDeltas, $turn->getText()]) ?: '');
+		$this->assertStringNotContainsString('private reasoning', json_encode([$observedDeltas, $turn->getText()]) ?: '');
+	}
+
+	public function testMiniMaxReasoningArtifactsAreRemovedBeforeLegacyToolParsing(): void {
+		$content = '<think>private tool reasoning</think>'
+			. '<minimax:tool_call><invoke name="search_test"><parameter name="query">Potsdam</parameter></invoke></minimax:tool_call>';
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->rawResponse(
+				'data: ' . json_encode([
+					'choices' => [[
+						'delta' => ['content' => $content],
+						'finish_reason' => 'stop',
+					]],
+				], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n\ndata: [DONE]\n\n"
+			));
+		$observedDeltas = [];
+
+		$turn = $this->chatLlmClient($client)->streamAgentTurn(
+			'system',
+			[],
+			['search_test'],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+			'primary:up/minimax-m2-5',
+		);
+
+		$this->assertSame([], $observedDeltas);
+		$this->assertSame('', $turn->getText());
+		$this->assertSame(AgentTurn::COMPATIBILITY_LEGACY_XML, $turn->getCompatibilitySource());
+		$this->assertSame('search_test', $turn->getToolCalls()[0]['function']['name']);
+		$this->assertSame(
+			['query' => 'Potsdam'],
+			json_decode($turn->getToolCalls()[0]['function']['arguments'], true, 512, JSON_THROW_ON_ERROR)
+		);
+	}
+
+	public function testReasoningOnlySyncCompletionNormalizesToEmptyAgentTurn(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('post')
+			->willReturn($this->jsonResponse([
+				'choices' => [[
+					'message' => ['content' => '<think>private reasoning only</think>'],
+					'finish_reason' => 'stop',
+				]],
+			]));
+
+		$turn = $this->chatLlmClient($client)->sendAgentTurn('system', [], []);
+
+		$this->assertTrue($turn->isEmpty());
+		$this->assertSame('', $turn->getText());
+		$this->assertSame([], $turn->getToolCalls());
+	}
+
+	public function testHiddenIncompleteLegacyStreamCanFallbackWithoutLeakingContent(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('primary:up/minimax-m2-5');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setFallbackModel('secondary:model-b');
+		$settings->setLlmStreamTimeout(240);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$hiddenContent = '<minimax:tool_call><invoke name="search_test"><parameter name="query">never-leak</parameter></invoke></minimax:tool_call>';
+		$posts = 0;
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function () use (&$posts, $hiddenContent): IResponse {
+				$posts++;
+				if ($posts === 1) {
+					$payload = json_encode([
+						'choices' => [['delta' => ['role' => 'assistant', 'content' => $hiddenContent]]],
+					], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+					return $this->rawResponse("data: {$payload}\n\ndata: [DONE]\n\n");
+				}
+
+				return $this->rawResponse(
+					"data: {\"choices\":[{\"delta\":{\"content\":\"Safe fallback\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+				);
+			});
+
+		$observedDeltas = [];
+		$turn = (new LLMClient(
+			$this->clientService($client),
+			$settingsService,
+			$this->logger(),
+		))->streamAgentTurn(
+			'system',
+			[['role' => 'user', 'content' => 'hi']],
+			['search_test'],
+			static function (array $delta) use (&$observedDeltas): void {
+				$observedDeltas[] = $delta;
+			},
+		);
+
+		$this->assertSame([['content' => 'Safe fallback']], $observedDeltas);
+		$this->assertSame('Safe fallback', $turn->getText());
+		$this->assertSame('secondary:model-b', $turn->getModelReference());
+		$this->assertSame(AgentTurn::COMPATIBILITY_NATIVE, $turn->getCompatibilitySource());
+		$this->assertStringNotContainsString('never-leak', json_encode($observedDeltas) ?: '');
 	}
 
 	public function testStreamingUsageAndReasoningRetriesConsumeAndTraceEveryAttempt(): void {

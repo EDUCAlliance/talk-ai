@@ -23,6 +23,19 @@ final class ProviderResponseNormalizer {
 	) {
 	}
 
+	public function resolveCompatibilityMode(?string $modelReference, ?string $explicitMode = null): string {
+		if ($explicitMode !== null) {
+			return $this->normalizeCompatibilityMode($explicitMode);
+		}
+
+		$modelReference = trim((string)$modelReference);
+		if (preg_match('~(?:^|[/:])minimax(?:[-_.]|$)~i', $modelReference) === 1) {
+			return self::COMPATIBILITY_XML;
+		}
+
+		return self::COMPATIBILITY_OFF;
+	}
+
 	/**
 	 * @param array<string,mixed> $response
 	 * @param array<int,string> $knownToolNames
@@ -30,7 +43,7 @@ final class ProviderResponseNormalizer {
 	public function normalize(array $response, array $knownToolNames, string $compatibilityMode = self::COMPATIBILITY_OFF): AgentTurn {
 		$content = $response['content'] ?? null;
 		$this->assertContentShape($content);
-		$text = $content ?? '';
+		$text = AssistantContentSanitizer::sanitize($content ?? '');
 		$nativeToolCalls = $response['tool_calls'] ?? [];
 		$this->assertNativeToolCallsShape($nativeToolCalls);
 		$toolCalls = $this->normalizeNativeToolCalls($nativeToolCalls);
@@ -40,7 +53,7 @@ final class ProviderResponseNormalizer {
 			$compatibilityMode = $this->normalizeCompatibilityMode($compatibilityMode);
 			$compatibilityCalls = null;
 			if ($compatibilityMode === self::COMPATIBILITY_JSON || $compatibilityMode === self::COMPATIBILITY_JSON_XML) {
-				$compatibilityCalls = $this->parseLegacyJson($text, $knownToolNames);
+				$compatibilityCalls = $this->parseLegacyJson($text);
 				if ($compatibilityCalls !== null) {
 					$compatibilitySource = AgentTurn::COMPATIBILITY_LEGACY_JSON;
 				}
@@ -50,7 +63,7 @@ final class ProviderResponseNormalizer {
 				$compatibilityCalls === null
 				&& ($compatibilityMode === self::COMPATIBILITY_XML || $compatibilityMode === self::COMPATIBILITY_JSON_XML)
 			) {
-				$compatibilityCalls = $this->parseLegacyXml($text, $knownToolNames);
+				$compatibilityCalls = $this->parseLegacyXml($text);
 				if ($compatibilityCalls !== null) {
 					$compatibilitySource = AgentTurn::COMPATIBILITY_LEGACY_XML;
 				}
@@ -213,10 +226,9 @@ final class ProviderResponseNormalizer {
 	}
 
 	/**
-	 * @param array<int,string> $knownToolNames
 	 * @return array<int,array<string,mixed>>|null
 	 */
-	private function parseLegacyJson(string $content, array $knownToolNames): ?array {
+	private function parseLegacyJson(string $content): ?array {
 		try {
 			$decoded = json_decode(trim($content), false, 512, JSON_THROW_ON_ERROR);
 		} catch (JsonException) {
@@ -227,14 +239,13 @@ final class ProviderResponseNormalizer {
 			return null;
 		}
 
-		return $this->normalizeCompatibilityEntries($entries, $knownToolNames);
+		return $this->normalizeCompatibilityEntries($entries);
 	}
 
 	/**
-	 * @param array<int,string> $knownToolNames
 	 * @return array<int,array<string,mixed>>|null
 	 */
-	private function parseLegacyXml(string $content, array $knownToolNames): ?array {
+	private function parseLegacyXml(string $content): ?array {
 		$trimmed = trim($content);
 		if (preg_match(
 			'/^<((?:[a-z0-9_-]+:)?(?:tool_call|function_call))\s*>(.*)<\/\1>$/is',
@@ -253,7 +264,7 @@ final class ProviderResponseNormalizer {
 			$decoded = json_decode($inner, false, 512, JSON_THROW_ON_ERROR);
 			$entries = $this->legacyJsonEntries($decoded);
 			if ($entries !== null) {
-				return $this->normalizeCompatibilityEntries($entries, $knownToolNames);
+				return $this->normalizeCompatibilityEntries($entries);
 			}
 		} catch (JsonException) {
 		}
@@ -269,18 +280,18 @@ final class ProviderResponseNormalizer {
 				$entry['arguments'] = html_entity_decode($parts[3] ?? '', ENT_QUOTES | ENT_XML1, 'UTF-8');
 			}
 
-			return $this->normalizeCompatibilityEntries([$entry], $knownToolNames);
+			return $this->normalizeCompatibilityEntries([$entry]);
 		}
 
 		$invokeEntries = $this->parseLegacyInvokeEntries($inner);
 		if ($invokeEntries !== null) {
-			return $this->normalizeCompatibilityEntries($invokeEntries, $knownToolNames);
+			return $this->normalizeCompatibilityEntries($invokeEntries);
 		}
 
 		$argumentPairEntry = $this->parseLegacyArgumentPairEntry($inner);
 		return $argumentPairEntry === null
 			? null
-			: $this->normalizeCompatibilityEntries([$argumentPairEntry], $knownToolNames);
+			: $this->normalizeCompatibilityEntries([$argumentPairEntry]);
 	}
 
 	/**
@@ -403,14 +414,9 @@ final class ProviderResponseNormalizer {
 
 	/**
 	 * @param array<int,mixed> $entries
-	 * @param array<int,string> $knownToolNames
 	 * @return array<int,array<string,mixed>>|null
 	 */
-	private function normalizeCompatibilityEntries(array $entries, array $knownToolNames): ?array {
-		$known = array_fill_keys(array_values(array_filter(
-			$knownToolNames,
-			static fn (mixed $name): bool => is_string($name) && trim($name) !== '',
-		)), true);
+	private function normalizeCompatibilityEntries(array $entries): ?array {
 		$normalized = [];
 		foreach ($entries as $entry) {
 			if (!is_array($entry)) {
@@ -442,9 +448,10 @@ final class ProviderResponseNormalizer {
 			if (array_key_exists('type', $entry) && $entry['type'] !== 'function') {
 				return null;
 			}
-			if (!is_string($name) || !isset($known[$name])) {
+			if (!is_string($name) || trim($name) === '') {
 				return null;
 			}
+			$name = trim($name);
 
 			$toolCall = [
 				'id' => $entry['id'] ?? null,

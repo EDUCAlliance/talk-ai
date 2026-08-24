@@ -66,28 +66,102 @@ class TalkHandlerTest extends TestCase {
 		$this->assertCount(2, array_unique($nonces));
 	}
 
-	public function testToolProgressPartialIsProgressOnly(): void {
-		$handler = $this->createTalkHandler();
+	#[DataProvider('talkHttpOutcomeProvider')]
+	public function testTalkHttpStatusIsClassifiedForQueueDelivery(int $httpStatus, string $expectedOutcome): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$response = $this->createMock(IResponse::class);
+		$response->method('getStatusCode')->willReturn($httpStatus);
+		$response->method('getBody')->willReturn('');
+		$client = $this->createMock(IClient::class);
+		$client->method('post')->willReturn($response);
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->willReturn('http://nextcloud.local/');
 
-		$result = $this->invokePrivateMethod($handler, 'isProgressOnlyPartial', ['🔧 _Using tool: tavily_search..._']);
+		$outcome = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		)->sendReplyToTalkWithOutcome('room-token', 'Queued answer.');
 
-		$this->assertTrue($result);
+		$this->assertSame($expectedOutcome, $outcome['status']);
+		$this->assertSame($httpStatus, $outcome['http_status']);
+		$this->assertNotNull($outcome['error']);
 	}
 
-	public function testMultipleToolProgressPartialIsProgressOnly(): void {
-		$handler = $this->createTalkHandler();
-
-		$result = $this->invokePrivateMethod($handler, 'isProgressOnlyPartial', ['🔧 _Using tools: tavily_search, tavily_extract..._']);
-
-		$this->assertTrue($result);
+	/**
+	 * @return array<string, array{int, string}>
+	 */
+	public static function talkHttpOutcomeProvider(): array {
+		return [
+			'request timeout' => [408, TalkHandler::DELIVERY_RETRYABLE],
+			'too early' => [425, TalkHandler::DELIVERY_RETRYABLE],
+			'rate limit' => [429, TalkHandler::DELIVERY_RETRYABLE],
+			'server failure' => [503, TalkHandler::DELIVERY_RETRYABLE],
+			'bad request' => [400, TalkHandler::DELIVERY_PERMANENT],
+		];
 	}
 
-	public function testVisibleAssistantPartialIsNotProgressOnly(): void {
-		$handler = $this->createTalkHandler();
+	#[DataProvider('talkHttpOutcomeProvider')]
+	public function testThrownTalkHttpResponseIsClassifiedFromExceptionChain(int $httpStatus, string $expectedOutcome): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$response = $this->createMock(IResponse::class);
+		$response->method('getStatusCode')->willReturn($httpStatus);
+		$httpException = new class($response) extends \RuntimeException {
+			public function __construct(
+				private IResponse $response,
+			) {
+				parent::__construct('HTTP request failed');
+			}
 
-		$result = $this->invokePrivateMethod($handler, 'isProgressOnlyPartial', ['Hier ist die Antwort aus den Suchergebnissen.']);
+			public function hasResponse(): bool {
+				return true;
+			}
 
-		$this->assertFalse($result);
+			public function getResponse(): IResponse {
+				return $this->response;
+			}
+		};
+		$client = $this->createMock(IClient::class);
+		$client->method('post')->willThrowException(new \RuntimeException('wrapped HTTP failure', 0, $httpException));
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->willReturn('http://nextcloud.local/');
+
+		$outcome = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		)->sendReplyToTalkWithOutcome('room-token', 'Queued answer.');
+
+		$this->assertSame($expectedOutcome, $outcome['status']);
+		$this->assertSame($httpStatus, $outcome['http_status']);
+		$this->assertNotNull($outcome['error']);
+	}
+
+	public function testTalkTransportExceptionHasExplicitAmbiguousOutcome(): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$client = $this->createMock(IClient::class);
+		$client->method('post')->willThrowException(new \RuntimeException('timeout'));
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->willReturn('http://nextcloud.local/');
+
+		$outcome = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		)->sendReplyToTalkWithOutcome('room-token', 'Queued answer.');
+
+		$this->assertSame(TalkHandler::DELIVERY_AMBIGUOUS, $outcome['status']);
+		$this->assertNull($outcome['http_status']);
+		$this->assertStringContainsString('unknown', (string)$outcome['error']);
 	}
 
 	public function testToolProgressPartialBypassesOpenThinkingBlock(): void {
@@ -100,16 +174,13 @@ class TalkHandlerTest extends TestCase {
 		$botService = $this->createMock(BotService::class);
 		$botService->expects($this->once())
 			->method('processMessage')
-			->willReturnCallback(function (
-				$bot,
-				string $message,
-				string $roomToken,
-				string $userId,
-				?string $originalMessage,
-				callable $onProgress,
-			): string {
-				$onProgress('<think>I should transcribe the voice note');
-				$onProgress('🔧 _Using tool: attachment_transcribe_audio..._');
+			->willReturnCallback(function (...$arguments): string {
+				$assistantProgress = $arguments[5] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($toolProgress);
+				$assistantProgress('<think>I should transcribe the voice note');
+				$toolProgress('🔧 _Using tool: attachment_transcribe_audio..._');
 
 				return 'Final audio answer.';
 			});
@@ -212,6 +283,63 @@ class TalkHandlerTest extends TestCase {
 		]);
 
 		$this->assertSame(['Final coalesced answer.'], $sentMessages);
+	}
+
+	public function testAssistantFinalMatchingToolProgressPrefixIsSentExactlyOnce(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$assistantAnswer = '🔧 _Using tool: this_is_the_final_answer..._';
+		$sentMessages = [];
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments) use ($assistantAnswer): string {
+				$assistantProgress = $arguments[5] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($toolProgress);
+				$assistantProgress($assistantAnswer);
+
+				return $assistantAnswer;
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->once())
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+				$sentMessages[] = $message;
+				return true;
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([$assistantAnswer], $sentMessages);
 	}
 
 	#[DataProvider('canonicalRetryOutcomes')]
@@ -435,10 +563,12 @@ class TalkHandlerTest extends TestCase {
 		$botService->expects($this->once())
 			->method('processMessage')
 			->willReturnCallback(function (...$arguments): string {
-				$progressCallback = $arguments[5] ?? null;
-				$this->assertIsCallable($progressCallback);
-				$progressCallback('🔧 _Using tool: search_test..._');
-				$progressCallback('Canonical answer.');
+				$assistantProgress = $arguments[5] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($toolProgress);
+				$toolProgress('🔧 _Using tool: search_test..._');
+				$assistantProgress('Canonical answer.');
 
 				return 'Canonical answer.';
 			});
@@ -500,14 +630,16 @@ class TalkHandlerTest extends TestCase {
 		$botService->expects($this->once())
 			->method('processMessage')
 			->willReturnCallback(function (...$arguments) use ($safeResponse): string {
-				$progressCallback = $arguments[5] ?? null;
+				$assistantProgress = $arguments[5] ?? null;
 				$errorCallback = $arguments[12] ?? null;
 				$mismatchCallback = $arguments[13] ?? null;
-				$this->assertIsCallable($progressCallback);
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
 				$this->assertIsCallable($errorCallback);
 				$this->assertIsCallable($mismatchCallback);
-				$progressCallback('Partial answer already visible.');
-				$progressCallback('🔧 _Using tool: search_test..._');
+				$this->assertIsCallable($toolProgress);
+				$assistantProgress('Partial answer already visible.');
+				$toolProgress('🔧 _Using tool: search_test..._');
 				$mismatchCallback();
 				$errorCallback('Agent execution terminated: max_turns');
 

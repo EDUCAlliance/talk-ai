@@ -46,6 +46,7 @@ class QueuedRequest extends Entity implements JsonSerializable {
     public const STATUS_PENDING = 'pending';
     public const STATUS_PROCESSING = 'processing';
     public const STATUS_RESPONSE_READY = 'response_ready';
+    public const STATUS_DELIVERING = 'delivering';
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_FAILED = 'failed';
 
@@ -132,4 +133,3 @@ class QueuedRequest extends Entity implements JsonSerializable {
         ];
     }
 }
-

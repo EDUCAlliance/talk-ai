@@ -24,6 +24,11 @@ use Psr\Log\LoggerInterface;
  * @psalm-import-type MessageContext from \OCA\EducAI\TypeDefinitions
  */
 class TalkHandler {
+	public const DELIVERY_SUCCESS = 'success';
+	public const DELIVERY_RETRYABLE = 'retryable';
+	public const DELIVERY_PERMANENT = 'permanent';
+	public const DELIVERY_AMBIGUOUS = 'ambiguous';
+
 	private const IGNORED_TALK_SYSTEM_EVENT_NAMES = [
 		'thread_created',
 	];
@@ -630,48 +635,47 @@ class TalkHandler {
 
 		try {
 			// Process message and get response
+			$assistantProgress = function (string $partial) use ($roomToken, $replyTargetId, $threadRootMessageId, &$alreadySent, &$isFirstMessage, &$assistantStreamDeliveryFailed, &$thinkingMessageSent, &$thinkingBuffer, &$isInThinkingMode): void {
+				$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
+
+				// Handle thinking tokens - filter them out and show placeholder
+				$filteredPartial = $this->filterThinkingTokens(
+					$partial,
+					$isInThinkingMode,
+					$thinkingBuffer,
+					$thinkingMessageSent,
+					$roomToken,
+					$replyTo,
+					$isFirstMessage
+				);
+
+				// Only send if there's actual content after filtering thinking tokens
+				if ($filteredPartial !== null && trim($filteredPartial) !== '') {
+					$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
+					if ($this->sendReplyToTalk($roomToken, $filteredPartial, $replyTo)) {
+						$alreadySent = true;
+						$isFirstMessage = false;
+					} else {
+						$assistantStreamDeliveryFailed = true;
+					}
+				}
+			};
+			$toolProgress = function (string $progress) use ($roomToken, $replyTargetId, $threadRootMessageId, &$isFirstMessage, &$thinkingBuffer, &$isInThinkingMode): void {
+				$isInThinkingMode = false;
+				$thinkingBuffer = '';
+				$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
+				if ($this->sendReplyToTalk($roomToken, $progress, $replyTo)) {
+					$isFirstMessage = false;
+				}
+			};
+
 			$response = $this->botService->processMessage(
 				$bot,
 				$cleanMessage,
 				$roomToken,
 				$userId,
 				$originalMessage ?? $cleanMessage,
-				function (string $partial) use ($roomToken, $replyTargetId, $threadRootMessageId, &$alreadySent, &$isFirstMessage, &$assistantStreamDeliveryFailed, &$thinkingMessageSent, &$thinkingBuffer, &$isInThinkingMode) {
-					$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
-					if ($this->isProgressOnlyPartial($partial)) {
-						$isInThinkingMode = false;
-						$thinkingBuffer = '';
-						if ($this->sendReplyToTalk($roomToken, $partial, $replyTo)) {
-							$isFirstMessage = false;
-						}
-						return;
-					}
-
-					// Handle thinking tokens - filter them out and show placeholder
-					$filteredPartial = $this->filterThinkingTokens(
-						$partial,
-						$isInThinkingMode,
-						$thinkingBuffer,
-						$thinkingMessageSent,
-						$roomToken,
-						$replyTo,
-						$isFirstMessage
-					);
-
-					// Only send if there's actual content after filtering thinking tokens
-					if ($filteredPartial !== null && trim($filteredPartial) !== '') {
-						$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
-						$isAssistantPartial = !$this->isProgressOnlyPartial($filteredPartial);
-						if ($this->sendReplyToTalk($roomToken, $filteredPartial, $replyTo)) {
-							if ($isAssistantPartial) {
-								$alreadySent = true;
-							}
-							$isFirstMessage = false;
-						} elseif ($isAssistantPartial) {
-							$assistantStreamDeliveryFailed = true;
-						}
-					}
-				},
+				$assistantProgress,
 				false,
 				$onboardingContext,
 				$messageContext,
@@ -687,7 +691,8 @@ class TalkHandler {
 						$traceStatus = 'partial';
 						$traceErrorSummary = self::STREAM_MISMATCH_TRACE_SUMMARY;
 					}
-				}
+				},
+				$toolProgress,
 			);
 
 			$this->logger->info('Got bot response', [
@@ -1096,18 +1101,25 @@ class TalkHandler {
 	 * @return bool
 	 */
 	public function sendReplyToTalk(string $roomToken, string $message, int $replyToId = 0, ?string $referenceId = null): bool {
+		return $this->sendReplyToTalkWithOutcome($roomToken, $message, $replyToId, $referenceId)['status'] === self::DELIVERY_SUCCESS;
+	}
+
+	/**
+	 * @return array{status: string, error: ?string, http_status: ?int}
+	 */
+	public function sendReplyToTalkWithOutcome(string $roomToken, string $message, int $replyToId = 0, ?string $referenceId = null): array {
 		try {
 			// Never send empty messages - Talk API will reject them with 400
 			if (trim($message) === '') {
 				$this->logger->debug('Skipping empty message - not sending to Talk');
-				return true; // Return true to not trigger error handling
+				return $this->deliveryOutcome(self::DELIVERY_SUCCESS);
 			}
 			
 			$secret = $this->settingsService->getWebhookSecret();
 			
 			if (empty($secret)) {
 				$this->logger->error('Cannot send reply: webhook secret not configured');
-				return false;
+				return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Talk webhook secret is not configured');
 			}
 
 			// Get Nextcloud base URL
@@ -1132,6 +1144,10 @@ class TalkHandler {
 
 			// Convert to JSON
 			$jsonBody = json_encode($requestBody);
+			if ($jsonBody === false) {
+				$this->logger->error('Cannot send reply: Talk request body is not valid JSON');
+				return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Talk request body could not be encoded');
+			}
 
 			// Create signature (HMAC of random + message)
 			$hash = hash_hmac('sha256', $random . $message, $secret);
@@ -1143,40 +1159,123 @@ class TalkHandler {
 				'reply_to' => $replyToId,
 			]);
 
-			$client = $this->clientService->newClient();
-			
-			$response = $client->post($endpoint, [
-				'headers' => [
-					'Content-Type' => 'application/json',
-					'OCS-APIRequest' => 'true',
-					'X-Nextcloud-Talk-Bot-Random' => $random,
-					'X-Nextcloud-Talk-Bot-Signature' => $hash,
-				],
-				'body' => $jsonBody,
-				'timeout' => 10,
-			]);
+			try {
+				$client = $this->clientService->newClient();
+			} catch (Exception $e) {
+				$this->logger->error('Failed to create Talk HTTP client: ' . $e->getMessage(), [
+					'exception' => $e,
+					'room_token' => $roomToken,
+				]);
+				return $this->deliveryOutcome(self::DELIVERY_RETRYABLE, 'Talk HTTP client is temporarily unavailable');
+			}
 
-			$statusCode = $response->getStatusCode();
+			try {
+				$response = $client->post($endpoint, [
+					'headers' => [
+						'Content-Type' => 'application/json',
+						'OCS-APIRequest' => 'true',
+						'X-Nextcloud-Talk-Bot-Random' => $random,
+						'X-Nextcloud-Talk-Bot-Signature' => $hash,
+					],
+					'body' => $jsonBody,
+					'timeout' => 10,
+				]);
+				$statusCode = $response->getStatusCode();
+			} catch (Exception $e) {
+				$statusCode = $this->httpStatusFromException($e);
+				if ($statusCode !== null) {
+					$this->logger->warning('Talk API request threw an HTTP error', [
+						'status_code' => $statusCode,
+						'room_token' => $roomToken,
+					]);
+					return $this->failedDeliveryOutcomeForHttpStatus($statusCode);
+				}
+				$this->logger->error('Talk delivery outcome is unknown: ' . $e->getMessage(), [
+					'exception' => $e,
+					'room_token' => $roomToken,
+				]);
+				return $this->deliveryOutcome(
+					self::DELIVERY_AMBIGUOUS,
+					'Talk request failed after dispatch; delivery outcome is unknown'
+				);
+			}
+
 			if ($statusCode >= 200 && $statusCode < 300) {
 				$this->logger->info('Successfully sent reply to Talk', [
 					'room_token' => $roomToken,
 				]);
-				return true;
+				return $this->deliveryOutcome(self::DELIVERY_SUCCESS, httpStatus: $statusCode);
 			}
 
 			$this->logger->warning('Unexpected status code from Talk API', [
 				'status_code' => $statusCode,
-				'response_body_length' => strlen((string)$response->getBody()),
 			]);
-			return false;
+			return $this->failedDeliveryOutcomeForHttpStatus($statusCode);
 
 		} catch (Exception $e) {
 			$this->logger->error('Failed to send reply to Talk: ' . $e->getMessage(), [
 				'exception' => $e,
 				'room_token' => $roomToken,
 			]);
-			return false;
+			return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Talk request could not be prepared');
 		}
+	}
+
+	private function httpStatusFromException(\Throwable $exception): ?int {
+		$candidate = $exception;
+		while ($candidate instanceof \Throwable) {
+			if (
+				method_exists($candidate, 'hasResponse')
+				&& method_exists($candidate, 'getResponse')
+				&& $candidate->hasResponse()
+			) {
+				$response = $candidate->getResponse();
+				if (is_object($response) && method_exists($response, 'getStatusCode')) {
+					$statusCode = (int)$response->getStatusCode();
+					if ($statusCode >= 100 && $statusCode <= 599) {
+						return $statusCode;
+					}
+				}
+			}
+
+			$statusCode = (int)$candidate->getCode();
+			if ($statusCode >= 100 && $statusCode <= 599) {
+				return $statusCode;
+			}
+			$candidate = $candidate->getPrevious();
+		}
+
+		return null;
+	}
+
+	/**
+	 * @return array{status: string, error: ?string, http_status: ?int}
+	 */
+	private function failedDeliveryOutcomeForHttpStatus(int $statusCode): array {
+		if ($statusCode === 408 || $statusCode === 425 || $statusCode === 429 || $statusCode >= 500) {
+			return $this->deliveryOutcome(
+				self::DELIVERY_RETRYABLE,
+				'Talk API returned retryable HTTP ' . $statusCode,
+				$statusCode
+			);
+		}
+
+		return $this->deliveryOutcome(
+			self::DELIVERY_PERMANENT,
+			'Talk API returned permanent HTTP ' . $statusCode,
+			$statusCode
+		);
+	}
+
+	/**
+	 * @return array{status: string, error: ?string, http_status: ?int}
+	 */
+	private function deliveryOutcome(string $status, ?string $error = null, ?int $httpStatus = null): array {
+		return [
+			'status' => $status,
+			'error' => $error,
+			'http_status' => $httpStatus,
+		];
 	}
 
 	/**
@@ -1312,10 +1411,4 @@ class TalkHandler {
 		return trim($result ?? $content);
 	}
 
-	private function isProgressOnlyPartial(string $partial): bool {
-		$trimmed = trim($partial);
-
-		return str_starts_with($trimmed, '🔧 _Using tool: ')
-			|| str_starts_with($trimmed, '🔧 _Using tools: ');
-	}
 }

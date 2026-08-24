@@ -92,6 +92,46 @@ class AgentExecutorTest extends TestCase {
 		];
 	}
 
+	public function testExplicitWebOnlyRequestDoesNotInventRagCallWhenProviderReturnsFinalText(): void {
+		[$executor, $llmClient, , $toolProvider, $mcpClient] = $this->createHarness([
+			$this->searchToolDefinition(BuiltInToolProvider::TOOL_RAG_SEARCH),
+			$this->searchToolDefinition('tavily_search'),
+		]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$mcpClient->expects($this->never())->method('callTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('Official web result.', [], 'stop')],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(0, $index);
+				$this->assertSame(
+					'Use web search only; do not search the knowledge base.',
+					$messages[0]['content'] ?? null
+				);
+				$this->assertSame([
+					BuiltInToolProvider::TOOL_RAG_SEARCH,
+					'tavily_search',
+				], $knownToolNames);
+				$this->assertNull($options['tool_choice']);
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Use web search only; do not search the knowledge base.']],
+			[],
+			$this->builtInOptions([
+				BuiltInToolProvider::TOOL_RAG_SEARCH,
+				'tavily_search',
+			])
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Official web result.', $result['content']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertSame(1, $result['logicalTurns']);
+	}
+
 	public function testPlainFinalTurnStopsWhenProviderIgnoresRequestedInitialToolChoice(): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
 		$requestedChoice = [
@@ -170,6 +210,45 @@ class AgentExecutorTest extends TestCase {
 		$this->assertSame('ok', $result['toolInvocations'][0]['status']);
 	}
 
+	public function testReasoningArtifactsOnNativeToolTurnNeverEnterSubsequentHistory(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$normalizer = new ProviderResponseNormalizer(new ToolCallIdGenerator());
+		$toolTurn = $normalizer->normalize([
+			'content' => '<think>private intermediate reasoning</think>',
+			'tool_calls' => [$this->toolCall('reasoning-tool', 'search_test', '{"query":"Potsdam"}')],
+			'finish_reason' => 'tool_calls',
+		], ['search_test']);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with('search_test', ['query' => 'Potsdam'])
+			->willReturn(['text' => 'Potsdam result']);
+		$this->expectSyncTurns(
+			$llmClient,
+			[$toolTurn, $this->turn('Visible final answer.', [], 'stop')],
+			function (int $index, array $messages): void {
+				if ($index !== 1) {
+					return;
+				}
+
+				$this->assertNull($messages[1]['content']);
+				$encodedHistory = json_encode($messages, JSON_THROW_ON_ERROR);
+				$this->assertStringNotContainsString('<think>', $encodedHistory);
+				$this->assertStringNotContainsString('private intermediate reasoning', $encodedHistory);
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search Potsdam']],
+			[],
+			$this->builtInOptions(['search_test'])
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Visible final answer.', $result['content']);
+		$this->assertStringNotContainsString('<think>', json_encode($result['messages'], JSON_THROW_ON_ERROR));
+	}
+
 	public function testMissingProviderIdGetsNineCharacterIdAndKeepsCorrelation(): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
 		$normalizer = new ProviderResponseNormalizer(new ToolCallIdGenerator());
@@ -238,6 +317,7 @@ class AgentExecutorTest extends TestCase {
 
 	public function testUnknownAndMalformedToolsBecomeOrderedStructuredErrors(): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness();
+		$toolProgress = [];
 		$malformedCall = (new ProviderResponseNormalizer(new ToolCallIdGenerator()))->normalize([
 			'content' => '',
 			'tool_calls' => [[
@@ -267,9 +347,56 @@ class AgentExecutorTest extends TestCase {
 			}
 		);
 
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Use tools']], []);
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Use tools']],
+			[],
+			['on_tool_progress' => static function (string $progress) use (&$toolProgress): void {
+				$toolProgress[] = $progress;
+			}]
+		);
 		$this->assertSame(['not_available', 'unknown'], array_column($result['toolInvocations'], 'tool'));
 		$this->assertSame(['error', 'error'], array_column($result['toolInvocations'], 'status'));
+		$this->assertSame([], $toolProgress);
+	}
+
+	#[DataProvider('unsafeToolProgressNames')]
+	public function testPreparedToolWithUnsafeDisplayNameDoesNotEmitProgress(string $toolName): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($toolName)]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with($toolName, [])
+			->willReturn(['text' => 'executed']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('unsafe-name', $toolName, '{}')], 'tool_calls'),
+			$this->turn('Done', [], 'stop'),
+		]);
+		$toolProgress = [];
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Use the tool']],
+			[],
+			$this->builtInOptions([$toolName]) + [
+				'on_tool_progress' => static function (string $progress) use (&$toolProgress): void {
+					$toolProgress[] = $progress;
+				},
+			]
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Done', $result['content']);
+		$this->assertSame('ok', $result['toolInvocations'][0]['status']);
+		$this->assertSame([], $toolProgress);
+	}
+
+	/** @return array<string,array{string}> */
+	public static function unsafeToolProgressNames(): array {
+		return [
+			'newline injection' => ["search_test\n**Injected status**"],
+			'markdown injection' => ['search_test_[link](https://example.invalid)'],
+			'over maximum length' => [str_repeat('a', 65)],
+		];
 	}
 
 	public function testMissingRequiredArgumentsBecomeStructuredErrorWithoutExecution(): void {
@@ -485,12 +612,19 @@ class AgentExecutorTest extends TestCase {
 	}
 
 	public function testTerminalFinishReasonsRemainDistinguishable(): void {
-		foreach (['stop', 'length', 'content_filter'] as $finishReason) {
+		$cases = [
+			'stop' => ['completed', 'final_response', 'Text stop'],
+			'length' => ['budget_exhausted', 'length', ''],
+			'content_filter' => ['error', 'content_filter', ''],
+		];
+		foreach ($cases as $finishReason => [$expectedStatus, $expectedTerminalReason, $expectedContent]) {
 			[$executor, $llmClient] = $this->createHarness();
 			$this->expectSyncTurns($llmClient, [$this->turn('Text ' . $finishReason, [], $finishReason)]);
 			$result = $executor->run('system', [['role' => 'user', 'content' => 'Question']], []);
 			$this->assertSame($finishReason, $result['finishReason']);
-			$this->assertSame('completed', $result['status']);
+			$this->assertSame($expectedStatus, $result['status']);
+			$this->assertSame($expectedTerminalReason, $result['terminalReason']);
+			$this->assertSame($expectedContent, $result['content']);
 		}
 
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
@@ -506,6 +640,31 @@ class AgentExecutorTest extends TestCase {
 		);
 		$this->assertSame('tool_calls', $result['finishReason']);
 		$this->assertSame('budget_exhausted', $result['status']);
+	}
+
+	public function testContentFilteredToolCallIsNeverExecuted(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [
+			$this->turn(
+				'Filtered response',
+				[$this->toolCall('filtered-tool', 'search_test', '{"query":"x"}')],
+				'content_filter'
+			),
+		]);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			$this->builtInOptions(['search_test'])
+		);
+
+		$this->assertSame('error', $result['status']);
+		$this->assertSame('content_filter', $result['terminalReason']);
+		$this->assertSame('content_filter', $result['finishReason']);
+		$this->assertSame('', $result['content']);
+		$this->assertSame([], $result['toolInvocations']);
 	}
 
 	public function testEmptySuccessfulTurnIsTypedErrorWithoutExtraRequestOrFallback(): void {
@@ -1273,15 +1432,19 @@ class AgentExecutorTest extends TestCase {
 				$completedStreamTurns++;
 			}
 		);
-		$observedPartials = [];
+		$observedAssistantPartials = [];
+		$observedToolProgress = [];
 
 		$result = $executor->run(
 			'system',
 			[['role' => 'user', 'content' => 'Search']],
 			[],
 			$this->builtInOptions(['search_test']) + [
-				'on_partial_result' => static function (string $partial) use (&$observedPartials, &$completedStreamTurns): void {
-					$observedPartials[] = [$partial, $completedStreamTurns];
+				'on_partial_result' => static function (string $partial) use (&$observedAssistantPartials, &$completedStreamTurns): void {
+					$observedAssistantPartials[] = [$partial, $completedStreamTurns];
+				},
+				'on_tool_progress' => static function (string $progress) use (&$observedToolProgress, &$completedStreamTurns): void {
+					$observedToolProgress[] = [$progress, $completedStreamTurns];
 				},
 			]
 		);
@@ -1289,10 +1452,12 @@ class AgentExecutorTest extends TestCase {
 		$this->assertSame('Final streamed answer', $result['content']);
 		$this->assertSame([
 			['Searching...', 0],
-			['🔧 _Using tool: search_test..._', 1],
 			['Final ', 1],
 			['streamed answer', 1],
-		], $observedPartials);
+		], $observedAssistantPartials);
+		$this->assertSame([
+			['🔧 _Using tool: search_test..._', 1],
+		], $observedToolProgress);
 		$this->assertSame(2, $completedStreamTurns);
 		$this->assertStringNotContainsString('Searching...', $result['content']);
 	}

@@ -46,6 +46,7 @@ class SettingsControllerTest extends TestCase {
 		$bot->setMentionName('@bot');
 
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
 		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
 		$rateLimitService->expects($this->exactly(2))
@@ -58,10 +59,10 @@ class SettingsControllerTest extends TestCase {
 		$rateLimitService->expects($this->once())->method('getNextPending')->willReturn($request);
 		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
 		$rateLimitService->expects($this->once())->method('recordUsage');
-		$rateLimitService->expects($this->never())->method('markForRetry');
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
 		$rateLimitService->expects($this->never())->method('markResponseReady');
 		$rateLimitService->expects($this->once())
-			->method('markFailed')
+			->method('markProcessingFailed')
 			->with($request, 'Agent execution failed: Agent execution terminated: max_turns');
 		$rateLimitService->expects($this->never())->method('markCompleted');
 
@@ -153,6 +154,7 @@ class SettingsControllerTest extends TestCase {
 		$bot->setMentionName('@bot');
 
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
 		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
 		$rateLimitService->expects($this->exactly(2))
@@ -185,9 +187,9 @@ class SettingsControllerTest extends TestCase {
 
 		$talkHandler = $this->createMock(TalkHandler::class);
 		$talkHandler->expects($this->once())
-			->method('sendReplyToTalk')
+			->method('sendReplyToTalkWithOutcome')
 			->with('room-token', 'Queued answer.', 123, $request->getDeliveryReferenceId())
-			->willReturn(true);
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_SUCCESS));
 
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->once())
@@ -206,7 +208,7 @@ class SettingsControllerTest extends TestCase {
 		], $controller->processQueue()->getData());
 	}
 
-	public function testFailedTalkDeliveryTerminatesQueueAndFinishesTraceAsPartial(): void {
+	public function testPermanentTalkDeliveryFailureTerminatesQueueAndFinishesTraceAsPartial(): void {
 		$request = new QueuedRequest();
 		$request->setId(99);
 		$request->setBotId(7);
@@ -225,6 +227,7 @@ class SettingsControllerTest extends TestCase {
 		$bot->setMentionName('@bot');
 
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
 		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
 		$rateLimitService->expects($this->exactly(2))
@@ -243,7 +246,13 @@ class SettingsControllerTest extends TestCase {
 		$rateLimitService->expects($this->never())->method('markForRetry');
 		$rateLimitService->expects($this->once())
 			->method('markResponseDeliveryFailed')
-			->with($request, 'Delivery failed: Failed to deliver queued response to Talk');
+			->with($request, 'Talk API returned permanent HTTP 400')
+			->willReturnCallback(static function (QueuedRequest $queuedRequest, string $error): QueuedRequest {
+				$queuedRequest->setStatus(QueuedRequest::STATUS_FAILED);
+				$queuedRequest->setError($error);
+				return $queuedRequest;
+			});
+		$rateLimitService->expects($this->never())->method('markResponseDeliveryRetry');
 
 		$botMapper = $this->createMock(BotMapper::class);
 		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
@@ -259,14 +268,21 @@ class SettingsControllerTest extends TestCase {
 
 		$talkHandler = $this->createMock(TalkHandler::class);
 		$talkHandler->expects($this->once())
-			->method('sendReplyToTalk')
+			->method('sendReplyToTalkWithOutcome')
 			->with('room-token', 'Queued answer.', 123, $request->getDeliveryReferenceId())
-			->willReturn(false);
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_PERMANENT, 'Talk API returned permanent HTTP 400', 400));
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->once())->method('startRun')->willReturn(83);
 		$traceService->expects($this->once())
+			->method('recordEvent')
+			->with(83, 'queue_delivery', $this->callback(static fn (array $event): bool
+				=> $event['status'] === 'error'
+				&& $event['payload']['delivery_outcome'] === TalkHandler::DELIVERY_PERMANENT
+				&& $event['payload']['http_status'] === 400
+			));
+		$traceService->expects($this->once())
 			->method('finishRun')
-			->with(83, 'partial', 'Failed to deliver queued response to Talk');
+			->with(83, 'partial', 'Talk API returned permanent HTTP 400');
 
 		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
 
@@ -274,7 +290,7 @@ class SettingsControllerTest extends TestCase {
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => ['Failed to deliver queued response to Talk'],
+			'errors' => ['Talk API returned permanent HTTP 400'],
 		], $controller->processQueue()->getData());
 		$this->assertSame('Queued answer.', $request->getResult());
 	}
@@ -298,6 +314,7 @@ class SettingsControllerTest extends TestCase {
 		$bot->setMentionName('@bot');
 
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
 		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
 		$rateLimitService->expects($this->exactly(2))
@@ -326,9 +343,9 @@ class SettingsControllerTest extends TestCase {
 
 		$talkHandler = $this->createMock(TalkHandler::class);
 		$talkHandler->expects($this->once())
-			->method('sendReplyToTalk')
+			->method('sendReplyToTalkWithOutcome')
 			->with('room-token', 'Queued answer.', 123, $request->getDeliveryReferenceId())
-			->willReturn(true);
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_SUCCESS));
 
 		$error = 'Queued response delivered, but completion persistence failed: database unavailable';
 		$traceService = $this->createMock(TraceService::class);
@@ -351,12 +368,13 @@ class SettingsControllerTest extends TestCase {
 			'errors' => [$error],
 		], $controller->processQueue()->getData());
 		$this->assertSame('Queued answer.', $request->getResult());
-		$this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
+		$this->assertSame(QueuedRequest::STATUS_DELIVERING, $request->getStatus());
 	}
 
 	public function testFreshResponseReadyRowUsesDeliveryOnlyLaneWhenRateLimitingIsDisabled(): void {
 		$request = $this->createReadyRequest();
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())
 			->method('getResponseReadyRequests')
 			->with(10)
@@ -375,6 +393,7 @@ class SettingsControllerTest extends TestCase {
 			->with($request)
 			->willReturnCallback(static function (QueuedRequest $queued): QueuedRequest {
 				$queued->incrementAttempts();
+				$queued->setStatus(QueuedRequest::STATUS_DELIVERING);
 				return $queued;
 			});
 		$rateLimitService->expects($this->once())
@@ -391,9 +410,9 @@ class SettingsControllerTest extends TestCase {
 		$botService->expects($this->never())->method('processMessage');
 		$talkHandler = $this->createMock(TalkHandler::class);
 		$talkHandler->expects($this->once())
-			->method('sendReplyToTalk')
+			->method('sendReplyToTalkWithOutcome')
 			->with('room-token', 'Queued answer.', 123, $request->getDeliveryReferenceId())
-			->willReturn(true);
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_SUCCESS));
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->once())
 			->method('startRun')
@@ -421,6 +440,7 @@ class SettingsControllerTest extends TestCase {
 		$this->assertSame($referenceId, $terminalReload->getDeliveryReferenceId());
 
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService, 3);
 		$rateLimitService->expects($this->exactly(3))
 			->method('getResponseReadyRequests')
 			->with(10)
@@ -442,6 +462,7 @@ class SettingsControllerTest extends TestCase {
 			->method('markResponseDeliveryAttempt')
 			->willReturnCallback(static function (QueuedRequest $request): QueuedRequest {
 				$request->incrementAttempts();
+				$request->setStatus(QueuedRequest::STATUS_DELIVERING);
 				return $request;
 			});
 		$rateLimitService->expects($this->exactly(2))
@@ -462,13 +483,13 @@ class SettingsControllerTest extends TestCase {
 		$referenceIds = [];
 		$talkHandler = $this->createMock(TalkHandler::class);
 		$talkHandler->expects($this->exactly(2))
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $room, string $message, int $replyTo, string $calledReference) use (&$referenceIds): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $room, string $message, int $replyTo, string $calledReference) use (&$referenceIds): array {
 				$this->assertSame('room-token', $room);
 				$this->assertSame('Queued answer.', $message);
 				$this->assertSame(123, $replyTo);
 				$referenceIds[] = $calledReference;
-				return true;
+				return $this->deliveryOutcome(TalkHandler::DELIVERY_SUCCESS);
 			});
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->exactly(3))
@@ -491,8 +512,9 @@ class SettingsControllerTest extends TestCase {
 
 	public function testRejectedAtomicDeliveryClaimNeverSendsOrRunsAgent(): void {
 		$request = $this->createReadyRequest(0);
-		$error = 'Queued response delivery reconciliation failed: Queued response delivery attempt was not claimed';
+		$summary = 'Queued response delivery ownership transferred to another worker';
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())
 			->method('getResponseReadyRequests')
 			->with(10)
@@ -504,7 +526,7 @@ class SettingsControllerTest extends TestCase {
 		$rateLimitService->expects($this->once())
 			->method('markResponseDeliveryAttempt')
 			->with($request)
-			->willThrowException(new \LogicException('Queued response delivery attempt was not claimed'));
+			->willThrowException(new \LogicException(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE));
 		$rateLimitService->expects($this->never())->method('markCompleted');
 		$rateLimitService->expects($this->never())->method('markFailed');
 		$rateLimitService->expects($this->never())->method('markForRetry');
@@ -518,14 +540,220 @@ class SettingsControllerTest extends TestCase {
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->once())->method('startRun')->willReturn(90);
 		$traceService->expects($this->never())->method('recordEvent');
-		$traceService->expects($this->once())->method('finishRun')->with(90, 'partial', $error);
+		$traceService->expects($this->once())->method('finishRun')->with(90, 'partial', $summary);
 
 		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
 		$this->assertSame([
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => [$error],
+			'errors' => [],
+		], $controller->processQueue()->getData());
+	}
+
+	public function testStaleProcessingClaimAfterRetryNeverConsumesCapacityOrRunsAgent(): void {
+		$request = $this->createRequest();
+		$request->setAttempts(1);
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
+		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
+		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
+		$rateLimitService->expects($this->exactly(2))
+			->method('getQueueStats')
+			->willReturnOnConsecutiveCalls(
+				['pending' => 1, 'processing' => 0, 'completed' => 0, 'failed' => 0, 'total' => 1],
+				['pending' => 0, 'processing' => 1, 'completed' => 0, 'failed' => 0, 'total' => 1]
+			);
+		$rateLimitService->expects($this->once())->method('canProcess')->willReturn(true);
+		$rateLimitService->expects($this->once())->method('getNextPending')->willReturn($request);
+		$rateLimitService->expects($this->once())
+			->method('markProcessing')
+			->with($request)
+			->willThrowException(new \LogicException(RateLimitService::PROCESSING_CLAIM_LOST_MESSAGE));
+		$rateLimitService->expects($this->never())->method('recordUsage');
+		$rateLimitService->expects($this->never())->method('markResponseReady');
+		$rateLimitService->expects($this->never())->method('markProcessingFailed');
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->never())->method('findById');
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->never())->method('processMessage');
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->never())->method('sendReplyToTalk');
+		$talkHandler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->never())->method('startRun');
+
+		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
+		$this->assertSame([
+			'success' => true,
+			'processed' => 0,
+			'remaining' => 0,
+			'errors' => [],
+		], $controller->processQueue()->getData());
+		$this->assertSame(QueuedRequest::STATUS_PENDING, $request->getStatus());
+		$this->assertSame(1, $request->getAttempts());
+	}
+
+	public function testDeliveryClaimTransferredAfterResponsePersistenceDoesNotReportFailure(): void {
+		$request = $this->createRequest();
+		$request->setAttempts(0);
+		$bot = new Bot();
+		$bot->setId(7);
+		$bot->setIsActive(true);
+		$bot->setMentionName('@bot');
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
+		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
+		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
+		$rateLimitService->expects($this->exactly(2))
+			->method('getQueueStats')
+			->willReturnOnConsecutiveCalls(
+				['pending' => 1, 'processing' => 0, 'completed' => 0, 'failed' => 0, 'total' => 1],
+				['pending' => 0, 'processing' => 1, 'completed' => 0, 'failed' => 0, 'total' => 1]
+			);
+		$rateLimitService->expects($this->once())->method('canProcess')->willReturn(true);
+		$rateLimitService->expects($this->once())->method('getNextPending')->willReturn($request);
+		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
+		$rateLimitService->expects($this->once())->method('recordUsage');
+		$this->expectResponseReady($rateLimitService, $request, 'Queued answer.');
+		$rateLimitService->expects($this->once())
+			->method('markResponseDeliveryAttempt')
+			->with($request)
+			->willThrowException(new \LogicException(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE));
+		$rateLimitService->expects($this->never())->method('markCompleted');
+		$rateLimitService->expects($this->never())->method('markProcessingFailed');
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('processMessage')->willReturn('Queued answer.');
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->never())->method('sendReplyToTalk');
+		$talkHandler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(91);
+		$traceService->expects($this->never())->method('recordEvent');
+		$traceService->expects($this->once())
+			->method('finishRun')
+			->with(91, 'partial', 'Queued response delivery ownership transferred to another worker');
+
+		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
+		$this->assertSame([
+			'success' => true,
+			'processed' => 0,
+			'remaining' => 0,
+			'errors' => [],
+		], $controller->processQueue()->getData());
+		$this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
+		$this->assertSame('Queued answer.', $request->getResult());
+	}
+
+	public function testPostClaimReadFailureDefersDeliveryWithoutUserFailureReply(): void {
+		$request = $this->createRequest();
+		$request->setAttempts(0);
+		$bot = new Bot();
+		$bot->setId(7);
+		$bot->setIsActive(true);
+		$bot->setMentionName('@bot');
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
+		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
+		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
+		$rateLimitService->expects($this->exactly(2))
+			->method('getQueueStats')
+			->willReturnOnConsecutiveCalls(
+				['pending' => 1, 'processing' => 0, 'completed' => 0, 'failed' => 0, 'total' => 1],
+				['pending' => 0, 'processing' => 1, 'completed' => 0, 'failed' => 0, 'total' => 1]
+			);
+		$rateLimitService->expects($this->once())->method('canProcess')->willReturn(true);
+		$rateLimitService->expects($this->once())->method('getNextPending')->willReturn($request);
+		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
+		$rateLimitService->expects($this->once())->method('recordUsage');
+		$this->expectResponseReady($rateLimitService, $request, 'Queued answer.');
+		$rateLimitService->expects($this->once())
+			->method('markResponseDeliveryAttempt')
+			->with($request)
+			->willThrowException(new \RuntimeException('database unavailable'));
+		$rateLimitService->expects($this->never())->method('markProcessingFailed');
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
+		$rateLimitService->expects($this->never())->method('markResponseDeliveryFailed');
+		$rateLimitService->expects($this->never())->method('markResponseDeliveryRetry');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('processMessage')->willReturn('Queued answer.');
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->never())->method('sendReplyToTalk');
+		$talkHandler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+		$summary = 'Queued response persisted, but delivery reconciliation was deferred: database unavailable';
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(92);
+		$traceService->expects($this->once())
+			->method('recordEvent')
+			->with(92, 'queue_delivery', [
+				'status' => 'reconciliation_deferred',
+				'error_message' => $summary,
+			]);
+		$traceService->expects($this->once())->method('finishRun')->with(92, 'partial', $summary);
+
+		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
+		$this->assertSame([
+			'success' => true,
+			'processed' => 0,
+			'remaining' => 0,
+			'errors' => [$summary],
+		], $controller->processQueue()->getData());
+		$this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
+		$this->assertSame('Queued answer.', $request->getResult());
+	}
+
+	public function testOldDeliveryOwnerRetryPersistenceIsNeutralAfterLeaseTransfer(): void {
+		$request = $this->createReadyRequest(1);
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
+		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([$request]);
+		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(false);
+		$rateLimitService->expects($this->once())
+			->method('getQueueStats')
+			->willReturn(['pending' => 0, 'processing' => 1, 'completed' => 0, 'failed' => 0, 'total' => 1]);
+		$this->expectDeliveryAttempt($rateLimitService, $request);
+		$rateLimitService->expects($this->once())
+			->method('markResponseDeliveryRetry')
+			->with($request, 'HTTP 503')
+			->willThrowException(new \LogicException(RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE));
+		$rateLimitService->expects($this->never())->method('markResponseDeliveryFailed');
+		$rateLimitService->expects($this->never())->method('markCompleted');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->never())->method('findById');
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->never())->method('processMessage');
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->once())
+			->method('sendReplyToTalkWithOutcome')
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_RETRYABLE, 'HTTP 503', 503));
+		$talkHandler->expects($this->never())->method('sendReplyToTalk');
+		$summary = 'Queued response delivery ownership transferred to another worker';
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(93);
+		$traceService->expects($this->once())
+			->method('recordEvent')
+			->with(93, 'queue_delivery', [
+				'status' => 'started',
+				'payload' => ['reference_id' => $request->getDeliveryReferenceId()],
+			]);
+		$traceService->expects($this->once())->method('finishRun')->with(93, 'partial', $summary);
+
+		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
+		$this->assertSame([
+			'success' => true,
+			'processed' => 0,
+			'remaining' => 0,
+			'errors' => [],
 		], $controller->processQueue()->getData());
 	}
 
@@ -536,6 +764,7 @@ class SettingsControllerTest extends TestCase {
 		$bot->setIsActive(true);
 		$bot->setMentionName('@bot');
 		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
 		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
 		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
 		$rateLimitService->expects($this->exactly(2))
@@ -553,8 +782,8 @@ class SettingsControllerTest extends TestCase {
 			->with($request, 'Queued answer.')
 			->willThrowException(new \RuntimeException('database unavailable'));
 		$error = 'Queued response persistence failed: database unavailable';
-		$rateLimitService->expects($this->once())->method('markFailed')->with($request, $error);
-		$rateLimitService->expects($this->never())->method('markForRetry');
+		$rateLimitService->expects($this->once())->method('markProcessingFailed')->with($request, $error);
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
 		$rateLimitService->expects($this->never())->method('markCompleted');
 
 		$botMapper = $this->createMock(BotMapper::class);
@@ -597,8 +826,21 @@ class SettingsControllerTest extends TestCase {
 			->with($request)
 			->willReturnCallback(static function (QueuedRequest $queuedRequest): QueuedRequest {
 				$queuedRequest->incrementAttempts();
+				$queuedRequest->setStatus(QueuedRequest::STATUS_DELIVERING);
 				return $queuedRequest;
 			});
+	}
+
+	private function expectLeaseRecovery(RateLimitService $rateLimitService, int $times = 1): void {
+		$rateLimitService->expects($this->exactly($times))->method('failExhaustedPendingRequests')->willReturn(0);
+		$rateLimitService->expects($this->exactly($times))->method('recoverStaleResponseDeliveries')->willReturn(0);
+	}
+
+	/**
+	 * @return array{status: string, error: ?string, http_status: ?int}
+	 */
+	private function deliveryOutcome(string $status, ?string $error = null, ?int $httpStatus = null): array {
+		return ['status' => $status, 'error' => $error, 'http_status' => $httpStatus];
 	}
 
 	private function createRequest(): QueuedRequest {

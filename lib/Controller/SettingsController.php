@@ -392,12 +392,14 @@ class SettingsController extends Controller {
 		try {
 			$processedCount = 0;
 			$errors = [];
+			$this->rateLimitService->failExhaustedPendingRequests();
+			$this->rateLimitService->recoverStaleResponseDeliveries();
 			$readyRequests = $this->rateLimitService->getResponseReadyRequests(10);
 			foreach ($readyRequests as $request) {
 				$result = $this->processResponseReadyRequest($request);
-				if ($result['success']) {
+				if ($result['success'] && !($result['skipped'] ?? false)) {
 					$processedCount++;
-				} else {
+				} elseif (!$result['success']) {
 					$errors[] = $result['error'];
 				}
 			}
@@ -449,17 +451,11 @@ class SettingsController extends Controller {
 					break;
 				}
 
-				// Skip stale requests (older than 1 hour)
-				if ($request->isStale(3600)) {
-					$this->rateLimitService->markFailed($request, 'Request expired (too old)');
-					continue;
-				}
-
 				// Process the request
 				$result = $this->processQueuedRequest($request);
-				if ($result['success']) {
+				if ($result['success'] && !($result['skipped'] ?? false)) {
 					$processedCount++;
-				} else {
+				} elseif (!$result['success']) {
 					$errors[] = $result['error'];
 				}
 
@@ -486,11 +482,25 @@ class SettingsController extends Controller {
 
 	/**
 	 * Process a single queued request
-	 * 
-	 * @return array{success: bool, error?: string}
+	 *
+	 * @return array{success: bool, error?: string, skipped?: bool}
 	 */
 	private function processQueuedRequest(QueuedRequest $request): array {
-		$this->rateLimitService->markProcessing($request);
+		try {
+			$this->rateLimitService->markProcessing($request);
+		} catch (\LogicException $e) {
+			if (!$this->isProcessingClaimLost($e)) {
+				throw $e;
+			}
+			$this->logger->debug('Skipping queued request claimed by another worker', [
+				'request_id' => $request->getId(),
+			]);
+			return ['success' => true, 'skipped' => true];
+		}
+		if ($request->isStale(3600)) {
+			$this->failProcessingIfOwned($request, 'Request expired (too old)');
+			return ['success' => true, 'skipped' => true];
+		}
 		$this->rateLimitService->recordUsage();
 		$traceRunId = null;
 		$traceStatus = null;
@@ -498,9 +508,9 @@ class SettingsController extends Controller {
 		$agentExecutionStarted = false;
 		$executionFailed = false;
 		$terminalNotification = null;
-		$deliveryFailed = false;
 		$deliverySucceeded = false;
 		$agentExecutionCompleted = false;
+		$responsePersisted = false;
 
 		try {
 			$bot = $this->botMapper->findById($request->getBotId());
@@ -535,21 +545,24 @@ class SettingsController extends Controller {
 			$agentExecutionCompleted = true;
 
 			$this->rateLimitService->markResponseReady($request, $response);
+			$responsePersisted = true;
 			$request = $this->rateLimitService->markResponseDeliveryAttempt($request);
-			$deliveryFailed = true;
-			$delivered = $this->talkHandler->sendReplyToTalk(
+			$deliveryOutcome = $this->talkHandler->sendReplyToTalkWithOutcome(
 				$request->getRoomToken(),
 				$response,
 				$request->getReplyToMessageId() ?? 0,
 				$request->getDeliveryReferenceId()
 			);
-			if (!$delivered) {
+			if ($deliveryOutcome['status'] !== TalkHandler::DELIVERY_SUCCESS) {
 				$traceStatus = 'partial';
-				throw new Exception('Failed to deliver queued response to Talk');
+				$traceErrorSummary = $this->persistDeliveryFailure($request, $deliveryOutcome, $traceRunId);
+				return ['success' => false, 'error' => $traceErrorSummary];
 			}
-			$deliveryFailed = false;
 			$deliverySucceeded = true;
 
+			// A persistence failure after Talk accepted the response stays in the
+			// delivery-only lane: the agent/provider/tools are never re-run, but lease
+			// recovery may resend the stored response up to the bounded attempt budget.
 			try {
 				$this->rateLimitService->markCompleted($request, $response);
 			} catch (\Throwable $e) {
@@ -573,9 +586,27 @@ class SettingsController extends Controller {
 		} catch (DoesNotExistException $e) {
 			$traceStatus = 'error';
 			$traceErrorSummary = 'Bot no longer exists';
-			$this->rateLimitService->markFailed($request, 'Bot no longer exists');
+			if (!$this->failProcessingIfOwned($request, 'Bot no longer exists')) {
+				return ['success' => true, 'skipped' => true];
+			}
 			return ['success' => false, 'error' => 'Bot not found'];
 		} catch (Exception $e) {
+			if ($this->isProcessingClaimLost($e)) {
+				$traceStatus = 'partial';
+				$traceErrorSummary = 'Queued processing ownership was lost; the current owner was left unchanged';
+				$this->logger->warning('Queued processing ownership was lost', [
+					'request_id' => $request->getId(),
+				]);
+				return ['success' => true, 'skipped' => true];
+			}
+			if ($responsePersisted && $this->isResponseDeliveryClaimLost($e)) {
+				$traceStatus = 'partial';
+				$traceErrorSummary = 'Queued response delivery ownership transferred to another worker';
+				$this->logger->debug('Queued response delivery ownership transferred', [
+					'request_id' => $request->getId(),
+				]);
+				return ['success' => true, 'skipped' => true];
+			}
 			if ($deliverySucceeded) {
 				if ($traceStatus !== 'partial') {
 					$traceStatus = 'partial';
@@ -588,19 +619,25 @@ class SettingsController extends Controller {
 
 				return ['success' => false, 'error' => $traceErrorSummary];
 			}
-			if ($deliveryFailed) {
+			if ($responsePersisted) {
 				$traceStatus = 'partial';
-				$traceErrorSummary = $e->getMessage();
-				$this->rateLimitService->markResponseDeliveryFailed($request, 'Delivery failed: ' . $e->getMessage());
+				$traceErrorSummary = 'Queued response persisted, but delivery reconciliation was deferred: ' . $e->getMessage();
+				$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+					'status' => 'reconciliation_deferred',
+					'error_message' => $traceErrorSummary,
+				]);
+				$this->logger->error('Queued delivery reconciliation deferred after response persistence', [
+					'request_id' => $request->getId(),
+					'exception' => $e->getMessage(),
+				]);
+
 				return ['success' => false, 'error' => $traceErrorSummary];
 			}
 			if ($agentExecutionCompleted) {
 				$traceStatus = 'partial';
 				$traceErrorSummary = 'Queued response persistence failed: ' . $e->getMessage();
-				if ($request->getStatus() === QueuedRequest::STATUS_RESPONSE_READY) {
-					$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
-				} else {
-					$this->rateLimitService->markFailed($request, $traceErrorSummary);
+				if (!$this->failProcessingIfOwned($request, $traceErrorSummary)) {
+					return ['success' => true, 'skipped' => true];
 				}
 				$this->traceService->recordEvent($traceRunId, 'queue_persistence', [
 					'status' => 'error',
@@ -613,7 +650,9 @@ class SettingsController extends Controller {
 			}
 			$traceErrorSummary = $e->getMessage();
 			if ($agentExecutionStarted) {
-				$this->rateLimitService->markFailed($request, 'Agent execution failed: ' . $e->getMessage());
+				if (!$this->failProcessingIfOwned($request, 'Agent execution failed: ' . $e->getMessage())) {
+					return ['success' => true, 'skipped' => true];
+				}
 				if ($terminalNotification !== null) {
 					$this->talkHandler->sendReplyToTalk(
 						$request->getRoomToken(),
@@ -622,9 +661,13 @@ class SettingsController extends Controller {
 					);
 				}
 			} elseif ($request->getAttempts() < QueuedRequest::MAX_ATTEMPTS) {
-				$this->rateLimitService->markForRetry($request, $e->getMessage());
+				if (!$this->retryProcessingIfOwned($request, $e->getMessage())) {
+					return ['success' => true, 'skipped' => true];
+				}
 			} else {
-				$this->rateLimitService->markFailed($request, 'Max retries exceeded: ' . $e->getMessage());
+				if (!$this->failProcessingIfOwned($request, 'Max retries exceeded: ' . $e->getMessage())) {
+					return ['success' => true, 'skipped' => true];
+				}
 			}
 			return ['success' => false, 'error' => $e->getMessage()];
 		} finally {
@@ -645,13 +688,6 @@ class SettingsController extends Controller {
 		$referenceId = $request->getDeliveryReferenceId();
 
 		try {
-			if ($result === null || trim($result) === '') {
-				$traceStatus = 'error';
-				$traceErrorSummary = 'Stored queued response is empty';
-				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
-				return ['success' => false, 'error' => $traceErrorSummary];
-			}
-
 			if ($request->getAttempts() >= QueuedRequest::MAX_ATTEMPTS) {
 				$traceErrorSummary = 'Queued response delivery attempts exhausted';
 				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
@@ -664,23 +700,25 @@ class SettingsController extends Controller {
 
 			$request = $this->rateLimitService->markResponseDeliveryAttempt($request);
 
+			if ($result === null || trim($result) === '') {
+				$traceStatus = 'error';
+				$traceErrorSummary = 'Stored queued response is empty';
+				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
+				return ['success' => false, 'error' => $traceErrorSummary];
+			}
+
 			$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
 				'status' => 'started',
 				'payload' => ['reference_id' => $referenceId],
 			]);
-			$delivered = $this->talkHandler->sendReplyToTalk(
+			$deliveryOutcome = $this->talkHandler->sendReplyToTalkWithOutcome(
 				$request->getRoomToken(),
 				$result,
 				$request->getReplyToMessageId() ?? 0,
 				$referenceId
 			);
-			if (!$delivered) {
-				$traceErrorSummary = 'Failed to reconcile stored queued response delivery';
-				$this->rateLimitService->markResponseDeliveryFailed($request, $traceErrorSummary);
-				$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
-					'status' => 'error',
-					'error_message' => $traceErrorSummary,
-				]);
+			if ($deliveryOutcome['status'] !== TalkHandler::DELIVERY_SUCCESS) {
+				$traceErrorSummary = $this->persistDeliveryFailure($request, $deliveryOutcome, $traceRunId);
 				return ['success' => false, 'error' => $traceErrorSummary];
 			}
 
@@ -702,6 +740,13 @@ class SettingsController extends Controller {
 			]);
 			return ['success' => true];
 		} catch (\Throwable $e) {
+			if ($this->isResponseDeliveryClaimLost($e)) {
+				$traceErrorSummary = 'Queued response delivery ownership transferred to another worker';
+				$this->logger->debug('Queued response delivery ownership transferred', [
+					'request_id' => $request->getId(),
+				]);
+				return ['success' => true, 'skipped' => true];
+			}
 			$traceErrorSummary ??= 'Queued response delivery reconciliation failed: ' . $e->getMessage();
 			$this->logger->error('Queued response delivery reconciliation failed', [
 				'request_id' => $request->getId(),
@@ -711,6 +756,71 @@ class SettingsController extends Controller {
 		} finally {
 			$this->traceService->finishRun($traceRunId, $traceStatus, $traceErrorSummary);
 		}
+	}
+
+	/**
+	 * @param array{status: string, error: ?string, http_status: ?int} $outcome
+	 */
+	private function persistDeliveryFailure(QueuedRequest $request, array $outcome, ?int $traceRunId): string {
+		$error = $outcome['error'] ?? 'Talk delivery failed without an error detail';
+		$retryable = $outcome['status'] === TalkHandler::DELIVERY_RETRYABLE
+			|| $outcome['status'] === TalkHandler::DELIVERY_AMBIGUOUS;
+		$stored = $retryable
+			? $this->rateLimitService->markResponseDeliveryRetry($request, $error)
+			: $this->rateLimitService->markResponseDeliveryFailed($request, $error);
+		$retryScheduled = $stored->getStatus() === QueuedRequest::STATUS_RESPONSE_READY;
+
+		$this->traceService->recordEvent($traceRunId, 'queue_delivery', [
+			'status' => $retryScheduled ? 'retry_scheduled' : 'error',
+			'error_message' => $stored->getError() ?? $error,
+			'payload' => [
+				'delivery_outcome' => $outcome['status'],
+				'http_status' => $outcome['http_status'],
+				'attempts' => $stored->getAttempts(),
+			],
+		]);
+
+		return $stored->getError() ?? $error;
+	}
+
+	private function failProcessingIfOwned(QueuedRequest $request, string $error): bool {
+		try {
+			$this->rateLimitService->markProcessingFailed($request, $error);
+			return true;
+		} catch (\LogicException $e) {
+			if (!$this->isProcessingClaimLost($e)) {
+				throw $e;
+			}
+			$this->logger->warning('Ignoring stale processing failure from a former queue owner', [
+				'request_id' => $request->getId(),
+			]);
+			return false;
+		}
+	}
+
+	private function retryProcessingIfOwned(QueuedRequest $request, string $error): bool {
+		try {
+			$this->rateLimitService->markProcessingRetry($request, $error);
+			return true;
+		} catch (\LogicException $e) {
+			if (!$this->isProcessingClaimLost($e)) {
+				throw $e;
+			}
+			$this->logger->warning('Ignoring stale processing retry from a former queue owner', [
+				'request_id' => $request->getId(),
+			]);
+			return false;
+		}
+	}
+
+	private function isProcessingClaimLost(\Throwable $e): bool {
+		return $e instanceof \LogicException
+			&& $e->getMessage() === RateLimitService::PROCESSING_CLAIM_LOST_MESSAGE;
+	}
+
+	private function isResponseDeliveryClaimLost(\Throwable $e): bool {
+		return $e instanceof \LogicException
+			&& $e->getMessage() === RateLimitService::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE;
 	}
 
 	private function startQueuedTrace(QueuedRequest $request, Bot $bot): ?int {

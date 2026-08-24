@@ -23,6 +23,8 @@ class LLMClient {
 	private const CONTINUED_USER_PLACEHOLDER = '(continued)';
 	private const PROVIDER_ERROR_BODY_LIMIT = 500;
 	private const FALLBACK_CAUSE_OPTION = '_fallback_cause';
+	private const QUARANTINE_LEGACY_STREAM_CONTENT_OPTION = '_quarantine_legacy_stream_content';
+	private const STREAM_TO_SYNC_RETRY_REASON = 'stream_to_sync_retry';
 	private const FALLBACK_CAUSES = [
 		'timeout',
 		'network',
@@ -169,17 +171,11 @@ class LLMClient {
 			true,
 		);
 		$streamStarted = false;
-		$trackedOnChunk = function (array $delta) use ($onChunk, &$streamStarted): void {
-			if ($delta !== []) {
-				$streamStarted = true;
-			}
-			$onChunk($delta);
-		};
 
 		try {
-			return $this->streamResolvedChatCompletionWithCompatibilityRetries(
+			return $this->streamResolvedRouteWithRecovery(
 				$fullMessages,
-				$trackedOnChunk,
+				$onChunk,
 				$modelConfig,
 				$settings,
 				$options,
@@ -187,11 +183,15 @@ class LLMClient {
 				'selected',
 			);
 		} catch (\Exception $e) {
-			if ($this->isNonRetryableProviderException($e)) {
+			$canFallbackAfterHiddenIncompleteStream = $e instanceof IncompleteProviderStreamException
+				&& !$streamStarted
+				&& !empty($options[self::QUARANTINE_LEGACY_STREAM_CONTENT_OPTION])
+				&& $this->providerCompatibilityMode($modelConfig['id'], $options) !== ProviderResponseNormalizer::COMPATIBILITY_OFF;
+			if ($this->isNonRetryableProviderException($e) && !$canFallbackAfterHiddenIncompleteStream) {
 				throw $e;
 			}
 			$fallbackOptions = $this->withFallbackCause($options, $e);
-			$fallbackConfig = !$streamStarted && $this->isFallbackEligibleException($e)
+			$fallbackConfig = !$streamStarted && ($canFallbackAfterHiddenIncompleteStream || $this->isFallbackEligibleException($e))
 				? $this->tryResolveFallbackModelConfig($settings, $modelConfig, $e, $fallbackOptions, true)
 				: null;
 			if ($fallbackConfig !== null) {
@@ -202,9 +202,9 @@ class LLMClient {
 				]);
 
 				try {
-					return $this->streamResolvedChatCompletionWithCompatibilityRetries(
+					return $this->streamResolvedRouteWithRecovery(
 						$fullMessages,
-						$trackedOnChunk,
+						$onChunk,
 						$fallbackConfig,
 						$settings,
 						$fallbackOptions,
@@ -222,12 +222,62 @@ class LLMClient {
 					throw new \Exception(self::STREAM_FAILURE_MESSAGE, 0, $fallbackException);
 				}
 			}
+			if ($canFallbackAfterHiddenIncompleteStream) {
+				throw $e;
+			}
 
 			$this->logger->error('LLM Streaming failed: ' . $e->getMessage(), [
 				'exception' => $e,
 				'model' => $modelConfig['id'],
 			]);
 			throw new \Exception(self::STREAM_FAILURE_MESSAGE, 0, $e);
+		}
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $fullMessages
+	 * @param array{id:string,endpoint_key:string,endpoint:string,api_key:string,model:string} $modelConfig
+	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>
+	 */
+	private function streamResolvedRouteWithRecovery(
+		array $fullMessages,
+		callable $onChunk,
+		array $modelConfig,
+		$settings,
+		array $options,
+		bool &$streamStarted,
+		string $route,
+	): array {
+		try {
+			return $this->streamResolvedChatCompletionWithCompatibilityRetries(
+				$fullMessages,
+				$onChunk,
+				$modelConfig,
+				$settings,
+				$options,
+				$streamStarted,
+				$route,
+			);
+		} catch (\Exception $e) {
+			if ($streamStarted || !$this->isServerHttpError($e)) {
+				throw $e;
+			}
+
+			$this->logger->warning('LLM streaming failed with a server error before first public chunk, retrying synchronously', [
+				'exception' => $e,
+				'model' => $modelConfig['id'],
+				'route' => $route,
+			]);
+
+			return $this->sendResolvedChatCompletion(
+				$fullMessages,
+				$modelConfig,
+				$settings,
+				$this->withInitialModelParameterProfile($options, $modelConfig['model']),
+				$route,
+				self::STREAM_TO_SYNC_RETRY_REASON,
+			);
 		}
 	}
 
@@ -244,8 +294,21 @@ class LLMClient {
 		?string $modelOverride = null,
 		array $options = [],
 	): AgentTurn {
+		$options[self::QUARANTINE_LEGACY_STREAM_CONTENT_OPTION] = true;
 		$response = $this->streamChatCompletion($systemPrompt, $messages, $onChunk, $modelOverride, $options);
-		return $this->normalizeAgentTurn($response, $knownToolNames, $options);
+		$turn = $this->normalizeAgentTurn($response, $knownToolNames, $options);
+		$modelReference = is_string($response['model_reference'] ?? null)
+			? $response['model_reference']
+			: (is_string($response['model'] ?? null) ? $response['model'] : null);
+		if (
+			$this->providerCompatibilityMode($modelReference, $options) !== ProviderResponseNormalizer::COMPATIBILITY_OFF
+			&& $turn->getToolCalls() === []
+			&& $turn->getText() !== ''
+		) {
+			$onChunk(['content' => $turn->getText()]);
+		}
+
+		return $turn;
 	}
 
 	/**
@@ -269,7 +332,12 @@ class LLMClient {
 		return [
 			'endpoint' => $modelConfig['endpoint_key'],
 			'model_reference' => $modelConfig['id'],
-			'payload' => $this->buildPayload($modelConfig['model'], $fullMessages, $options, $stream),
+			'payload' => $this->buildPayload(
+				$modelConfig['model'],
+				$fullMessages,
+				$this->withInitialModelParameterProfile($options, $modelConfig['model']),
+				$stream,
+			),
 		];
 	}
 
@@ -279,9 +347,10 @@ class LLMClient {
 	 * @param array<string,mixed> $options
 	 */
 	private function normalizeAgentTurn(array $response, array $knownToolNames, array $options): AgentTurn {
-		$compatibilityMode = is_string($options['legacy_tool_call_compatibility'] ?? null)
-			? $options['legacy_tool_call_compatibility']
-			: ProviderResponseNormalizer::COMPATIBILITY_OFF;
+		$modelReference = is_string($response['model_reference'] ?? null)
+			? $response['model_reference']
+			: (is_string($response['model'] ?? null) ? $response['model'] : null);
+		$compatibilityMode = $this->providerCompatibilityMode($modelReference, $options);
 		$turn = $this->responseNormalizer->normalize($response, $knownToolNames, $compatibilityMode);
 
 		if ($turn->getCompatibilitySource() !== AgentTurn::COMPATIBILITY_NATIVE) {
@@ -299,6 +368,17 @@ class LLMClient {
 		}
 
 		return $turn;
+	}
+
+	/** @param array<string,mixed> $options */
+	private function providerCompatibilityMode(?string $modelReference, array $options): string {
+		$explicitMode = array_key_exists('legacy_tool_call_compatibility', $options)
+			? (is_string($options['legacy_tool_call_compatibility'])
+				? $options['legacy_tool_call_compatibility']
+				: ProviderResponseNormalizer::COMPATIBILITY_OFF)
+			: null;
+
+		return $this->responseNormalizer->resolveCompatibilityMode($modelReference, $explicitMode);
 	}
 
 	/**
@@ -626,6 +706,7 @@ class LLMClient {
 		array $options,
 		string $route,
 	): array {
+		$options = $this->withInitialModelParameterProfile($options, $modelConfig['model']);
 		try {
 			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options, $route, 'initial');
 		} catch (\Exception $e) {
@@ -674,11 +755,29 @@ class LLMClient {
 		bool &$streamStarted,
 		string $route,
 	): array {
-		$retryOptions = $options;
+		$retryOptions = $this->withInitialModelParameterProfile($options, $modelConfig['model']);
+		$compatibilityMode = $this->providerCompatibilityMode($modelConfig['id'], $options);
+		$quarantineContent = !empty($options[self::QUARANTINE_LEGACY_STREAM_CONTENT_OPTION])
+			&& $compatibilityMode !== ProviderResponseNormalizer::COMPATIBILITY_OFF;
+		$providerOnChunk = static function (array $delta) use ($onChunk, &$streamStarted, $quarantineContent): void {
+			if (!$quarantineContent) {
+				if ($delta !== []) {
+					$streamStarted = true;
+				}
+				$onChunk($delta);
+				return;
+			}
+
+			$delta = array_intersect_key($delta, ['tool_calls' => true]);
+			if ($delta !== []) {
+				$streamStarted = true;
+				$onChunk($delta);
+			}
+		};
 		try {
 			return $this->streamResolvedChatCompletion(
 				$fullMessages,
-				$onChunk,
+				$providerOnChunk,
 				$modelConfig,
 				$settings,
 				$retryOptions,
@@ -694,7 +793,7 @@ class LLMClient {
 				try {
 					return $this->streamResolvedChatCompletion(
 						$fullMessages,
-						$onChunk,
+						$providerOnChunk,
 						$modelConfig,
 						$settings,
 						$retryOptions,
@@ -714,7 +813,7 @@ class LLMClient {
 				try {
 					return $this->streamResolvedChatCompletion(
 						$fullMessages,
-						$onChunk,
+						$providerOnChunk,
 						$modelConfig,
 						$settings,
 						$retryOptions,
@@ -917,6 +1016,7 @@ class LLMClient {
 		$usage = null;
 		$finishReason = null;
 		$responseModel = $modelConfig['model'];
+		$sawChoiceFrame = false;
 
 		while (!feof($body)) {
 			$line = fgets($body);
@@ -958,8 +1058,31 @@ class LLMClient {
 					throw new ProviderContractException();
 				}
 				if (!$hasChoices || $choices === []) {
-					if (!$hasUsage) {
+					$allowedKeys = [
+						'id',
+						'created',
+						'model',
+						'object',
+						'choices',
+						'system_fingerprint',
+						'service_tier',
+						'obfuscation',
+					];
+					if ($hasUsage) {
+						$allowedKeys[] = 'usage';
+						if (array_diff(array_keys($chunk), $allowedKeys) !== []) {
+							throw new ProviderContractException();
+						}
+					} elseif (
+						!$hasChoices
+						|| $sawChoiceFrame
+						|| count($chunk) < 2
+						|| array_diff(array_keys($chunk), $allowedKeys) !== []
+						|| !$this->isValidStreamMetadataPreamble($chunk)
+					) {
 						throw new ProviderContractException();
+					} else {
+						continue;
 					}
 					$choice = [];
 				} else {
@@ -967,6 +1090,7 @@ class LLMClient {
 					if (!is_array($choice)) {
 						throw new ProviderContractException();
 					}
+					$sawChoiceFrame = true;
 				}
 				$chunkFinishReason = $this->validFinishReason($choice['finish_reason'] ?? null);
 				if ($chunkFinishReason !== null) {
@@ -1051,6 +1175,25 @@ class LLMClient {
 		return is_string($finishReason) && trim($finishReason) !== '' ? $finishReason : null;
 	}
 
+	/** @param array<string,mixed> $chunk */
+	private function isValidStreamMetadataPreamble(array $chunk): bool {
+		foreach (['id', 'model', 'object'] as $key) {
+			if (array_key_exists($key, $chunk) && !is_string($chunk[$key])) {
+				return false;
+			}
+		}
+		if (array_key_exists('created', $chunk) && !is_int($chunk['created'])) {
+			return false;
+		}
+		foreach (['system_fingerprint', 'service_tier', 'obfuscation'] as $key) {
+			if (array_key_exists($key, $chunk) && !is_string($chunk[$key]) && $chunk[$key] !== null) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	/**
 	 * @param array<int,array<string,mixed>> $fullMessages
 	 * @param array<string,mixed> $options
@@ -1063,8 +1206,8 @@ class LLMClient {
 		];
 		$maxTokens = $options['max_tokens'] ?? 1000;
 
-		// Default is classic OpenAI-compatible params. Reasoning-style
-		// max_completion_tokens is used only after a 400/422 remap retry.
+		// Default to classic OpenAI-compatible params. Known reasoning models
+		// and the bounded compatibility retry use max_completion_tokens.
 		if (!empty($options['_use_reasoning_parameters'])) {
 			$payload['max_completion_tokens'] = $maxTokens;
 		} else {
@@ -1571,6 +1714,9 @@ class LLMClient {
 		if (array_key_exists('stream_options', $options) || !empty($options['_disable_stream_usage'])) {
 			return false;
 		}
+		if ($this->isInvalidModelHttpError($e)) {
+			return false;
+		}
 
 		return in_array((int)$e->getCode(), [400, 422], true);
 	}
@@ -1580,6 +1726,9 @@ class LLMClient {
 	 */
 	private function shouldRetryWithReasoningParameters(\Exception $e, array $options, string $model = ''): bool {
 		if (!empty($options['_use_reasoning_parameters'])) {
+			return false;
+		}
+		if ($this->isInvalidModelHttpError($e)) {
 			return false;
 		}
 
@@ -1592,6 +1741,47 @@ class LLMClient {
 
 	private function modelRejectsReasoningTokenParameters(string $model): bool {
 		return preg_match('/mistral|codestral/i', $model) === 1;
+	}
+
+	/** @param array<string,mixed> $options */
+	private function withInitialModelParameterProfile(array $options, string $model): array {
+		if ($this->modelUsesReasoningTokenParameters($model)) {
+			$options['_use_reasoning_parameters'] = true;
+		}
+
+		return $options;
+	}
+
+	private function modelUsesReasoningTokenParameters(string $model): bool {
+		return preg_match('/(?:^|[\\/:])(?:gpt-5|claude-sonnet-5)(?:[._-]|$)/i', $model) === 1;
+	}
+
+	private function isInvalidModelHttpError(\Exception $exception): bool {
+		if (!in_array($this->httpStatusFromException($exception), [400, 422], true)) {
+			return false;
+		}
+
+		$message = strtolower($exception->getMessage());
+		foreach ([
+			'invalid model',
+			'invalid_model',
+			'unknown model',
+			'model_not_found',
+			'model not found',
+			'no such model',
+			'model does not exist',
+		] as $marker) {
+			if (str_contains($message, $marker)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function isServerHttpError(\Exception $exception): bool {
+		$status = $this->httpStatusFromException($exception);
+		return $status !== null && $status >= 500 && $status < 600;
 	}
 
 	private function modelRejectsSamplingExtras(string $model): bool {

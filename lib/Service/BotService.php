@@ -769,6 +769,7 @@ class BotService {
 	 * @param int|null $traceRunId App-owned trace run ID for best-effort personal activity capture
 	 * @param callable(?string):void|null $onExecutionError Internal error propagation for the trace owner
 	 * @param callable():void|null $onStreamMismatch Internal warning propagation for the trace owner
+	 * @param callable(string):void|null $onToolProgress Callback for executor-owned tool progress
 	 * @return string
 	 * @throws Exception
 	 */
@@ -787,6 +788,7 @@ class BotService {
 		?int $traceRunId = null,
 		?callable $onExecutionError = null,
 		?callable $onStreamMismatch = null,
+		?callable $onToolProgress = null,
 	): string {
 		$effectiveBot = $this->resolveEffectiveBotForUser($bot, $userId);
 		$messageContext = $this->normalizeMessageContext($messageContext);
@@ -957,25 +959,27 @@ class BotService {
 			}
 		}
 		if ($hasRagTool) {
-			$systemPrompt .= "\n\n## CRITICAL: Document Search Instructions\n";
-			$systemPrompt .= "You have access to a knowledge base with indexed documents. You MUST follow these rules:\n\n";
+			$systemPrompt .= "\n\n## Document Search Instructions\n";
+			$systemPrompt .= "You have access to a knowledge base with indexed documents. Use it when it is relevant to the user's requested scope:\n\n";
 			if ($attachmentSummary['has_room_documents'] && $hasRoomDocumentTool) {
-				$systemPrompt .= "1. **Prefer room documents first**: If the question is about files uploaded in the current Talk chat, call `room_search_documents` first.\n";
-				$systemPrompt .= "2. **Use the global KB for bot knowledge**: For the bot's permanent knowledge base, call `rag_search_documents`.\n";
-				$systemPrompt .= "3. **Never guess**: Do NOT answer from memory if the answer could be in uploaded documents. Search first!\n";
+				$systemPrompt .= "1. **Respect explicit scope**: If the user explicitly requests a different source or tool and does not ask about these documents, follow that request without calling a document-search tool.\n";
+				$systemPrompt .= "2. **Prefer room documents first**: If the question is about files uploaded in the current Talk chat, call `room_search_documents` first.\n";
+				$systemPrompt .= "3. **Use the global KB for bot knowledge**: For the bot's permanent knowledge base, call `rag_search_documents`.\n";
+				$systemPrompt .= "4. **Do not guess about documents**: Search before answering when the answer should come from uploaded documents.\n";
+				$systemPrompt .= "5. **How to search**: Convert the user's question into search keywords.\n";
+				$systemPrompt .= "6. **After searching**: Read the returned chunks carefully and synthesize an answer based on the document content.\n";
+				$systemPrompt .= "7. **If no results**: Tell the user you couldn't find that information in the documents.\n";
+				$systemPrompt .= "8. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.\n";
+			} else {
+				$systemPrompt .= "1. **Respect explicit scope**: If the user explicitly requests a different source or tool and does not ask about the knowledge base, follow that request without calling `rag_search_documents`.\n";
+				$systemPrompt .= "2. **Search when relevant**: When the user asks about the bot's indexed documents, call `rag_search_documents` before answering.\n";
+				$systemPrompt .= "3. **Do not guess about documents**: Search before answering when the answer should come from the knowledge base.\n";
 				$systemPrompt .= "4. **How to search**: Convert the user's question into search keywords.\n";
+				$systemPrompt .= "   - User asks: \"Was ist der Titel von Modul 3?\" → Search: \"Modul 3 Titel\"\n";
+				$systemPrompt .= "   - User asks: \"What are the requirements?\" → Search: \"requirements prerequisites\"\n";
 				$systemPrompt .= "5. **After searching**: Read the returned chunks carefully and synthesize an answer based on the document content.\n";
 				$systemPrompt .= "6. **If no results**: Tell the user you couldn't find that information in the documents.\n";
 				$systemPrompt .= "7. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.\n";
-			} else {
-				$systemPrompt .= "1. **ALWAYS search first**: Before answering ANY question that might be in the documents, call the `rag_search_documents` tool.\n";
-				$systemPrompt .= "2. **Never guess**: Do NOT answer from memory if the answer could be in the documents. Search first!\n";
-				$systemPrompt .= "3. **How to search**: Convert the user's question into search keywords.\n";
-				$systemPrompt .= "   - User asks: \"Was ist der Titel von Modul 3?\" → Search: \"Modul 3 Titel\"\n";
-				$systemPrompt .= "   - User asks: \"What are the requirements?\" → Search: \"requirements prerequisites\"\n";
-				$systemPrompt .= "4. **After searching**: Read the returned chunks carefully and synthesize an answer based on the document content.\n";
-				$systemPrompt .= "5. **If no results**: Tell the user you couldn't find that information in the documents.\n";
-				$systemPrompt .= "6. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.\n";
 			}
 		}
 		if ($hasWikiTools) {
@@ -998,8 +1002,7 @@ class BotService {
 
 		$partialBuffer = '';
 		$currentAssistantTurnText = '';
-		$lastPartialFlushTime = microtime(true);
-		$flushPartialBuffer = function () use ($onProgress, &$partialBuffer, &$lastPartialFlushTime): void {
+		$releaseAssistantBuffer = function () use ($onProgress, &$partialBuffer): void {
 			if ($onProgress === null || $partialBuffer === '') {
 				return;
 			}
@@ -1009,47 +1012,27 @@ class BotService {
 			if (trim($chunk) !== '') {
 				$onProgress($chunk);
 			}
-			$lastPartialFlushTime = microtime(true);
 		};
-		$batchedProgress = $onProgress === null
+		$discardAssistantBuffer = static function () use (&$partialBuffer, &$currentAssistantTurnText): void {
+			$partialBuffer = '';
+			$currentAssistantTurnText = '';
+		};
+		$assistantProgress = $onProgress === null
 			? null
-			: function (string $partial) use ($onProgress, $flushPartialBuffer, &$partialBuffer, &$currentAssistantTurnText, &$lastPartialFlushTime): void {
+			: static function (string $partial) use (&$partialBuffer, &$currentAssistantTurnText): void {
 				if ($partial === '') {
-					return;
-				}
-
-				if ($this->isImmediateToolProgress($partial)) {
-					$flushPartialBuffer();
-					$currentAssistantTurnText = '';
-					$onProgress($partial);
 					return;
 				}
 
 				$partialBuffer .= $partial;
 				$currentAssistantTurnText .= $partial;
-				$currentTime = microtime(true);
-
-				while (($paragraphEnd = strpos($partialBuffer, "\n\n")) !== false) {
-					$chunk = substr($partialBuffer, 0, $paragraphEnd);
-					$partialBuffer = substr($partialBuffer, $paragraphEnd + 2);
-					if (trim($chunk) !== '') {
-						$onProgress($chunk);
-					}
-					$lastPartialFlushTime = $currentTime;
-				}
-
-				if ($currentTime - $lastPartialFlushTime > 3.0 && strlen($partialBuffer) > 100) {
-					$flushPoint = $this->findSentenceBoundary($partialBuffer);
-					if ($flushPoint > 50) {
-						$chunk = substr($partialBuffer, 0, $flushPoint);
-						$partialBuffer = substr($partialBuffer, $flushPoint);
-						if (trim($chunk) !== '') {
-							$onProgress($chunk);
-						}
-						$lastPartialFlushTime = $currentTime;
-					}
-				}
 			};
+		$toolProgress = static function (string $progress) use ($onToolProgress, $discardAssistantBuffer): void {
+			$discardAssistantBuffer();
+			if ($onToolProgress !== null && $progress !== '') {
+				$onToolProgress($progress);
+			}
+		};
 
 		try {
 			$this->logger->info('Calling LLM API', [
@@ -1070,19 +1053,22 @@ class BotService {
 					'image_source_ids' => $messageContext['image_source_ids'],
 				]);
 
+				$agentOptions = array_filter([
+					'model' => $effectiveBot->getModel(),
+					'temperature' => $resolvedTemperature,
+					'initial_tool_choice' => $initialToolChoice,
+					'on_partial_result' => $assistantProgress,
+					'bot_id' => $effectiveBot->getId(),
+					'built_in_tools' => $builtInToolLoadout,
+					'trace_run_id' => $traceRunId,
+				], static fn ($value) => $value !== null);
+				$agentOptions['on_tool_progress'] = $toolProgress;
+
 				$agentResult = $this->agentExecutor->run(
 					$systemPrompt,
 					$messages,
 					$toolLoadout,
-					array_filter([
-						'model' => $effectiveBot->getModel(),
-						'temperature' => $resolvedTemperature,
-						'initial_tool_choice' => $initialToolChoice,
-						'on_partial_result' => $batchedProgress,
-						'bot_id' => $effectiveBot->getId(),
-						'built_in_tools' => $builtInToolLoadout,
-						'trace_run_id' => $traceRunId,
-					], static fn ($value) => $value !== null)
+					$agentOptions
 				);
 			} finally {
 				$this->toolProviderRegistry->setInvocationContext(null);
@@ -1102,6 +1088,7 @@ class BotService {
 			if (!is_string($assistantMessage)) {
 				throw new Exception('Agent execution returned invalid content');
 			}
+			$assistantMessage = AssistantContentSanitizer::sanitize($assistantMessage);
 
 			$toolInvocations = $agentResult['toolInvocations'] ?? null;
 			if (!is_array($toolInvocations)) {
@@ -1114,7 +1101,22 @@ class BotService {
 			}
 			$this->rateLimitService->updateFromHeaders($rateLimitHeaders);
 
-			if ($onProgress !== null && $agentStatus === 'completed' && $assistantMessage !== '') {
+			if ($agentStatus !== 'completed') {
+				$discardAssistantBuffer();
+				throw new Exception('Agent execution terminated: ' . $terminalReason);
+			}
+			if (trim($assistantMessage) === '') {
+				$discardAssistantBuffer();
+				throw new Exception('Agent execution completed without assistant content');
+			}
+
+			if ($onProgress !== null) {
+				$sanitizedStreamedText = AssistantContentSanitizer::sanitize($currentAssistantTurnText);
+				if ($sanitizedStreamedText !== $currentAssistantTurnText) {
+					$partialBuffer = $sanitizedStreamedText;
+					$currentAssistantTurnText = $sanitizedStreamedText;
+				}
+
 				if ($currentAssistantTurnText === '') {
 					$partialBuffer .= $assistantMessage;
 					$currentAssistantTurnText = $assistantMessage;
@@ -1144,14 +1146,7 @@ class BotService {
 					$currentAssistantTurnText = $assistantMessage;
 				}
 			}
-			$flushPartialBuffer();
-
-			if ($agentStatus !== 'completed') {
-				throw new Exception('Agent execution terminated: ' . $terminalReason);
-			}
-			if (trim($assistantMessage) === '') {
-				throw new Exception('Agent execution completed without assistant content');
-			}
+			$releaseAssistantBuffer();
 
 			$this->logger->info('Got LLM response', [
 				'bot_id' => $effectiveBot->getId(),
@@ -1188,7 +1183,7 @@ class BotService {
 
 			return $assistantMessage;
 		} catch (Exception $e) {
-			$flushPartialBuffer();
+			$discardAssistantBuffer();
 			$this->logger->error('Failed to process bot message: ' . $e->getMessage(), [
 				'bot_id' => $effectiveBot->getId(),
 				'trace_run_id' => $traceRunId,
@@ -1328,36 +1323,6 @@ class BotService {
 		}
 
 		return rtrim($message) . "\n\n[Attachments: " . implode('; ', $labels) . ']';
-	}
-
-	private function isImmediateToolProgress(string $partial): bool {
-		$trimmed = trim($partial);
-		return str_starts_with($trimmed, '🔧 _Using tool: ')
-			|| str_starts_with($trimmed, '🔧 _Using tools: ');
-	}
-
-	private function findSentenceBoundary(string $text): int {
-		$lastPosition = 0;
-		foreach (['. ', '! ', '? ', ".\n", "!\n", "?\n"] as $pattern) {
-			$position = strrpos($text, $pattern);
-			if ($position !== false && $position > $lastPosition) {
-				$lastPosition = $position + strlen($pattern);
-			}
-		}
-
-		$trimmed = rtrim($text);
-		if ($trimmed !== '' && in_array(substr($trimmed, -1), ['.', '!', '?'], true) && strlen($trimmed) === strlen($text)) {
-			return strlen($text);
-		}
-
-		if ($lastPosition === 0) {
-			$newlinePosition = strrpos($text, "\n");
-			if ($newlinePosition !== false && $newlinePosition > 30) {
-				return $newlinePosition + 1;
-			}
-		}
-
-		return $lastPosition;
 	}
 
 	/**
@@ -2793,9 +2758,14 @@ class BotService {
 		$includedLatestUser = false;
 
 		foreach ($reversed as $conv) {
-			$content = $conv->getContent();
-			$tokens = $this->estimateTokens($content);
 			$role = $conv->getRole();
+			$content = $role === 'assistant'
+				? AssistantContentSanitizer::sanitize($conv->getContent())
+				: $conv->getContent();
+			if ($role === 'assistant' && trim($content) === '') {
+				continue;
+			}
+			$tokens = $this->estimateTokens($content);
 
 			// Always include the most recent user message (it's the current query)
 			if (!$includedLatestUser && $role === 'user') {
