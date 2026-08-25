@@ -9,39 +9,159 @@ use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
 use OCA\EducAI\Service\RoomImageIngestionService;
 use OCA\EducAI\Service\SettingsService;
+use OCA\EducAI\Service\TraceService;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCA\EducAI\Webhook\IncomingTalkMessage;
 use OCA\EducAI\Webhook\TalkHandler;
 use OCA\EducAI\Webhook\TalkMessageParser;
+use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
+use OCP\Http\Client\IResponse;
 use OCP\IDBConnection;
 use OCP\IURLGenerator;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class TalkHandlerTest extends TestCase {
-	public function testToolProgressPartialIsProgressOnly(): void {
-		$handler = $this->createTalkHandler();
+	public function testCallerSuppliedReferenceIdIsStableWhileSigningNonceRemainsValid(): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->with('')->willReturn('http://nextcloud.local/');
 
-		$result = $this->invokePrivateMethod($handler, 'isProgressOnlyPartial', ['🔧 _Using tool: tavily_search..._']);
+		$response = $this->createMock(IResponse::class);
+		$response->method('getStatusCode')->willReturn(201);
+		$referenceIds = [];
+		$nonces = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))
+			->method('post')
+			->willReturnCallback(function (string $endpoint, array $options) use ($response, &$referenceIds, &$nonces): IResponse {
+				$this->assertSame('http://nextcloud.local/ocs/v2.php/apps/spreed/api/v1/bot/room-token/message', $endpoint);
+				$body = json_decode((string)$options['body'], true, 512, JSON_THROW_ON_ERROR);
+				$referenceIds[] = $body['referenceId'] ?? null;
+				$this->assertSame('Queued answer.', $body['message'] ?? null);
+				$this->assertSame(123, $body['replyTo'] ?? null);
+				$nonce = (string)$options['headers']['X-Nextcloud-Talk-Bot-Random'];
+				$nonces[] = $nonce;
+				$this->assertSame(
+					hash_hmac('sha256', $nonce . 'Queued answer.', 'talk-secret'),
+					$options['headers']['X-Nextcloud-Talk-Bot-Signature']
+				);
+				return $response;
+			});
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
 
-		$this->assertTrue($result);
+		$handler = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		);
+
+		$this->assertTrue($handler->sendReplyToTalk('room-token', 'Queued answer.', 123, 'stable-reference'));
+		$this->assertTrue($handler->sendReplyToTalk('room-token', 'Queued answer.', 123, 'stable-reference'));
+		$this->assertSame(['stable-reference', 'stable-reference'], $referenceIds);
+		$this->assertCount(2, array_unique($nonces));
 	}
 
-	public function testMultipleToolProgressPartialIsProgressOnly(): void {
-		$handler = $this->createTalkHandler();
+	#[DataProvider('talkHttpOutcomeProvider')]
+	public function testTalkHttpStatusIsClassifiedForQueueDelivery(int $httpStatus, string $expectedOutcome): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$response = $this->createMock(IResponse::class);
+		$response->method('getStatusCode')->willReturn($httpStatus);
+		$response->method('getBody')->willReturn('');
+		$client = $this->createMock(IClient::class);
+		$client->method('post')->willReturn($response);
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->willReturn('http://nextcloud.local/');
 
-		$result = $this->invokePrivateMethod($handler, 'isProgressOnlyPartial', ['🔧 _Using tools: tavily_search, tavily_extract..._']);
+		$outcome = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		)->sendReplyToTalkWithOutcome('room-token', 'Queued answer.');
 
-		$this->assertTrue($result);
+		$this->assertSame($expectedOutcome, $outcome['status']);
+		$this->assertSame($httpStatus, $outcome['http_status']);
+		$this->assertNotNull($outcome['error']);
 	}
 
-	public function testVisibleAssistantPartialIsNotProgressOnly(): void {
-		$handler = $this->createTalkHandler();
+	/**
+	 * @return array<string, array{int, string}>
+	 */
+	public static function talkHttpOutcomeProvider(): array {
+		return [
+			'request timeout' => [408, TalkHandler::DELIVERY_RETRYABLE],
+			'too early' => [425, TalkHandler::DELIVERY_RETRYABLE],
+			'rate limit' => [429, TalkHandler::DELIVERY_RETRYABLE],
+			'server failure' => [503, TalkHandler::DELIVERY_RETRYABLE],
+			'bad request' => [400, TalkHandler::DELIVERY_PERMANENT],
+		];
+	}
 
-		$result = $this->invokePrivateMethod($handler, 'isProgressOnlyPartial', ['Hier ist die Antwort aus den Suchergebnissen.']);
+	#[DataProvider('talkHttpOutcomeProvider')]
+	public function testThrownTalkHttpResponseIsClassifiedFromExceptionChain(int $httpStatus, string $expectedOutcome): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$response = $this->createMock(IResponse::class);
+		$response->method('getStatusCode')->willReturn($httpStatus);
+		$httpException = new class($response) extends \RuntimeException {
+			public function __construct(
+				private IResponse $response,
+			) {
+				parent::__construct('HTTP request failed');
+			}
 
-		$this->assertFalse($result);
+			public function hasResponse(): bool {
+				return true;
+			}
+
+			public function getResponse(): IResponse {
+				return $this->response;
+			}
+		};
+		$client = $this->createMock(IClient::class);
+		$client->method('post')->willThrowException(new \RuntimeException('wrapped HTTP failure', 0, $httpException));
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->willReturn('http://nextcloud.local/');
+
+		$outcome = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		)->sendReplyToTalkWithOutcome('room-token', 'Queued answer.');
+
+		$this->assertSame($expectedOutcome, $outcome['status']);
+		$this->assertSame($httpStatus, $outcome['http_status']);
+		$this->assertNotNull($outcome['error']);
+	}
+
+	public function testTalkTransportExceptionHasExplicitAmbiguousOutcome(): void {
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');
+		$client = $this->createMock(IClient::class);
+		$client->method('post')->willThrowException(new \RuntimeException('timeout'));
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->willReturn('http://nextcloud.local/');
+
+		$outcome = $this->createTalkHandler(
+			settingsService: $settingsService,
+			clientService: $clientService,
+			urlGenerator: $urlGenerator,
+		)->sendReplyToTalkWithOutcome('room-token', 'Queued answer.');
+
+		$this->assertSame(TalkHandler::DELIVERY_AMBIGUOUS, $outcome['status']);
+		$this->assertNull($outcome['http_status']);
+		$this->assertStringContainsString('unknown', (string)$outcome['error']);
 	}
 
 	public function testToolProgressPartialBypassesOpenThinkingBlock(): void {
@@ -54,16 +174,13 @@ class TalkHandlerTest extends TestCase {
 		$botService = $this->createMock(BotService::class);
 		$botService->expects($this->once())
 			->method('processMessage')
-			->willReturnCallback(function (
-				$bot,
-				string $message,
-				string $roomToken,
-				string $userId,
-				?string $originalMessage,
-				callable $onProgress
-			): string {
-				$onProgress('<think>I should transcribe the voice note');
-				$onProgress('🔧 _Using tool: attachment_transcribe_audio..._');
+			->willReturnCallback(function (...$arguments): string {
+				$assistantProgress = $arguments[5] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($toolProgress);
+				$assistantProgress('<think>I should transcribe the voice note');
+				$toolProgress('🔧 _Using tool: attachment_transcribe_audio..._');
 
 				return 'Final audio answer.';
 			});
@@ -112,6 +229,475 @@ class TalkHandlerTest extends TestCase {
 
 		$this->assertContains('🔧 _Using tool: attachment_transcribe_audio..._', $sentMessages);
 		$this->assertContains('Final audio answer.', $sentMessages);
+	}
+
+	public function testStreamedTerminalContentIsNotDuplicatedByFinalReturn(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$sentMessages = [];
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments): string {
+				$progressCallback = $arguments[5] ?? null;
+				$this->assertIsCallable($progressCallback);
+				$progressCallback('Final coalesced answer.');
+
+				return 'Final coalesced answer.';
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->once())
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+				$sentMessages[] = $message;
+				return true;
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame(['Final coalesced answer.'], $sentMessages);
+	}
+
+	public function testAssistantFinalMatchingToolProgressPrefixIsSentExactlyOnce(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$assistantAnswer = '🔧 _Using tool: this_is_the_final_answer..._';
+		$sentMessages = [];
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments) use ($assistantAnswer): string {
+				$assistantProgress = $arguments[5] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($toolProgress);
+				$assistantProgress($assistantAnswer);
+
+				return $assistantAnswer;
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->once())
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+				$sentMessages[] = $message;
+				return true;
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([$assistantAnswer], $sentMessages);
+	}
+
+	#[DataProvider('canonicalRetryOutcomes')]
+	public function testFailedFirstAssistantPartialRetriesCanonicalFinalWithTruthfulTrace(bool $retryDelivered, string $expectedTraceStatus): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$attempts = [];
+		$deliveryResults = [false, $retryDelivered];
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments): string {
+				$progressCallback = $arguments[5] ?? null;
+				$this->assertIsCallable($progressCallback);
+				$progressCallback('First streamed chunk.');
+
+				return 'Canonical full answer.';
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(72);
+		$traceService->expects($this->once())->method('finishRun')->with(72, $expectedTraceStatus, null);
+
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+				$traceService,
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->exactly(2))
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
+				return array_shift($deliveryResults);
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([
+			['message' => 'First streamed chunk.', 'reply_to' => 1234],
+			['message' => 'Canonical full answer.', 'reply_to' => 1234],
+		], $attempts);
+	}
+
+	/**
+	 * @return array<string,array{bool,string}>
+	 */
+	public static function canonicalRetryOutcomes(): array {
+		return [
+			'successful recovery' => [true, 'success'],
+			'failed recovery' => [false, 'partial'],
+		];
+	}
+
+	public function testLaterFailedAssistantPartialForcesCanonicalRetryAfterEarlierSuccess(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$attempts = [];
+		$deliveryResults = [true, false, true];
+		$canonicalAnswer = 'First delivered chunk. Second recovered chunk.';
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments) use ($canonicalAnswer): string {
+				$progressCallback = $arguments[5] ?? null;
+				$this->assertIsCallable($progressCallback);
+				$progressCallback('First delivered chunk.');
+				$progressCallback('Second lost chunk.');
+
+				return $canonicalAnswer;
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(73);
+		$traceService->expects($this->once())->method('finishRun')->with(73, 'success', null);
+
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+				$traceService,
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->exactly(3))
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
+				return array_shift($deliveryResults);
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([
+			['message' => 'First delivered chunk.', 'reply_to' => 1234],
+			['message' => 'Second lost chunk.', 'reply_to' => 0],
+			['message' => $canonicalAnswer, 'reply_to' => 0],
+		], $attempts);
+	}
+
+	public function testCanonicalMismatchFinishesTraceAsPartialAfterCanonicalContentIsDelivered(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$attempts = [];
+		$deliveryResults = [true, true];
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments): string {
+				$progressCallback = $arguments[5] ?? null;
+				$mismatchCallback = $arguments[13] ?? null;
+				$this->assertIsCallable($progressCallback);
+				$this->assertIsCallable($mismatchCallback);
+				$progressCallback('Draft');
+				$mismatchCallback();
+				$progressCallback('Canonical');
+
+				return 'Canonical';
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(75);
+		$traceService->expects($this->once())
+			->method('finishRun')
+			->with(75, 'partial', 'Streamed response differed from terminal content');
+
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+				$traceService,
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->exactly(2))
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
+				return array_shift($deliveryResults);
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([
+			['message' => 'Draft', 'reply_to' => 1234],
+			['message' => 'Canonical', 'reply_to' => 0],
+		], $attempts);
+	}
+
+	public function testFailedToolProgressDoesNotMoveFirstReplyTargetOrDuplicateCanonicalAnswer(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$attempts = [];
+		$deliveryResults = [false, true];
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments): string {
+				$assistantProgress = $arguments[5] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($toolProgress);
+				$toolProgress('🔧 _Using tool: search_test..._');
+				$assistantProgress('Canonical answer.');
+
+				return 'Canonical answer.';
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())->method('startRun')->willReturn(74);
+		$traceService->expects($this->once())->method('finishRun')->with(74, 'success', null);
+
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+				$traceService,
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->exactly(2))
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
+				return array_shift($deliveryResults);
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([
+			['message' => '🔧 _Using tool: search_test..._', 'reply_to' => 1234],
+			['message' => 'Canonical answer.', 'reply_to' => 1234],
+		], $attempts);
+	}
+
+	public function testTypedAgentFailureAfterProgressSendsOneSafeTerminalAndFinishesTraceAsError(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$bot->setMentionName('@safe-bot');
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$sentMessages = [];
+		$safeResponse = "Sorry, I'm having trouble connecting to the AI service right now. Please try again later.";
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments) use ($safeResponse): string {
+				$assistantProgress = $arguments[5] ?? null;
+				$errorCallback = $arguments[12] ?? null;
+				$mismatchCallback = $arguments[13] ?? null;
+				$toolProgress = $arguments[14] ?? null;
+				$this->assertIsCallable($assistantProgress);
+				$this->assertIsCallable($errorCallback);
+				$this->assertIsCallable($mismatchCallback);
+				$this->assertIsCallable($toolProgress);
+				$assistantProgress('Partial answer already visible.');
+				$toolProgress('🔧 _Using tool: search_test..._');
+				$mismatchCallback();
+				$errorCallback('Agent execution terminated: max_turns');
+
+				return $safeResponse;
+			});
+
+		$onboardingService = $this->createMock(OnboardingService::class);
+		$onboardingService->method('buildOnboardingContext')->willReturn('');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())
+			->method('startRun')
+			->willReturn(71);
+		$traceService->expects($this->once())
+			->method('finishRun')
+			->with(71, 'error', 'Agent execution terminated: max_turns');
+
+		$handler = $this->getMockBuilder(TalkHandler::class)
+			->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboardingService,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+				$traceService,
+			])
+			->onlyMethods(['sendReplyToTalk'])
+			->getMock();
+		$handler->expects($this->exactly(3))
+			->method('sendReplyToTalk')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+				$sentMessages[] = $message;
+				return true;
+			});
+
+		$this->invokePrivateMethod($handler, 'processNormalMessage', [
+			$bot,
+			$room,
+			'room-a',
+			'alice',
+			'Hello',
+			1234,
+		]);
+
+		$this->assertSame([
+			'Partial answer already visible.',
+			'🔧 _Using tool: search_test..._',
+			$safeResponse,
+		], $sentMessages);
+		$this->assertSame(1, count(array_filter(
+			$sentMessages,
+			static fn (string $message): bool => $message === $safeResponse
+		)));
+		$this->assertStringNotContainsString('max_turns', implode("\n", $sentMessages));
 	}
 
 	public function testBuildMessageContextIngestsImageForRoomImageMemory(): void {
@@ -293,6 +879,7 @@ class TalkHandlerTest extends TestCase {
 		?RoomImageIngestionService $roomImageIngestionService = null,
 		?IClientService $clientService = null,
 		?IDBConnection $db = null,
+		?IURLGenerator $urlGenerator = null,
 		?LoggerInterface $logger = null,
 	): TalkHandler {
 		return new TalkHandler(
@@ -304,7 +891,7 @@ class TalkHandlerTest extends TestCase {
 			$roomImageIngestionService ?? $this->createMock(RoomImageIngestionService::class),
 			$clientService ?? $this->createMock(IClientService::class),
 			$db ?? $this->createMock(IDBConnection::class),
-			$this->createMock(IURLGenerator::class),
+			$urlGenerator ?? $this->createMock(IURLGenerator::class),
 			$logger ?? $this->createMock(LoggerInterface::class)
 		);
 	}

@@ -18,6 +18,12 @@ use Psr\Log\LoggerInterface;
 class RateLimitService {
     public const ENDPOINT_CHAT = 'chat_completions';
     public const ENDPOINT_EMBEDDINGS = 'embeddings';
+    public const RESPONSE_DELIVERY_LEASE_SECONDS = 120;
+    /** Five minutes for queue setup, context preparation, and response persistence. */
+    public const PROCESSING_LEASE_MARGIN_SECONDS = 300;
+    public const PROCESSING_LEASE_SECONDS = AgentExecutor::HARD_MAX_WALL_CLOCK_SECONDS + self::PROCESSING_LEASE_MARGIN_SECONDS;
+    public const PROCESSING_CLAIM_LOST_MESSAGE = 'Queued processing attempt no longer owns request';
+    public const RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE = 'Queued response delivery attempt was not claimed';
 
     private RateLimitStateMapper $rateLimitMapper;
     private QueuedRequestMapper $queuedRequestMapper;
@@ -276,22 +282,267 @@ class RateLimitService {
     }
 
     /**
+     * @return QueuedRequest[]
+     */
+    public function getResponseReadyRequests(int $limit = 10): array {
+        return $this->queuedRequestMapper->findResponseReady($limit);
+    }
+
+    /**
      * Mark a request as processing
      */
     public function markProcessing(QueuedRequest $request): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_PENDING) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+
+        $claimedAt = time();
+        $claimed = $this->queuedRequestMapper->claimProcessingAttempt(
+            $request->getId(),
+            $request->getAttempts(),
+            QueuedRequest::MAX_ATTEMPTS,
+            $claimedAt
+        );
+        if (!$claimed) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+
         $request->setStatus(QueuedRequest::STATUS_PROCESSING);
         $request->incrementAttempts();
-        return $this->queuedRequestMapper->update($request);
+        $request->setError(null);
+        $request->setProcessedAt($claimedAt);
+        return $request;
+    }
+
+    /**
+     * Persist a completed agent response before attempting external delivery.
+     * Recovery retries only this stored response and never re-runs the agent.
+     */
+    public function markResponseReady(QueuedRequest $request, string $result): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_PROCESSING) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+        $stored = $this->queuedRequestMapper->storeResponseReady(
+            $request->getId(),
+            $request->getAttempts(),
+            $result
+        );
+        if (!$stored) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+
+        $request->setStatus(QueuedRequest::STATUS_RESPONSE_READY);
+        $request->setResult($result);
+        $request->setError(null);
+        $request->setAttempts(0);
+        $request->setProcessedAt(null);
+        return $request;
+    }
+
+    public function markResponseDeliveryAttempt(QueuedRequest $request): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_RESPONSE_READY) {
+            throw new \LogicException('Only response-ready requests can enter delivery');
+        }
+
+        $expectedAttempts = $request->getAttempts();
+        $claimed = $this->queuedRequestMapper->claimResponseDeliveryAttempt(
+            $request->getId(),
+            $expectedAttempts,
+            QueuedRequest::MAX_ATTEMPTS,
+            time()
+        );
+        if (!$claimed) {
+            throw new \LogicException(self::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE);
+        }
+
+        $stored = $this->queuedRequestMapper->findById($request->getId());
+        if ($stored->getStatus() !== QueuedRequest::STATUS_DELIVERING
+            || $stored->getAttempts() !== $expectedAttempts + 1
+        ) {
+            throw new \LogicException(self::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE);
+        }
+
+        return $stored;
     }
 
     /**
      * Mark a request as completed with result
      */
     public function markCompleted(QueuedRequest $request, string $result): QueuedRequest {
+        $processedAt = time();
+        $completed = $this->queuedRequestMapper->completeResponseDelivery(
+            $request->getId(),
+            $request->getAttempts(),
+            $result,
+            $processedAt
+        );
+        if (!$completed) {
+            $stored = $this->queuedRequestMapper->findById($request->getId());
+            if ($stored->getStatus() === QueuedRequest::STATUS_COMPLETED) {
+                return $stored;
+            }
+            if ($stored->getStatus() === QueuedRequest::STATUS_FAILED
+                || $this->responseDeliveryOwnershipTransferred($request, $stored)
+            ) {
+                throw new \LogicException(self::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE);
+            }
+            throw new \RuntimeException('Queued response completion was not persisted');
+        }
+
         $request->setStatus(QueuedRequest::STATUS_COMPLETED);
         $request->setResult($result);
-        $request->setProcessedAt(time());
-        return $this->queuedRequestMapper->update($request);
+        $request->setError(null);
+        $request->setProcessedAt($processedAt);
+        return $request;
+    }
+
+    public function markResponseDeliveryFailed(QueuedRequest $request, string $error): QueuedRequest {
+        $processedAt = time();
+        $failed = $this->queuedRequestMapper->failResponseDelivery(
+            $request->getId(),
+            $request->getAttempts(),
+            $error,
+            $processedAt,
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if (!$failed) {
+            $stored = $this->queuedRequestMapper->findById($request->getId());
+            if ($stored->getStatus() === QueuedRequest::STATUS_COMPLETED
+                || $stored->getStatus() === QueuedRequest::STATUS_FAILED
+            ) {
+                return $stored;
+            }
+            if ($this->responseDeliveryOwnershipTransferred($request, $stored)) {
+                throw new \LogicException(self::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE);
+            }
+            throw new \RuntimeException('Queued response delivery failure was not persisted');
+        }
+
+        $request->setStatus(QueuedRequest::STATUS_FAILED);
+        $request->setError($error);
+        $request->setAttempts(QueuedRequest::MAX_ATTEMPTS);
+        $request->setProcessedAt($processedAt);
+        return $request;
+    }
+
+    public function markResponseDeliveryRetry(QueuedRequest $request, string $error): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_DELIVERING) {
+            throw new \LogicException('Only an owned delivery can be scheduled for retry');
+        }
+        if ($request->getAttempts() >= QueuedRequest::MAX_ATTEMPTS) {
+            return $this->markResponseDeliveryFailed(
+                $request,
+                'Talk delivery attempts exhausted after: ' . $error
+            );
+        }
+
+        $released = $this->queuedRequestMapper->releaseResponseDeliveryForRetry(
+            $request->getId(),
+            $request->getAttempts(),
+            $error,
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if (!$released) {
+            $stored = $this->queuedRequestMapper->findById($request->getId());
+            if ($stored->getStatus() === QueuedRequest::STATUS_COMPLETED
+                || $stored->getStatus() === QueuedRequest::STATUS_FAILED
+            ) {
+                return $stored;
+            }
+            if ($this->responseDeliveryOwnershipTransferred($request, $stored)) {
+                throw new \LogicException(self::RESPONSE_DELIVERY_CLAIM_LOST_MESSAGE);
+            }
+            if ($stored->getStatus() === QueuedRequest::STATUS_RESPONSE_READY) {
+                return $stored;
+            }
+            throw new \RuntimeException('Queued response delivery retry was not persisted');
+        }
+
+        $request->setStatus(QueuedRequest::STATUS_RESPONSE_READY);
+        $request->setError($error);
+        $request->setProcessedAt(null);
+        return $request;
+    }
+
+    public function recoverStaleResponseDeliveries(int $leaseSeconds = self::RESPONSE_DELIVERY_LEASE_SECONDS): int {
+        $now = time();
+        $recovered = $this->queuedRequestMapper->recoverStaleResponseDeliveries(
+            $now - $leaseSeconds,
+            $now,
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if ($recovered > 0) {
+            $this->logger->warning('Recovered stale queued Talk deliveries', [
+                'count' => $recovered,
+                'lease_seconds' => $leaseSeconds,
+            ]);
+        }
+        return $recovered;
+    }
+
+    public function failExhaustedPendingRequests(): int {
+        $failed = $this->queuedRequestMapper->failExhaustedPending(
+            QueuedRequest::MAX_ATTEMPTS,
+            time()
+        );
+        if ($failed > 0) {
+            $this->logger->warning('Reconciled exhausted pending queue requests', [
+                'count' => $failed,
+            ]);
+        }
+        return $failed;
+    }
+
+    public function markProcessingFailed(QueuedRequest $request, string $error): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_PROCESSING) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+        $processedAt = time();
+        $failed = $this->queuedRequestMapper->failProcessingAttempt(
+            $request->getId(),
+            $request->getAttempts(),
+            $error,
+            $processedAt,
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if (!$failed) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+
+        $request->setStatus(QueuedRequest::STATUS_FAILED);
+        $request->setError($error);
+        $request->setAttempts(QueuedRequest::MAX_ATTEMPTS);
+        $request->setProcessedAt($processedAt);
+        return $request;
+    }
+
+    public function markProcessingRetry(QueuedRequest $request, string $error): QueuedRequest {
+        if ($request->getStatus() !== QueuedRequest::STATUS_PROCESSING) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+        if ($request->getAttempts() >= QueuedRequest::MAX_ATTEMPTS) {
+            return $this->markProcessingFailed($request, 'Max retries exceeded: ' . $error);
+        }
+        $released = $this->queuedRequestMapper->releaseProcessingForRetry(
+            $request->getId(),
+            $request->getAttempts(),
+            $error,
+            QueuedRequest::MAX_ATTEMPTS
+        );
+        if (!$released) {
+            throw new \LogicException(self::PROCESSING_CLAIM_LOST_MESSAGE);
+        }
+
+        $request->setStatus(QueuedRequest::STATUS_PENDING);
+        $request->setError($error);
+        $request->setProcessedAt(null);
+        return $request;
+    }
+
+    private function responseDeliveryOwnershipTransferred(QueuedRequest $request, QueuedRequest $stored): bool {
+        return ($stored->getStatus() === QueuedRequest::STATUS_DELIVERING
+            || $stored->getStatus() === QueuedRequest::STATUS_RESPONSE_READY)
+            && $stored->getAttempts() !== $request->getAttempts();
     }
 
     /**
@@ -300,6 +551,7 @@ class RateLimitService {
     public function markFailed(QueuedRequest $request, string $error): QueuedRequest {
         $request->setStatus(QueuedRequest::STATUS_FAILED);
         $request->setError($error);
+        $request->setAttempts(max(QueuedRequest::MAX_ATTEMPTS, $request->getAttempts()));
         $request->setProcessedAt(time());
         return $this->queuedRequestMapper->update($request);
     }
@@ -318,7 +570,7 @@ class RateLimitService {
     /**
      * Get queue statistics
      * 
-     * @return array{pending: int, processing: int, completed: int, failed: int, total: int}
+     * @return array{pending: int, processing: int, response_ready: int, completed: int, failed: int, total: int}
      */
     public function getQueueStats(): array {
         return $this->queuedRequestMapper->getQueueStats();
@@ -435,7 +687,7 @@ class RateLimitService {
     public function cleanup(int $maxAgeSeconds = 86400): array {
         $completedDeleted = $this->queuedRequestMapper->cleanupCompleted($maxAgeSeconds);
         $failedDeleted = $this->queuedRequestMapper->cleanupFailed(3, $maxAgeSeconds);
-        $staleReset = $this->queuedRequestMapper->resetStaleProcessing(300);
+        $staleReset = $this->queuedRequestMapper->resetStaleProcessing(self::PROCESSING_LEASE_SECONDS);
 
         $this->logger->info('Queue cleanup completed', [
             'completed_deleted' => $completedDeleted,

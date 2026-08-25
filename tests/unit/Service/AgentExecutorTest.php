@@ -4,1349 +4,1744 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Tests\Unit\Service;
 
-use OCA\EducAI\AppInfo\Application;
+use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Db\Tool;
+use OCA\EducAI\Exception\AgentRunInterruptedException;
+use OCA\EducAI\Exception\IncompleteProviderStreamException;
+use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Service\AgentExecutor;
+use OCA\EducAI\Service\AgentRunControl;
+use OCA\EducAI\Service\AgentTurn;
 use OCA\EducAI\Service\BuiltInToolProvider;
-use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\McpClient;
-use OCA\EducAI\Service\TraceService;
+use OCA\EducAI\Service\ProviderAttemptBudget;
+use OCA\EducAI\Service\ProviderResponseNormalizer;
+use OCA\EducAI\Service\SettingsService;
+use OCA\EducAI\Service\ToolCallIdGenerator;
 use OCA\EducAI\Service\ToolRegistry;
-use OCA\EducAI\Service\ToolResultFallbackService;
+use OCA\EducAI\Service\TraceService;
+use OCA\EducAI\ToolProvider\ToolProviderRegistry;
+use OCP\Http\Client\IClient;
+use OCP\Http\Client\IClientService;
+use OCP\Http\Client\IResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
-/**
- * @psalm-import-type ToolDefinition from \OCA\EducAI\TypeDefinitions
- */
 class AgentExecutorTest extends TestCase {
-	public function testGenerateFallbackFromToolResultsUsesRoomSearchResults(): void {
-		$fallbackService = new ToolResultFallbackService();
+	public function testPlainFinalTextUsesOneLogicalTurnAndNoTools(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness();
+		$text = " Exact answer.\n";
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [$this->turn($text, [], 'stop', ['remaining' => '7'])]);
 
-		$result = $fallbackService->generateFromTrace([
-			[
-				'tool' => 'room_search_documents',
-				'status' => 'ok',
-				'response' => "Found 1 relevant room document chunk(s) for: \"ambek Studiengang\"\n\n---\n**Source 1:** ambek.pdf (chunk 1) [relevance: 0.91]\n\nBachelor of Science Angewandte Bewegungswissenschaften\n",
-			],
+		$result = $executor->run('system', [['role' => 'user', 'content' => 'Question']], []);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('final_response', $result['terminalReason']);
+		$this->assertSame($text, $result['content']);
+		$this->assertSame('stop', $result['finishReason']);
+		$this->assertSame(AgentTurn::COMPATIBILITY_NATIVE, $result['compatibilitySource']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame(['remaining' => '7'], $result['rateLimitHeaders']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertSame($text, $result['messages'][1]['content']);
+	}
+
+	#[DataProvider('naturalQueries')]
+	public function testNaturalQueryDoesNotCauseHarnessInventedToolCall(string $query): void {
+		[$executor, $llmClient, , $toolProvider, $mcpClient] = $this->createHarness([$this->searchToolDefinition()]);
+		$providerAnswer = 'Plain provider answer.';
+		$toolProvider->expects($this->never())->method('executeTool');
+		$mcpClient->expects($this->never())->method('callTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn($providerAnswer, [], 'stop')],
+			function (int $index, array $messages, array $knownToolNames, array $options) use ($query): void {
+				$this->assertSame(0, $index);
+				$this->assertSame($query, $messages[0]['content'] ?? null);
+				$this->assertSame(['search_test'], $knownToolNames);
+				$this->assertNull($options['tool_choice']);
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => $query]],
+			[],
+			$this->builtInOptions(['search_test'])
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('final_response', $result['terminalReason']);
+		$this->assertSame($providerAnswer, $result['content']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertArrayNotHasKey('tool_calls', $result['messages'][1]);
+	}
+
+	/** @return array<string,array{string}> */
+	public static function naturalQueries(): array {
+		return [
+			'definition wording' => ['was ist Photosynthese?'],
+			'today wording' => ['heute brauche ich eine kurze Zusammenfassung.'],
+			'internet-search wording' => ['suche im Internet nach aktuellen Informationen.'],
+		];
+	}
+
+	public function testExplicitWebOnlyRequestDoesNotInventRagCallWhenProviderReturnsFinalText(): void {
+		[$executor, $llmClient, , $toolProvider, $mcpClient] = $this->createHarness([
+			$this->searchToolDefinition(BuiltInToolProvider::TOOL_RAG_SEARCH),
+			$this->searchToolDefinition('tavily_search'),
 		]);
-
-		$this->assertStringStartsWith("Based on the documents found:\n\n", $result);
-		$this->assertStringContainsString('Bachelor of Science Angewandte Bewegungswissenschaften', $result);
-	}
-
-	public function testSanitizeAssistantTextForUserRemovesThinkArtifactsAndAdjacentDuplicates(): void {
-		$executor = $this->createExecutor();
-
-		$result = $this->invokePrivateMethod(
-			$executor,
-			'sanitizeAssistantTextForUser',
-			['<think>Interne Analyse</think>Ich habe die Dokumente durchsucht.</think>Ich habe die Dokumente durchsucht.']
+		$toolProvider->expects($this->never())->method('executeTool');
+		$mcpClient->expects($this->never())->method('callTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('Official web result.', [], 'stop')],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(0, $index);
+				$this->assertSame(
+					'Use web search only; do not search the knowledge base.',
+					$messages[0]['content'] ?? null
+				);
+				$this->assertSame([
+					BuiltInToolProvider::TOOL_RAG_SEARCH,
+					'tavily_search',
+				], $knownToolNames);
+				$this->assertNull($options['tool_choice']);
+			}
 		);
 
-		$this->assertSame('Ich habe die Dokumente durchsucht.', $result);
-	}
-
-	public function testSanitizeAssistantTextForUserRemovesNamespacedToolCallArtifacts(): void {
-		$executor = $this->createExecutor();
-
-		$result = $this->invokePrivateMethod(
-			$executor,
-			'sanitizeAssistantTextForUser',
-			['Vorher <minimax:tool_call><invoke name="wiki_write_page"><parameter name="path">index.md</parameter></invoke></minimax:tool_call> Nachher']
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Use web search only; do not search the knowledge base.']],
+			[],
+			$this->builtInOptions([
+				BuiltInToolProvider::TOOL_RAG_SEARCH,
+				'tavily_search',
+			])
 		);
 
-		$this->assertSame('Vorher Nachher', $result);
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Official web result.', $result['content']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertSame(1, $result['logicalTurns']);
 	}
 
-	public function testSanitizeOutputKeepsUtf8ValidWhenTruncatingAtEmojiBoundary(): void {
-		$executor = $this->createExecutor();
-		$text = str_repeat('a', 3999) . '💡tail';
-
-		$result = $this->invokePrivateMethod(
-			$executor,
-			'sanitizeOutput',
-			[['content' => [['type' => 'text', 'text' => $text]]]]
+	public function testPlainFinalTurnStopsWhenProviderIgnoresRequestedInitialToolChoice(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$requestedChoice = [
+			'type' => 'function',
+			'function' => ['name' => 'search_test'],
+		];
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('Provider chose a final answer.', [], 'stop')],
+			function (int $index, array $messages, array $knownToolNames, array $options) use ($requestedChoice): void {
+				$this->assertSame(0, $index);
+				$this->assertSame(['search_test'], $knownToolNames);
+				$this->assertSame($requestedChoice, $options['tool_choice']);
+			}
 		);
 
-		$this->assertTrue(mb_check_encoding($result, 'UTF-8'));
-		$this->assertNotFalse(json_encode(['content' => $result]));
-		$this->assertStringEndsWith('💡...', $result);
-	}
-
-	public function testSanitizeOutputJsonFallbackSubstitutesInvalidUtf8(): void {
-		$executor = $this->createExecutor();
-		$invalidUtf8 = substr(str_repeat('b', 3999) . '💡', 0, 4000);
-		$this->assertFalse(mb_check_encoding($invalidUtf8, 'UTF-8'));
-
-		$result = $this->invokePrivateMethod(
-			$executor,
-			'sanitizeOutput',
-			[['raw' => $invalidUtf8]]
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Answer directly if no tool is needed']],
+			[],
+			$this->builtInOptions(['search_test']) + ['initial_tool_choice' => $requestedChoice]
 		);
 
-		$this->assertTrue(mb_check_encoding($result, 'UTF-8'));
-		$this->assertNotFalse(json_encode(['content' => $result]));
-		$this->assertStringNotContainsString('Received invalid tool response', $result);
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Provider chose a final answer.', $result['content']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame([], $result['toolInvocations']);
 	}
 
-	public function testRunOmitsNameFromToolResultMessages(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(42)
-			->willReturn([['name' => 'search_test']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$callIndex = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages
-			) use (&$callIndex): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					return [
-						'content' => '',
-						'tool_calls' => [[
-							'id' => 'call_search',
-							'type' => 'function',
-							'function' => [
-								'name' => 'search_test',
-								'arguments' => '{"query":"Berlin"}',
-							],
-						]],
-					];
+	public function testNativeToolCallExecutesOnceAndPreservesProviderId(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$call = $this->toolCall('provider-call-17', 'search_test', '{"query":"Berlin"}');
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with('search_test', ['query' => 'Berlin'])
+			->willReturn(['content' => [['type' => 'text', 'text' => 'Berlin result']]]);
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('', [$call], 'tool_calls'), $this->turn('Final answer', [], 'stop')],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(['search_test'], $knownToolNames);
+				if ($index === 0) {
+					$this->assertSame([
+						'type' => 'function',
+						'function' => ['name' => 'search_test'],
+					], $options['tool_choice']);
+					return;
 				}
-
-				$toolMessages = array_values(array_filter(
-					$messages,
-					static fn (array $message): bool => ($message['role'] ?? '') === 'tool'
-				));
-				$this->assertCount(1, $toolMessages);
-				$this->assertArrayNotHasKey('name', $toolMessages[0]);
-				$this->assertSame('call_search', $toolMessages[0]['tool_call_id'] ?? null);
-				$this->assertArrayHasKey('content', $toolMessages[0]);
-
-				return [
-					'content' => 'Final answer',
-					'tool_calls' => [],
-				];
-			});
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Berlin'])
-			->willReturn(['results' => ['Berlin']]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
+				$this->assertSame('auto', $options['tool_choice']);
+				$this->assertSame('provider-call-17', $messages[1]['tool_calls'][0]['id']);
+				$this->assertSame('provider-call-17', $messages[2]['tool_call_id']);
+				$this->assertArrayNotHasKey('name', $messages[2]);
+			}
 		);
 
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find Berlin']], [], ['bot_id' => 42]);
-
-		$this->assertSame('Final answer', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-	}
-
-	public function testRunExecutesXmlWrappedJsonToolCall(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(42)
-			->willReturn([['name' => 'search_test']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '<tool_call>{"name":"search_test","arguments":{"query":"Berlin"}}</tool_call>',
-					'tool_calls' => [],
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Find Berlin']],
+			[],
+			$this->builtInOptions(['search_test']) + [
+				'tool_choice' => 'auto',
+				'initial_tool_choice' => [
+					'type' => 'function',
+					'function' => ['name' => 'search_test'],
 				],
-				[
-					'content' => 'Final answer',
-					'tool_calls' => [],
-				]
-			);
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Berlin'])
-			->willReturn(['results' => ['Berlin']]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
+			]
 		);
 
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find Berlin']], [], ['bot_id' => 42]);
-
 		$this->assertSame('Final answer', $result['content']);
+		$this->assertSame(2, $result['logicalTurns']);
+		$this->assertSame(2, $result['providerAttempts']);
 		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('search_test', $result['toolInvocations'][0]['tool']);
+		$this->assertSame('provider-call-17', $result['toolInvocations'][0]['toolCallId']);
 		$this->assertSame('ok', $result['toolInvocations'][0]['status']);
 	}
 
-	public function testRunRecordsBuiltInToolTraceEvents(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-		$traceService = $this->createMock(TraceService::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(42)
-			->willReturn([['name' => 'search_test']]);
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '',
-					'tool_calls' => [[
-						'id' => 'call-1',
-						'type' => 'function',
-						'function' => [
-							'name' => 'search_test',
-							'arguments' => '{"query":"Berlin"}',
-						],
-					]],
-					'finish_reason' => 'tool_calls',
-				],
-				[
-					'content' => 'Final answer',
-					'tool_calls' => [],
-					'finish_reason' => 'stop',
-				]
-			);
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Berlin'])
-			->willReturn(['content' => [['type' => 'text', 'text' => 'Found Berlin']]]);
-
-		$traceService->expects($this->atLeastOnce())->method('recordEvent');
-		$traceService->expects($this->once())
-			->method('recordToolCall')
-			->with(77, 'search_test', ['query' => 'Berlin'], 'call-1');
-		$traceService->expects($this->once())
-			->method('recordToolResult')
-			->with(
-				77,
-				'search_test',
-				'ok',
-				'Found Berlin',
-				$this->isType('int'),
-				null
-			);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class),
-			null,
-			null,
-			null,
-			$traceService
-		);
-
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find Berlin']], [], [
-			'bot_id' => 42,
-			'trace_run_id' => 77,
-		]);
-
-		$this->assertSame('Final answer', $result['content']);
-	}
-
-	public function testRunExecutesXmlSubElementToolCall(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(7)
-			->willReturn([['name' => 'search_test']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '<function_call><name>search_test</name><arguments>{"query":"Potsdam"}</arguments></function_call>',
-					'tool_calls' => [],
-				],
-				[
-					'content' => 'Antwort fertig',
-					'tool_calls' => [],
-				]
-			);
-
-		$builtInToolProvider->expects($this->once())
+	public function testReasoningArtifactsOnNativeToolTurnNeverEnterSubsequentHistory(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$normalizer = new ProviderResponseNormalizer(new ToolCallIdGenerator());
+		$toolTurn = $normalizer->normalize([
+			'content' => '<think>private intermediate reasoning</think>',
+			'tool_calls' => [$this->toolCall('reasoning-tool', 'search_test', '{"query":"Potsdam"}')],
+			'finish_reason' => 'tool_calls',
+		], ['search_test']);
+		$toolProvider->expects($this->once())
 			->method('executeTool')
 			->with('search_test', ['query' => 'Potsdam'])
-			->willReturn(['results' => ['Potsdam']]);
-
-		$executor = new AgentExecutor(
+			->willReturn(['text' => 'Potsdam result']);
+		$this->expectSyncTurns(
 			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
+			[$toolTurn, $this->turn('Visible final answer.', [], 'stop')],
+			function (int $index, array $messages): void {
+				if ($index !== 1) {
+					return;
+				}
 
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find Potsdam']], [], ['bot_id' => 7]);
-
-		$this->assertSame('Antwort fertig', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('search_test', $result['toolInvocations'][0]['tool']);
-	}
-
-	public function testRunRejectsMiniMaxInvokeToolCallMissingRequiredWikiPath(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(8)
-			->willReturn([['name' => BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE]]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildWikiWriteToolDefinition()]);
-
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '<minimax:tool_call><invoke name="wiki_write_page"><parameter name="title">Universität Potsdam</parameter><parameter name="content"># Universität Potsdam</parameter></invoke></minimax:tool_call>',
-					'tool_calls' => [],
-				],
-				[
-					'content' => 'Bitte gib einen Zielpfad fuer die Wiki-Seite an.',
-					'tool_calls' => [],
-				]
-			);
-
-		$builtInToolProvider->expects($this->never())
-			->method('executeTool');
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
+				$this->assertNull($messages[1]['content']);
+				$encodedHistory = json_encode($messages, JSON_THROW_ON_ERROR);
+				$this->assertStringNotContainsString('<think>', $encodedHistory);
+				$this->assertStringNotContainsString('private intermediate reasoning', $encodedHistory);
+			}
 		);
 
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Schreibe etwas über die Universität Potsdam ins Wiki']],
+			[['role' => 'user', 'content' => 'Search Potsdam']],
 			[],
-			[
-				'bot_id' => 8,
-				'user_query' => 'Schreibe etwas über die Universität Potsdam ins Wiki',
-			]
+			$this->builtInOptions(['search_test'])
 		);
 
-		$this->assertSame('Bitte gib einen Zielpfad fuer die Wiki-Seite an.', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame(BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE, $result['toolInvocations'][0]['tool']);
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Visible final answer.', $result['content']);
+		$this->assertStringNotContainsString('<think>', json_encode($result['messages'], JSON_THROW_ON_ERROR));
+	}
+
+	public function testMissingProviderIdGetsNineCharacterIdAndKeepsCorrelation(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$normalizer = new ProviderResponseNormalizer(new ToolCallIdGenerator());
+		$toolTurn = $normalizer->normalize([
+			'content' => '',
+			'tool_calls' => [[
+				'type' => 'function',
+				'function' => ['name' => 'search_test', 'arguments' => '{"query":"Potsdam"}'],
+			]],
+			'finish_reason' => 'tool_calls',
+		], ['search_test']);
+		$generatedId = $toolTurn->getToolCalls()[0]['id'];
+
+		$this->assertMatchesRegularExpression('/^[A-Za-z0-9]{9}$/', $generatedId);
+		$toolProvider->expects($this->once())->method('executeTool')->willReturn(['text' => 'Potsdam result']);
+		$this->expectSyncTurns(
+			$llmClient,
+			[$toolTurn, $this->turn('Done', [], 'stop')],
+			function (int $index, array $messages) use ($generatedId): void {
+				if ($index === 1) {
+					$this->assertSame($generatedId, $messages[1]['tool_calls'][0]['id']);
+					$this->assertSame($generatedId, $messages[2]['tool_call_id']);
+				}
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Find Potsdam']],
+			[],
+			$this->builtInOptions(['search_test'])
+		);
+		$this->assertSame($generatedId, $result['toolInvocations'][0]['toolCallId']);
+	}
+
+	public function testInvalidArgumentJsonIsExplicitAndNeverExecutedAsEmptyObject(): void {
+		$traceService = $this->createMock(TraceService::class);
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()], $traceService);
+		$invalidCall = $this->toolCall('invalid-json', 'search_test', '{broken');
+		$invalidCall['argument_error'] = ProviderResponseNormalizer::ARGUMENT_ERROR_INVALID_JSON;
+		$toolProvider->expects($this->never())->method('executeTool');
+		$traceService->expects($this->never())->method('recordToolCall');
+		$traceService->expects($this->atLeastOnce())->method('recordEvent');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('', [$invalidCall], 'tool_calls'), $this->turn('Corrected', [], 'stop')],
+			function (int $index, array $messages): void {
+				if ($index === 1) {
+					$this->assertSame('{broken', $messages[1]['tool_calls'][0]['function']['arguments']);
+					$this->assertArrayNotHasKey('argument_error', $messages[1]['tool_calls'][0]);
+					$this->assertSame('invalid_tool_arguments_json', $this->decodeToolError($messages[2]['content'])['code']);
+				}
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['search_test']) + ['trace_run_id' => 77]
+		);
+		$this->assertSame('Corrected', $result['content']);
 		$this->assertSame('error', $result['toolInvocations'][0]['status']);
-		$this->assertStringContainsString('missing required argument(s): path', $result['toolInvocations'][0]['response']);
+		$this->assertStringContainsString('invalid_tool_arguments_json', $result['toolInvocations'][0]['response']);
 	}
 
-	public function testRunUsesExplicitBuiltInToolsWithoutRegistryLookup(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->never())
-			->method('getBuiltInToolsForBot');
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '<tool_call>{"name":"search_test","arguments":{"query":"Leipzig"}}</tool_call>',
-					'tool_calls' => [],
-				],
-				[
-					'content' => 'Explicit built-in answer',
-					'tool_calls' => [],
-				]
-			);
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Leipzig'])
-			->willReturn(['results' => ['Leipzig']]);
-
-		$executor = new AgentExecutor(
+	public function testUnknownAndMalformedToolsBecomeOrderedStructuredErrors(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness();
+		$toolProgress = [];
+		$malformedCall = (new ProviderResponseNormalizer(new ToolCallIdGenerator()))->normalize([
+			'content' => '',
+			'tool_calls' => [[
+				'id' => 'malformed-id',
+				'type' => 'function',
+				'function' => ['name' => '', 'arguments' => '{}'],
+			]],
+			'finish_reason' => 'tool_calls',
+		], [])->getToolCalls()[0];
+		$calls = [
+			$this->toolCall('unknown-id', 'not_available', '{}'),
+			$malformedCall,
+		];
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns(
 			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
+			[$this->turn('', $calls, 'tool_calls'), $this->turn('Recovered', [], 'stop')],
+			function (int $index, array $messages): void {
+				if ($index === 1) {
+					$this->assertSame(['unknown-id', 'malformed-id'], [
+						$messages[2]['tool_call_id'],
+						$messages[3]['tool_call_id'],
+					]);
+					$this->assertSame('unknown_tool', $this->decodeToolError($messages[2]['content'])['code']);
+					$this->assertSame('malformed_tool_call', $this->decodeToolError($messages[3]['content'])['code']);
+				}
+			}
 		);
 
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Find Leipzig']],
+			[['role' => 'user', 'content' => 'Use tools']],
 			[],
-			[
-				'built_in_tools' => [['name' => 'search_test', 'config' => []]],
+			['on_tool_progress' => static function (string $progress) use (&$toolProgress): void {
+				$toolProgress[] = $progress;
+			}]
+		);
+		$this->assertSame(['not_available', 'unknown'], array_column($result['toolInvocations'], 'tool'));
+		$this->assertSame(['error', 'error'], array_column($result['toolInvocations'], 'status'));
+		$this->assertSame([], $toolProgress);
+	}
+
+	#[DataProvider('unsafeToolProgressNames')]
+	public function testPreparedToolWithUnsafeDisplayNameDoesNotEmitProgress(string $toolName): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($toolName)]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with($toolName, [])
+			->willReturn(['text' => 'executed']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('unsafe-name', $toolName, '{}')], 'tool_calls'),
+			$this->turn('Done', [], 'stop'),
+		]);
+		$toolProgress = [];
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Use the tool']],
+			[],
+			$this->builtInOptions([$toolName]) + [
+				'on_tool_progress' => static function (string $progress) use (&$toolProgress): void {
+					$toolProgress[] = $progress;
+				},
 			]
 		);
 
-		$this->assertSame('Explicit built-in answer', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('search_test', $result['toolInvocations'][0]['tool']);
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Done', $result['content']);
+		$this->assertSame('ok', $result['toolInvocations'][0]['status']);
+		$this->assertSame([], $toolProgress);
 	}
 
-	public function testRunPassesExplicitBuiltInToolConfigToProvider(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
+	/** @return array<string,array{string}> */
+	public static function unsafeToolProgressNames(): array {
+		return [
+			'newline injection' => ["search_test\n**Injected status**"],
+			'markdown injection' => ['search_test_[link](https://example.invalid)'],
+			'over maximum length' => [str_repeat('a', 65)],
+		];
+	}
 
-		$toolRegistry->expects($this->never())
-			->method('getBuiltInToolsForBot');
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '<tool_call>{"name":"search_test","arguments":{"query":"Leipzig"}}</tool_call>',
-					'tool_calls' => [],
-				],
-				[
-					'content' => 'Configured built-in answer',
-					'tool_calls' => [],
-				]
-			);
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Leipzig'], ['wiki_root_path' => Application::WIKI_ROOT_FOLDER . '/Personal Wikis/custom-study'])
-			->willReturn(['results' => ['Leipzig']]);
-
-		$executor = new AgentExecutor(
+	public function testMissingRequiredArgumentsBecomeStructuredErrorWithoutExecution(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns(
 			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
+			[
+				$this->turn('', [$this->toolCall('missing-query', 'search_test', '{}')], 'tool_calls'),
+				$this->turn('Please provide a query.', [], 'stop'),
+			],
+			function (int $index, array $messages): void {
+				if ($index === 1) {
+					$error = $this->decodeToolError($messages[2]['content']);
+					$this->assertSame('missing_required_arguments', $error['code']);
+					$this->assertSame(['query'], $error['details']['missing']);
+				}
+			}
 		);
 
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Find Leipzig']],
+			[['role' => 'user', 'content' => 'Search']],
 			[],
-			[
-				'built_in_tools' => [[
-					'name' => 'search_test',
-					'config' => ['wiki_root_path' => Application::WIKI_ROOT_FOLDER . '/Personal Wikis/custom-study'],
-				]],
-			]
+			$this->builtInOptions(['search_test'])
 		);
-
-		$this->assertSame('Configured built-in answer', $result['content']);
+		$this->assertSame('Please provide a query.', $result['content']);
+		$this->assertSame('error', $result['toolInvocations'][0]['status']);
 	}
 
-	public function testRunExecutesLegacyXmlArgumentPairToolCall(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(99)
-			->willReturn([['name' => 'search_test']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnOnConsecutiveCalls(
-				[
-					'content' => '<tool_call>search_test<arg_key>query</arg_key><arg_value>European Universities call 2026</arg_value><arg_key>limit</arg_key><arg_value>10</arg_value></tool_call>',
-					'tool_calls' => [],
-				],
-				[
-					'content' => 'Legacy XML answer',
-					'tool_calls' => [],
-				]
-			);
-
-		$builtInToolProvider->expects($this->once())
+	public function testMultipleToolCallsExecuteSequentiallyInProviderOrder(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->searchToolDefinition('search_one'),
+			$this->searchToolDefinition('search_two'),
+		]);
+		$order = [];
+		$toolProvider->expects($this->exactly(2))
 			->method('executeTool')
-			->with('search_test', ['query' => 'European Universities call 2026', 'limit' => 10])
-			->willReturn(['results' => ['European Universities call 2026']]);
-
-		$executor = new AgentExecutor(
+			->willReturnCallback(function (string $name, array $arguments) use (&$order): array {
+				$order[] = $name;
+				return ['text' => $arguments['query'] . ' result'];
+			});
+		$this->expectSyncTurns(
 			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
+			[
+				$this->turn('', [
+					$this->toolCall('call-one', 'search_one', '{"query":"one"}'),
+					$this->toolCall('call-two', 'search_two', '{"query":"two"}'),
+				], 'tool_calls'),
+				$this->turn('Combined answer', [], 'stop'),
+			],
+			function (int $index, array $messages): void {
+				if ($index === 1) {
+					$this->assertSame(['call-one', 'call-two'], [$messages[2]['tool_call_id'], $messages[3]['tool_call_id']]);
+				}
+			}
 		);
 
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find call 2026']], [], ['bot_id' => 99]);
-
-		$this->assertSame('Legacy XML answer', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('search_test', $result['toolInvocations'][0]['tool']);
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search twice']],
+			[],
+			$this->builtInOptions(['search_one', 'search_two'])
+		);
+		$this->assertSame(['search_one', 'search_two'], $order);
+		$this->assertSame(['search_one', 'search_two'], array_column($result['toolInvocations'], 'tool'));
 	}
 
-	public function testRunDoesNotStreamXmlToolArtifacts(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
+	public function testLengthTruncatedToolCallIsNotExecutedAndPreservesFinishReason(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('cut-off', 'search_test', '{"query":"Ber')], 'length'),
+		]);
 
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(5)
-			->willReturn([['name' => 'search_test']]);
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['search_test']) + ['max_turns' => 1]
+		);
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('max_turns', $result['terminalReason']);
+		$this->assertSame('length', $result['finishReason']);
+		$this->assertSame('incomplete_tool_call', $this->decodeToolError($result['messages'][2]['content'])['code']);
+	}
 
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
+	public function testSyncAndStreamingHaveSameTerminalSemanticState(): void {
+		[$syncExecutor, $syncLlm] = $this->createHarness();
+		[$streamExecutor, $streamLlm] = $this->createHarness();
+		$turn = $this->turn('Streamed final text', [], 'stop', ['remaining' => 3]);
+		$this->expectSyncTurns($syncLlm, [$turn]);
+		$this->expectStreamTurns($streamLlm, [$turn], [['Streamed ', 'final text']]);
 
-		$streamCall = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('streamChatCompletion')
+		$sync = $syncExecutor->run('system', [['role' => 'user', 'content' => 'Question']], []);
+		$partials = [];
+		$stream = $streamExecutor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['on_partial_result' => static function (string $partial) use (&$partials): void {
+				$partials[] = $partial;
+			}]
+		);
+		$this->assertSame($sync, $stream);
+		$this->assertSame(['Streamed ', 'final text'], $partials);
+		$this->assertSame($stream['content'], implode('', $partials));
+	}
+
+	public function testStreamingFinalTextWithoutProviderDeltasUsesOneFallbackCallback(): void {
+		[$executor, $llmClient] = $this->createHarness();
+		$this->expectStreamTurns($llmClient, [$this->turn('Fallback final text')], [[]]);
+		$partials = [];
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['on_partial_result' => static function (string $partial) use (&$partials): void {
+				$partials[] = $partial;
+			}]
+		);
+
+		$this->assertSame('Fallback final text', $result['content']);
+		$this->assertSame(['Fallback final text'], $partials);
+	}
+
+	public function testIncompleteMutatingToolStreamReturnsProviderErrorWithoutExecution(): void {
+		$toolName = BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE;
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->toolDefinition($toolName),
+		]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$llmClient->expects($this->once())
+			->method('streamAgentTurn')
 			->willReturnCallback(function (
 				string $systemPrompt,
 				array $messages,
-				callable $onChunk
-			) use (&$streamCall): array {
-				$streamCall++;
-				if ($streamCall === 1) {
-					$onChunk(['content' => '<tool_']);
-					$onChunk(['content' => 'call>search_test']);
-					$onChunk(['content' => '<arg_key>query</arg_key>']);
-					$onChunk(['content' => '<arg_value>Berlin</arg_value>']);
-					$onChunk(['content' => '</tool_call>']);
-
-					return [
-						'content' => '<tool_call>search_test<arg_key>query</arg_key><arg_value>Berlin</arg_value></tool_call>',
-						'tool_calls' => [],
-					];
-				}
-
-				$onChunk(['content' => 'Final answer streamed.']);
-
-				return [
-					'content' => 'Final answer streamed.',
-					'tool_calls' => [],
-				];
+				array $knownToolNames,
+				callable $onChunk,
+				?string $model,
+				array $options,
+			) use ($toolName): AgentTurn {
+				$options['provider_attempt_budget']->consume();
+				$onChunk([
+					'tool_calls' => [[
+						'index' => 0,
+						'id' => 'partial-write',
+						'function' => [
+							'name' => $toolName,
+							'arguments' => '{"path":"unsafe.md"',
+						],
+					]],
+				]);
+				throw new IncompleteProviderStreamException();
 			});
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Berlin'])
-			->willReturn(['results' => ['Berlin']]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
 		$partials = [];
+
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Find Berlin']],
+			[['role' => 'user', 'content' => 'Write']],
 			[],
-			[
-				'bot_id' => 5,
+			$this->builtInOptions([$toolName]) + [
 				'on_partial_result' => static function (string $partial) use (&$partials): void {
 					$partials[] = $partial;
 				},
 			]
 		);
 
-		$this->assertSame('Final answer streamed.', $result['content']);
-		$this->assertSame(
-			['🔧 _Using tool: search_test..._', 'Final answer streamed.'],
-			$partials
-		);
+		$this->assertSame('error', $result['status']);
+		$this->assertSame('provider_error', $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertSame([], $partials);
+		$this->assertCount(1, $result['messages']);
 	}
 
-	public function testRunDoesNotStreamMiniMaxXmlToolArtifacts(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(5)
-			->willReturn([['name' => 'search_test']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$streamCall = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('streamChatCompletion')
+	public function testIncompleteSyncMutatingToolTurnReturnsProviderErrorWithoutExecution(): void {
+		$toolName = BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE;
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->toolDefinition($toolName),
+		]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$llmClient->expects($this->once())
+			->method('sendAgentTurn')
 			->willReturnCallback(function (
 				string $systemPrompt,
 				array $messages,
-				callable $onChunk
-			) use (&$streamCall): array {
-				$streamCall++;
-				if ($streamCall === 1) {
-					$onChunk(['content' => '<minimax:']);
-					$onChunk(['content' => 'tool_call><invoke name="search_test">']);
-					$onChunk(['content' => '<parameter name="query">Berlin</parameter>']);
-					$onChunk(['content' => '</invoke></minimax:tool_call>']);
-
-					return [
-						'content' => '<minimax:tool_call><invoke name="search_test"><parameter name="query">Berlin</parameter></invoke></minimax:tool_call>',
-						'tool_calls' => [],
-					];
-				}
-
-				$onChunk(['content' => 'Final MiniMax answer.']);
-
-				return [
-					'content' => 'Final MiniMax answer.',
-					'tool_calls' => [],
-				];
+				array $knownToolNames,
+				?string $model,
+				array $options,
+			) use ($toolName): AgentTurn {
+				$this->assertContains($toolName, $knownToolNames);
+				$options['provider_attempt_budget']->consume();
+				// LLMClient rejects a non-empty tool-call payload with no terminal finish metadata.
+				throw new IncompleteProviderStreamException();
 			});
 
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Berlin'])
-			->willReturn(['results' => ['Berlin']]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
-		$partials = [];
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Find Berlin']],
+			[['role' => 'user', 'content' => 'Write']],
 			[],
-			[
-				'bot_id' => 5,
-				'on_partial_result' => static function (string $partial) use (&$partials): void {
-					$partials[] = $partial;
-				},
-			]
+			$this->builtInOptions([$toolName])
 		);
 
-		$this->assertSame('Final MiniMax answer.', $result['content']);
-		$this->assertSame(
-			['🔧 _Using tool: search_test..._', 'Final MiniMax answer.'],
-			$partials
-		);
+		$this->assertSame('error', $result['status']);
+		$this->assertSame('provider_error', $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertCount(1, $result['messages']);
 	}
 
-	public function testRunUsesInitialToolChoiceOnlyUntilAudioToolCallIsSatisfied(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(5)
-			->willReturn([['name' => 'attachment_transcribe_audio']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildAudioToolDefinition()]);
-
-		$callIndex = 0;
-		$expectedChoice = [
-			'type' => 'function',
-			'function' => ['name' => 'attachment_transcribe_audio'],
+	public function testTerminalFinishReasonsRemainDistinguishable(): void {
+		$cases = [
+			'stop' => ['completed', 'final_response', 'Text stop'],
+			'length' => ['budget_exhausted', 'length', ''],
+			'content_filter' => ['error', 'content_filter', ''],
 		];
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages,
-				?string $modelOverride,
-				array $options
-			) use (&$callIndex, $expectedChoice): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					$this->assertSame($expectedChoice, $options['tool_choice'] ?? null);
-					return [
-						'content' => 'I will transcribe the audio now.',
-						'tool_calls' => [],
-					];
-				}
+		foreach ($cases as $finishReason => [$expectedStatus, $expectedTerminalReason, $expectedContent]) {
+			[$executor, $llmClient] = $this->createHarness();
+			$this->expectSyncTurns($llmClient, [$this->turn('Text ' . $finishReason, [], $finishReason)]);
+			$result = $executor->run('system', [['role' => 'user', 'content' => 'Question']], []);
+			$this->assertSame($finishReason, $result['finishReason']);
+			$this->assertSame($expectedStatus, $result['status']);
+			$this->assertSame($expectedTerminalReason, $result['terminalReason']);
+			$this->assertSame($expectedContent, $result['content']);
+		}
 
-				$this->assertArrayHasKey('tool_choice', $options);
-				$this->assertNull($options['tool_choice']);
-
-				return [
-					'content' => 'Final audio answer',
-					'tool_calls' => [],
-				];
-			});
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('attachment_transcribe_audio', [])
-			->willReturn([
-				'content' => [
-					['type' => 'text', 'text' => 'Transcript for voice.wav: Hello world.'],
-				],
-			]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->once())->method('executeTool')->willReturn(['text' => 'result']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('finish-tool', 'search_test', '{"query":"x"}')], 'tool_calls'),
+		]);
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Decode this voice note']],
+			[['role' => 'user', 'content' => 'Question']],
 			[],
-			[
-				'bot_id' => 5,
-				'user_query' => 'Decode this voice note',
-				'initial_tool_choice' => $expectedChoice,
-			]
+			$this->builtInOptions(['search_test']) + ['max_turns' => 1]
 		);
-
-		$this->assertSame('Final audio answer', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('attachment_transcribe_audio', $result['toolInvocations'][0]['tool']);
+		$this->assertSame('tool_calls', $result['finishReason']);
+		$this->assertSame('budget_exhausted', $result['status']);
 	}
 
-	public function testRunNormalizesEmptyNativeToolArgumentsBeforeReplayingHistory(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(5)
-			->willReturn([['name' => 'attachment_transcribe_audio']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildAudioToolDefinition()]);
-
-		$callIndex = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages,
-				?string $modelOverride,
-				array $options
-			) use (&$callIndex): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					return [
-						'content' => '',
-						'tool_calls' => [[
-							'id' => 'call_audio',
-							'type' => 'function',
-							'function' => [
-								'name' => 'attachment_transcribe_audio',
-								'arguments' => '',
-							],
-						]],
-					];
-				}
-
-				$assistantMessages = array_values(array_filter(
-					$messages,
-					static fn (array $message): bool => ($message['role'] ?? null) === 'assistant' && isset($message['tool_calls'])
-				));
-				$this->assertSame('{}', $assistantMessages[0]['tool_calls'][0]['function']['arguments']);
-
-				return [
-					'content' => 'Final audio answer',
-					'tool_calls' => [],
-				];
-			});
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('attachment_transcribe_audio', [])
-			->willReturn([
-				'content' => [
-					['type' => 'text', 'text' => 'Transcript for voice.wav: Hello world.'],
-				],
-			]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
+	public function testContentFilteredToolCallIsNeverExecuted(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [
+			$this->turn(
+				'Filtered response',
+				[$this->toolCall('filtered-tool', 'search_test', '{"query":"x"}')],
+				'content_filter'
+			),
+		]);
 
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Decode this voice note']],
+			[['role' => 'user', 'content' => 'Question']],
 			[],
-			[
-				'bot_id' => 5,
-				'user_query' => 'Decode this voice note',
-			]
+			$this->builtInOptions(['search_test'])
 		);
 
-		$this->assertSame('Final audio answer', $result['content']);
+		$this->assertSame('error', $result['status']);
+		$this->assertSame('content_filter', $result['terminalReason']);
+		$this->assertSame('content_filter', $result['finishReason']);
+		$this->assertSame('', $result['content']);
+		$this->assertSame([], $result['toolInvocations']);
 	}
 
-	public function testRunSynthesizesFinalAnswerWhenToolRunEndsWithThinkOnlyContent(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-
-		$toolRegistry->expects($this->once())
-			->method('getBuiltInToolsForBot')
-			->with(5)
-			->willReturn([['name' => 'search_test']]);
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildSearchToolDefinition()]);
-
-		$callIndex = 0;
-		$llmClient->expects($this->exactly(3))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages,
-				?string $modelOverride,
-				array $options
-			) use (&$callIndex): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					return [
-						'content' => '',
-						'tool_calls' => [[
-							'id' => 'call_search_1',
-							'type' => 'function',
-							'function' => [
-								'name' => 'search_test',
-								'arguments' => '{"query":"Berlin"}',
-							],
-						]],
-					];
-				}
-
-				if ($callIndex === 2) {
-					return [
-						'content' => '<think>I have the facts and will write the visible answer now.</think>',
-						'tool_calls' => [],
-					];
-				}
-
-				$this->assertStringContainsString('Final Response Required', $systemPrompt);
-
-				return [
-					'content' => 'Visible synthesized answer.',
-					'tool_calls' => [],
-				];
-			});
-
-		$builtInToolProvider->expects($this->once())
-			->method('executeTool')
-			->with('search_test', ['query' => 'Berlin'])
-			->willReturn(['content' => [['type' => 'text', 'text' => 'Berlin facts.']]]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
-		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find Berlin']], [], ['bot_id' => 5]);
-
-		$this->assertSame('Visible synthesized answer.', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('search_test', $result['toolInvocations'][0]['tool']);
-	}
-
-	public function testGenericForcedToolCallPrefersMcpSearchOverRoomSearch(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-		$mcpTool = $this->buildMcpTool();
-
-		$toolRegistry->expects($this->never())
-			->method('getBuiltInToolsForBot');
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([$this->buildRoomSearchToolDefinition()]);
-
-		$mcpClient->expects($this->once())
-			->method('listTools')
-			->with($mcpTool)
-			->willReturn([$this->buildWebSearchDescriptor()]);
-
-		$callIndex = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages,
-				?string $modelOverride,
-				array $options
-			) use (&$callIndex): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					$this->assertSame('required', $options['tool_choice'] ?? null);
-
-					return [
-						'content' => '<think>I should search online.</think>',
-						'tool_calls' => [],
-					];
-				}
-
-				return [
-					'content' => 'Search complete.',
-					'tool_calls' => [],
-				];
-			});
-
-		$builtInToolProvider->expects($this->never())
-			->method('executeTool');
-
-		$mcpClient->expects($this->once())
-			->method('callTool')
-			->with(
-				$mcpTool,
-				'web_search',
-				['query' => 'Bitte suche im Internet nach Potsdam'],
-				[]
-			)
-			->willReturn(['content' => [['type' => 'text', 'text' => 'Potsdam search facts.']]]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
+	public function testEmptySuccessfulTurnIsTypedErrorWithoutExtraRequestOrFallback(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [$this->turn('', [], 'stop')]);
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Bitte suche im Internet nach Potsdam']],
-			[['tool' => $mcpTool, 'config' => []]],
-			[
-				'built_in_tools' => [['name' => 'room_search_documents', 'config' => []]],
-				'force_tool_call' => true,
-				'user_query' => 'Bitte suche im Internet nach Potsdam',
-			]
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			$this->builtInOptions(['search_test'])
 		);
-
-		$this->assertSame('Search complete.', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('web_search', $result['toolInvocations'][0]['tool']);
+		$this->assertSame('error', $result['status']);
+		$this->assertSame('empty_response', $result['terminalReason']);
+		$this->assertSame('', $result['content']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
 	}
 
-	public function testGenericForcedToolCallUsesMcpInputSchema(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-		$mcpTool = $this->buildMcpTool();
-
-		$toolRegistry->expects($this->never())
-			->method('getBuiltInToolsForBot');
-
-		$builtInToolProvider->expects($this->once())
-			->method('getAvailableTools')
-			->willReturn([]);
-
-		$mcpClient->expects($this->once())
-			->method('listTools')
-			->with($mcpTool)
-			->willReturn([$this->buildInputSchemaWebSearchDescriptor()]);
-
-		$callIndex = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages,
-				?string $modelOverride,
-				array $options
-			) use (&$callIndex): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					$tools = $options['tools'] ?? [];
-					$this->assertSame('required', $options['tool_choice'] ?? null);
-					$this->assertSame('web_search', $tools[0]['function']['name'] ?? null);
-					$this->assertArrayHasKey('query', $tools[0]['function']['parameters']['properties'] ?? []);
-
-					return [
-						'content' => '<think>I should search online.</think>',
-						'tool_calls' => [],
-					];
-				}
-
-				return [
-					'content' => 'Search complete.',
-					'tool_calls' => [],
-				];
-			});
-
-		$mcpClient->expects($this->once())
-			->method('callTool')
-			->with(
-				$mcpTool,
-				'web_search',
-				['query' => 'Bitte suche im Internet nach Potsdam'],
-				[]
-			)
-			->willReturn(['content' => [['type' => 'text', 'text' => 'Potsdam search facts.']]]);
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
+	public function testTurnExhaustionMakesNoAdditionalModelRequest(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->once())->method('executeTool')->willReturn(['text' => 'result']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('only-turn', 'search_test', '{"query":"x"}')], 'tool_calls'),
+		]);
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Bitte suche im Internet nach Potsdam']],
-			[['tool' => $mcpTool, 'config' => []]],
-			[
-				'force_tool_call' => true,
-				'user_query' => 'Bitte suche im Internet nach Potsdam',
-			]
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			$this->builtInOptions(['search_test']) + ['max_turns' => 1]
 		);
-
-		$this->assertSame('Search complete.', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('web_search', $result['toolInvocations'][0]['tool']);
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('max_turns', $result['terminalReason']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
 	}
 
-	public function testForcedQueryOnlyStripsExplicitMention(): void {
-		$executor = $this->createExecutor();
-
-		$this->assertSame(
-			'Potsdam Wetter',
-			$this->invokePrivateMethod($executor, 'buildForcedQuery', ['Potsdam Wetter'])
-		);
-		$this->assertSame(
-			'Bitte suche im Internet nach Potsdam',
-			$this->invokePrivateMethod($executor, 'buildForcedQuery', ['@web Bitte suche im Internet nach Potsdam'])
-		);
-	}
-
-	public function testInvalidMcpToolArgumentsAreReturnedAsToolObservation(): void {
-		$llmClient = $this->createMock(LLMClient::class);
-		$mcpClient = $this->createMock(McpClient::class);
-		$toolRegistry = $this->createMock(ToolRegistry::class);
-		$builtInToolProvider = $this->createMock(ToolProviderRegistry::class);
-		$mcpTool = $this->buildMcpTool();
-
-		$mcpClient->expects($this->once())
-			->method('listTools')
-			->with($mcpTool)
-			->willReturn([$this->buildWebSearchDescriptor()]);
-
-		$mcpClient->expects($this->never())
-			->method('callTool');
-
-		$callIndex = 0;
-		$llmClient->expects($this->exactly(2))
-			->method('sendChatCompletion')
-			->willReturnCallback(function (
-				string $systemPrompt,
-				array $messages,
-				?string $modelOverride,
-				array $options
-			) use (&$callIndex): array {
-				$callIndex++;
-				if ($callIndex === 1) {
-					return [
-						'content' => '',
-						'tool_calls' => [[
-							'id' => 'call-invalid',
-							'type' => 'function',
-							'function' => [
-								'name' => 'web_search',
-								'arguments' => '{}',
-							],
-						]],
-						'finish_reason' => 'tool_calls',
-					];
-				}
-
-				$lastMessage = $messages[count($messages) - 1] ?? [];
-				$this->assertSame('tool', $lastMessage['role'] ?? null);
-				$this->assertArrayNotHasKey('name', $lastMessage);
-				$this->assertSame('call-invalid', $lastMessage['tool_call_id'] ?? null);
-				$this->assertStringContainsString('ERROR: Invalid tool arguments for web_search', (string)($lastMessage['content'] ?? ''));
-				$this->assertStringContainsString('missing required argument(s): query', (string)($lastMessage['content'] ?? ''));
-
-				return [
-					'content' => 'Please provide a search query.',
-					'tool_calls' => [],
-				];
-			});
-
-		$executor = new AgentExecutor(
-			$llmClient,
-			$mcpClient,
-			$toolRegistry,
-			$builtInToolProvider,
-			$this->createMock(LoggerInterface::class)
-		);
-
+	public function testWholeBatchToolBudgetStopsBeforeAnySideEffect(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->searchToolDefinition('search_one'),
+			$this->searchToolDefinition('search_two'),
+		]);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [
+				$this->toolCall('one', 'search_one', '{"query":"one"}'),
+				$this->toolCall('two', 'search_two', '{"query":"two"}'),
+			], 'tool_calls'),
+		]);
 		$result = $executor->run(
 			'system',
-			[['role' => 'user', 'content' => 'Search online']],
-			[['tool' => $mcpTool, 'config' => []]],
-			['user_query' => 'Search online']
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			$this->builtInOptions(['search_one', 'search_two']) + ['max_tool_calls' => 1]
 		);
-
-		$this->assertSame('Please provide a search query.', $result['content']);
-		$this->assertCount(1, $result['toolInvocations']);
-		$this->assertSame('error', $result['toolInvocations'][0]['status']);
-		$this->assertStringContainsString('missing required argument(s): query', $result['toolInvocations'][0]['response']);
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('max_tool_calls', $result['terminalReason']);
+		$this->assertSame([], $result['toolInvocations']);
 	}
 
-	public function testGenericForcedToolSelectionSkipsBuiltInAndUnsafeTools(): void {
-		$executor = $this->createExecutor();
-		$toolMap = [
-			'room_search_documents' => $this->buildToolMapEntry('room_search_documents', 'Search room documents.', null),
-			'wiki_write_page' => $this->buildToolMapEntry('wiki_write_page', 'Write a wiki page.', null),
-			'attachment_transcribe_audio' => $this->buildToolMapEntry('attachment_transcribe_audio', 'Transcribe audio.', null),
-			'tavily_extract' => $this->buildToolMapEntry('tavily_extract', 'Extract page content from URLs.', $this->buildMcpTool(2, 'Extract')),
-		];
-
-		$result = $this->invokePrivateMethod($executor, 'pickToolForForcedCall', [$toolMap]);
-
-		$this->assertNull($result);
-	}
-
-	/**
-	 * @return ToolDefinition
-	 */
-	private function buildSearchToolDefinition(): array {
-		return [
-			'name' => 'search_test',
-			'description' => 'Search test tool',
-			'schema' => [
-				'type' => 'object',
-				'properties' => [
-					'query' => ['type' => 'string'],
-					'limit' => ['type' => 'integer'],
-				],
-				'required' => ['query'],
-			],
-		];
-	}
-
-	/**
-	 * @return ToolDefinition
-	 */
-	private function buildAudioToolDefinition(): array {
-		return [
-			'name' => 'attachment_transcribe_audio',
-			'description' => 'Transcribe audio or voice-message attachments.',
-			'schema' => [
-				'type' => 'object',
-				'properties' => [
-					'attachment_name' => ['type' => 'string'],
-				],
-			],
-		];
-	}
-
-	/**
-	 * @return ToolDefinition
-	 */
-	private function buildRoomSearchToolDefinition(): array {
-		return [
-			'name' => 'room_search_documents',
-			'description' => 'Search documents uploaded inside the current Talk room.',
-			'schema' => [
-				'type' => 'object',
-				'properties' => [
-					'query' => ['type' => 'string'],
-				],
-				'required' => ['query'],
-			],
-		];
-	}
-
-	/**
-	 * @return ToolDefinition
-	 */
-	private function buildWikiWriteToolDefinition(): array {
-		return [
-			'name' => BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE,
-			'description' => 'Create, overwrite, or append to a Markdown page in the bot wiki.',
-			'schema' => [
+	public function testFourEffectivelyIdenticalMutatingCallsInOneBatchStopBeforeAnySideEffect(): void {
+		$toolName = BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE;
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->never())->method('recordToolCall');
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness(
+			[$this->toolDefinition($toolName, [
 				'type' => 'object',
 				'properties' => [
 					'path' => ['type' => 'string'],
 					'content' => ['type' => 'string'],
-					'mode' => ['type' => 'string'],
-					'reason' => ['type' => 'string'],
+					'revision' => ['type' => 'integer'],
 				],
 				'required' => ['path', 'content'],
+			])],
+			$traceService
+		);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$calls = [];
+		for ($index = 1; $index <= 4; $index++) {
+			$calls[] = $this->toolCall(
+				'write-' . $index,
+				$toolName,
+				(string)json_encode([
+					'path' => 'same.md',
+					'content' => 'same content',
+					'revision' => $index % 2 === 0 ? 7 : '7',
+					'nonce' => 'ignored-' . $index,
+				], JSON_THROW_ON_ERROR)
+			);
+		}
+		$this->expectSyncTurns($llmClient, [$this->turn('', $calls, 'tool_calls')]);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Write repeatedly']],
+			[],
+			$this->builtInOptions([$toolName])
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('repetition_limit', $result['terminalReason']);
+		$this->assertSame([], $result['toolInvocations']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertCount(2, $result['messages']);
+	}
+
+	public function testOrdinaryJsonAndXmlAssistantProseRemainExactText(): void {
+		foreach ([
+			'{"name":"search_test","arguments":{"query":"Berlin"}}',
+			'Before <tool_call>{"name":"search_test","arguments":{}}</tool_call> after',
+		] as $content) {
+			[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+			$toolProvider->expects($this->never())->method('executeTool');
+			$this->expectSyncTurns($llmClient, [$this->turn($content, [], 'stop')]);
+			$result = $executor->run(
+				'system',
+				[['role' => 'user', 'content' => 'Show syntax']],
+				[],
+				$this->builtInOptions(['search_test'])
+			);
+			$this->assertSame($content, $result['content']);
+			$this->assertSame([], $result['toolInvocations']);
+		}
+	}
+
+	public function testMutatingRepetitionBudgetStopsBeforeFourthSideEffect(): void {
+		$toolName = BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE;
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->toolDefinition($toolName),
+		]);
+		$toolProvider->expects($this->exactly(3))
+			->method('executeTool')
+			->with($toolName, [])
+			->willReturn(['text' => 'written']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('write-1', $toolName, '{}')], 'tool_calls'),
+			$this->turn('', [$this->toolCall('write-2', $toolName, '{}')], 'tool_calls'),
+			$this->turn('', [$this->toolCall('write-3', $toolName, '{}')], 'tool_calls'),
+			$this->turn('', [$this->toolCall('write-4', $toolName, '{}')], 'tool_calls'),
+		]);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Write repeatedly']],
+			[],
+			$this->builtInOptions([$toolName])
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('repetition_limit', $result['terminalReason']);
+		$this->assertSame(4, $result['logicalTurns']);
+		$this->assertSame(4, $result['providerAttempts']);
+		$this->assertCount(3, $result['toolInvocations']);
+		$this->assertSame(['write-1', 'write-2', 'write-3'], array_column($result['toolInvocations'], 'toolCallId'));
+	}
+
+	public function testProviderAttemptBudgetExceptionReturnsTypedBudgetResult(): void {
+		[$executor, $llmClient] = $this->createHarness();
+		$llmClient->expects($this->once())
+			->method('sendAgentTurn')
+			->willReturnCallback(function (
+				string $systemPrompt,
+				array $messages,
+				array $knownToolNames,
+				?string $model,
+				array $options,
+			): AgentTurn {
+				/** @var ProviderAttemptBudget $budget */
+				$budget = $options['provider_attempt_budget'];
+				$this->assertSame(1, $budget->getLimit());
+				$budget->consume();
+				$budget->consume();
+				$this->fail('The second provider attempt must exhaust the shared budget.');
+			});
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['max_provider_attempts' => 1]
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('provider_attempts', $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame([], $result['toolInvocations']);
+	}
+
+	public function testProviderAttemptLimitIsHardCappedAndCompatibilitySourcePropagates(): void {
+		[$executor, $llmClient] = $this->createHarness();
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('Legacy answer', [], 'stop', [], AgentTurn::COMPATIBILITY_LEGACY_XML)],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(48, $options['provider_attempt_budget']->getLimit());
+				$this->assertSame('xml', $options['legacy_tool_call_compatibility']);
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			[
+				'max_provider_attempts' => 999,
+				'legacy_tool_call_compatibility' => 'xml',
+			]
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame(AgentTurn::COMPATIBILITY_LEGACY_XML, $result['compatibilitySource']);
+	}
+
+	public function testWallClockBudgetStopsBeforeFirstProviderCall(): void {
+		$clockValues = [10.0, 15.0];
+		$clock = static function () use (&$clockValues): float {
+			return array_shift($clockValues) ?? 15.0;
+		};
+		[$executor, $llmClient] = $this->createHarness([], null, $clock);
+		$llmClient->expects($this->never())->method('sendAgentTurn');
+		$llmClient->expects($this->never())->method('streamAgentTurn');
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['max_wall_clock_seconds' => 5]
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_WALL_CLOCK, $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(0, $result['providerAttempts']);
+	}
+
+	public function testWallClockBudgetStopsBeforeToolSideEffect(): void {
+		$clockValues = [20.0, 20.0, 20.0, 26.0];
+		$clock = static function () use (&$clockValues): float {
+			return array_shift($clockValues) ?? 26.0;
+		};
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness(
+			[$this->searchToolDefinition()],
+			null,
+			$clock
+		);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('timed-out-tool', 'search_test', '{"query":"x"}')], 'tool_calls'),
+		]);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['search_test']) + ['max_wall_clock_seconds' => 5]
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_WALL_CLOCK, $result['terminalReason']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame([], $result['toolInvocations']);
+	}
+
+	public function testAbortStopsBeforeProviderCallWithTypedResult(): void {
+		[$executor, $llmClient] = $this->createHarness();
+		$llmClient->expects($this->never())->method('sendAgentTurn');
+		$llmClient->expects($this->never())->method('streamAgentTurn');
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['abort_callback' => static fn (): bool => true]
+		);
+
+		$this->assertSame('error', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_ABORTED, $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(0, $result['providerAttempts']);
+	}
+
+	public function testAbortStopsBeforeMcpDiscoveryWithoutExternalCall(): void {
+		$tool = $this->mcpTool();
+		[$executor, $llmClient, , , $mcpClient] = $this->createHarness();
+		$mcpClient->expects($this->never())->method('listTools');
+		$llmClient->expects($this->never())->method('sendAgentTurn');
+		$llmClient->expects($this->never())->method('streamAgentTurn');
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[['tool' => $tool, 'config' => []]],
+			['abort_callback' => static fn (): bool => true]
+		);
+
+		$this->assertSame('error', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_ABORTED, $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(0, $result['providerAttempts']);
+	}
+
+	public function testMcpDiscoveryUsesSharedRemainingDeadlineAndStopsBeforeNextEndpoint(): void {
+		$now = 100.0;
+		$clock = static function () use (&$now): float {
+			return $now;
+		};
+		$firstTool = $this->mcpTool();
+		$secondTool = $this->mcpTool();
+		$secondTool->setId(2);
+		[$executor, $llmClient, , , $mcpClient] = $this->createHarness([], null, $clock);
+		$llmClient->expects($this->never())->method('sendAgentTurn');
+		$llmClient->expects($this->never())->method('streamAgentTurn');
+		$mcpClient->expects($this->once())
+			->method('listTools')
+			->willReturnCallback(function (
+				Tool $tool,
+				array $context,
+				?AgentRunControl $runControl,
+			) use (&$now, $firstTool): array {
+				$this->assertSame($firstTool, $tool);
+				$this->assertSame([], $context);
+				$this->assertInstanceOf(AgentRunControl::class, $runControl);
+				$now = 104.0;
+				$this->assertSame(1.0, $runControl->clampTimeout(60));
+				$now = 105.0;
+				return [];
+			});
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[
+				['tool' => $firstTool, 'config' => []],
+				['tool' => $secondTool, 'config' => []],
 			],
-		];
+			['max_wall_clock_seconds' => 5]
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_WALL_CLOCK, $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(0, $result['providerAttempts']);
 	}
 
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function buildWebSearchDescriptor(): array {
-		return [
-			'name' => 'web_search',
-			'description' => 'Search the web and internet.',
-			'schema' => [
-				'type' => 'object',
-				'properties' => [
-					'query' => ['type' => 'string'],
-				],
-				'required' => ['query'],
-			],
-		];
+	public function testAbortIsRecheckedBeforeEveryToolSideEffect(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->searchToolDefinition('search_one'),
+			$this->searchToolDefinition('search_two'),
+		]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with('search_one', ['query' => 'one'])
+			->willReturn(['text' => 'one result']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [
+				$this->toolCall('first', 'search_one', '{"query":"one"}'),
+				$this->toolCall('second', 'search_two', '{"query":"two"}'),
+			], 'tool_calls'),
+		]);
+		$abortChecks = 0;
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search twice']],
+			[],
+			$this->builtInOptions(['search_one', 'search_two']) + [
+				'abort_callback' => static function () use (&$abortChecks): bool {
+					$abortChecks++;
+					return $abortChecks >= 4;
+				},
+			]
+		);
+
+		$this->assertSame('error', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_ABORTED, $result['terminalReason']);
+		$this->assertSame(4, $abortChecks);
+		$this->assertCount(1, $result['toolInvocations']);
+		$this->assertSame('first', $result['toolInvocations'][0]['toolCallId']);
 	}
 
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function buildInputSchemaWebSearchDescriptor(): array {
-		$descriptor = $this->buildWebSearchDescriptor();
-		$descriptor['inputSchema'] = $descriptor['schema'];
-		unset($descriptor['schema']);
+	public function testRunControlClampsTimeoutAndUsesHardCappedWallClockLimit(): void {
+		$now = 100.0;
+		$control = new AgentRunControl(900, null, static function () use (&$now): float {
+			return $now;
+		});
+		$now = 102.5;
+		$this->assertSame(897.5, $control->getRemainingSeconds());
+		$this->assertSame(30.0, $control->clampTimeout(30));
+		$now = 999.5;
+		$this->assertSame(0.5, $control->clampTimeout(30));
+		$now = 1000.0;
 
-		return $descriptor;
-	}
+		try {
+			$control->assertCanContinue();
+			$this->fail('The wall-clock deadline must interrupt the run.');
+		} catch (AgentRunInterruptedException $e) {
+			$this->assertSame(AgentRunInterruptedException::REASON_WALL_CLOCK, $e->getReason());
+		}
 
-	private function buildMcpTool(int $id = 1, string $name = 'Web search'): Tool {
-		$tool = new Tool();
-		$tool->setId($id);
-		$tool->setName($name);
-		$tool->setMcpEndpointUrl('https://mcp.example.test');
-		$tool->setEnabled(true);
-
-		return $tool;
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function buildToolMapEntry(string $name, string $description, ?Tool $tool): array {
-		return [
-			'tool' => $tool,
-			'config' => [],
-			'definition' => [
-				'type' => 'function',
-				'function' => [
-					'name' => $name,
-					'description' => $description,
-					'parameters' => [
-						'type' => 'object',
-						'properties' => [
-							'query' => ['type' => 'string'],
-						],
-					],
-				],
-			],
-			'invokeName' => $name,
-		];
-	}
-
-	private function createExecutor(): AgentExecutor {
-		return new AgentExecutor(
-			$this->createMock(LLMClient::class),
-			$this->createMock(McpClient::class),
-			$this->createMock(ToolRegistry::class),
-			$this->createMock(ToolProviderRegistry::class),
-			$this->createMock(LoggerInterface::class)
+		[$executor, $llmClient] = $this->createHarness();
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('Done')],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertInstanceOf(AgentRunControl::class, $options['agent_run_control']);
+				$this->assertSame(900, $options['agent_run_control']->getMaxWallClockSeconds());
+			}
+		);
+		$executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['max_wall_clock_seconds' => 9999]
 		);
 	}
 
-	/**
-	 * @param array<int,mixed> $arguments
-	 * @return mixed
-	 */
-	private function invokePrivateMethod(AgentExecutor $executor, string $method, array $arguments) {
-		$reflection = new \ReflectionMethod($executor, $method);
-		$reflection->setAccessible(true);
+	public function testTracePreparationDoesNotSwallowRunInterruption(): void {
+		$traceService = $this->createMock(TraceService::class);
+		[$executor, $llmClient] = $this->createHarness([], $traceService);
+		$llmClient->expects($this->once())
+			->method('buildTraceChatCompletionPayload')
+			->willThrowException(new AgentRunInterruptedException(AgentRunInterruptedException::REASON_WALL_CLOCK));
+		$llmClient->expects($this->never())->method('sendAgentTurn');
 
-		return $reflection->invokeArgs($executor, $arguments);
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['trace_run_id' => 7]
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame(AgentRunInterruptedException::REASON_WALL_CLOCK, $result['terminalReason']);
+		$this->assertSame(0, $result['logicalTurns']);
+	}
+
+	public function testTracePreparationDoesNotSwallowProviderAttemptExhaustion(): void {
+		$traceService = $this->createMock(TraceService::class);
+		[$executor, $llmClient] = $this->createHarness([], $traceService);
+		$llmClient->expects($this->once())
+			->method('buildTraceChatCompletionPayload')
+			->willReturnCallback(function (
+				string $systemPrompt,
+				array $messages,
+				?string $model,
+				array $options,
+			): array {
+				$options['provider_attempt_budget']->consume();
+				throw new ProviderAttemptBudgetExceededException(1, 1);
+			});
+		$llmClient->expects($this->never())->method('sendAgentTurn');
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['trace_run_id' => 7, 'max_provider_attempts' => 1]
+		);
+
+		$this->assertSame('budget_exhausted', $result['status']);
+		$this->assertSame('provider_attempts', $result['terminalReason']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertSame(0, $result['logicalTurns']);
+	}
+
+	public function testTracePreflightDiscoveryErrorIsSecretSafeAndDoesNotBlockRealTurn(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setDefaultModel('model-a');
+		$settings->setLlmModelsTimeout(25);
+		$settings->setLlmChatTimeout(90);
+
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+
+		$response = $this->createMock(IResponse::class);
+		$response->method('getBody')->willReturn(json_encode([
+			'model' => 'model-a',
+			'choices' => [[
+				'message' => ['content' => 'safe answer'],
+				'finish_reason' => 'stop',
+			]],
+		]) ?: '');
+		$response->method('getHeader')->willReturn('');
+		$response->method('getStatusCode')->willReturn(200);
+
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())
+			->method('get')
+			->with('https://primary.example.invalid/v1/models')
+			->willThrowException(new \Error('discovery failed at https://secret.example.invalid using api-key-secret'));
+		$client->expects($this->once())
+			->method('post')
+			->with('https://primary.example.invalid/v1/chat/completions')
+			->willReturn($response);
+		$clientService = $this->createMock(IClientService::class);
+		$clientService->method('newClient')->willReturn($client);
+
+		$events = [];
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->method('recordEvent')
+			->willReturnCallback(static function (?int $runId, string $eventType, array $event = []) use (&$events): void {
+				$events[] = [
+					'run_id' => $runId,
+					'event_type' => $eventType,
+					'event' => $event,
+				];
+			});
+		$llmClient = new LLMClient(
+			$clientService,
+			$settingsService,
+			$this->createMock(LoggerInterface::class),
+			null,
+			$traceService,
+		);
+		$toolProvider = $this->createMock(ToolProviderRegistry::class);
+		$toolProvider->method('getAvailableTools')->willReturn([]);
+		$executor = new AgentExecutor(
+			$llmClient,
+			$this->createMock(McpClient::class),
+			$this->createMock(ToolRegistry::class),
+			$toolProvider,
+			$this->createMock(LoggerInterface::class),
+			null,
+			null,
+			$traceService,
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['trace_run_id' => 73, 'max_provider_attempts' => 2]
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('safe answer', $result['content']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(2, $result['providerAttempts']);
+
+		$llmRequestEvents = array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'llm_request'
+		));
+		$this->assertCount(1, $llmRequestEvents);
+		$this->assertSame(
+			'provider_trace_preflight_failed',
+			$llmRequestEvents[0]['event']['payload']['trace_payload_error'] ?? null,
+		);
+		$providerAttemptEvents = array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
+		));
+		$this->assertCount(2, $providerAttemptEvents);
+		$this->assertSame(['error', 'ok'], array_column(array_column($providerAttemptEvents, 'event'), 'status'));
+		$this->assertSame(['model_discovery', 'selected'], array_map(
+			static fn (array $event): string => $event['event']['payload']['route'],
+			$providerAttemptEvents
+		));
+
+		$traceJson = json_encode($events) ?: '';
+		$this->assertStringNotContainsString('secret.example.invalid', $traceJson);
+		$this->assertStringNotContainsString('api-key-secret', $traceJson);
+		$this->assertStringNotContainsString('discovery failed', $traceJson);
+	}
+
+	public function testExplicitBuiltInLoadoutPreservesConfigAndOmitsUnassignedTools(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			$this->searchToolDefinition('configured_search'),
+			$this->searchToolDefinition('not_assigned'),
+		]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with('configured_search', ['query' => 'x'], ['scope' => 'course-7'])
+			->willReturn(['text' => 'result']);
+		$this->expectSyncTurns(
+			$llmClient,
+			[
+				$this->turn('', [$this->toolCall('configured', 'configured_search', '{"query":"x"}')], 'tool_calls'),
+				$this->turn('Done', [], 'stop'),
+			],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(['configured_search'], $knownToolNames);
+				$this->assertSame(['configured_search'], array_column(array_column($options['tools'], 'function'), 'name'));
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			[
+				'built_in_tools' => [[
+					'name' => 'configured_search',
+					'config' => ['scope' => 'course-7'],
+				]],
+			]
+		);
+
+		$this->assertSame('Done', $result['content']);
+		$this->assertSame(['query' => 'x'], $result['toolInvocations'][0]['arguments']);
+	}
+
+	public function testExplicitEmptyBuiltInLoadoutIsAuthoritativeWithBotId(): void {
+		[$executor, $llmClient, $toolRegistry, $toolProvider] = $this->createHarness([
+			$this->toolDefinition(BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE),
+		]);
+		$toolRegistry->expects($this->never())->method('getBuiltInToolsForBot');
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('No tools loaded')],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame([], $knownToolNames);
+				$this->assertSame([], $options['tools']);
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Question']],
+			[],
+			['bot_id' => 99, 'built_in_tools' => []]
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('No tools loaded', $result['content']);
+		$this->assertSame([], $result['toolInvocations']);
+	}
+
+	public function testUnassignedMutatingBuiltInCallBecomesStructuredErrorWithoutSideEffect(): void {
+		[$executor, $llmClient, $toolRegistry, $toolProvider] = $this->createHarness([
+			$this->toolDefinition(BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE),
+		]);
+		$call = $this->toolCall(
+			'unauthorized-write',
+			BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE,
+			'{"path":"forbidden.md","content":"must not be written"}'
+		);
+		$toolRegistry->expects($this->never())->method('getBuiltInToolsForBot');
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[$this->turn('', [$call], 'tool_calls'), $this->turn('Write was not allowed.', [], 'stop')],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame([], $knownToolNames);
+				$this->assertSame([], $options['tools']);
+				if ($index === 1) {
+					$this->assertSame('unauthorized-write', $messages[2]['tool_call_id']);
+					$this->assertSame('unknown_tool', $this->decodeToolError($messages[2]['content'])['code']);
+				}
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Do not write anything']],
+			[],
+			['bot_id' => 99, 'built_in_tools' => []]
+		);
+
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Write was not allowed.', $result['content']);
+		$this->assertCount(1, $result['toolInvocations']);
+		$this->assertSame('error', $result['toolInvocations'][0]['status']);
+		$this->assertStringContainsString('unknown_tool', $result['toolInvocations'][0]['response']);
+	}
+
+	public function testMcpAliasUsesCanonicalInputSchemaAndOriginalInvokeName(): void {
+		$tool = $this->mcpTool();
+		[$executor, $llmClient, , $toolProvider, $mcpClient] = $this->createHarness([
+			$this->toolDefinition('remote_search'),
+		]);
+		$sharedRunControl = null;
+		$mcpClient->expects($this->once())
+			->method('listTools')
+			->with(
+				$tool,
+				[],
+				$this->callback(function (AgentRunControl $runControl) use (&$sharedRunControl): bool {
+					$sharedRunControl = $runControl;
+					return true;
+				})
+			)
+			->willReturn([[
+				'name' => 'remote_search',
+				'description' => 'Remote search',
+				'inputSchema' => [
+					'properties' => [
+						'query' => ['type' => 'string'],
+						'filters' => ['type' => 'object', 'properties' => []],
+					],
+					'required' => ['query'],
+				],
+			]]);
+		$mcpClient->expects($this->once())
+			->method('callTool')
+			->with(
+				$tool,
+				'remote_search',
+				['query' => 'Berlin'],
+				['tenant' => 'one'],
+				$this->callback(function (AgentRunControl $runControl) use (&$sharedRunControl): bool {
+					return $runControl === $sharedRunControl;
+				})
+			)
+			->willReturn(['text' => 'remote result']);
+		$toolProvider->expects($this->never())->method('executeTool');
+		$this->expectSyncTurns(
+			$llmClient,
+			[
+				$this->turn('', [
+					$this->toolCall('mcp-call', 'remote_search__mcp1', '{"query":"Berlin"}'),
+				], 'tool_calls'),
+				$this->turn('Remote answer', [], 'stop'),
+			],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(['remote_search', 'remote_search__mcp1'], $knownToolNames);
+				$mcpParameters = $options['tools'][1]['function']['parameters'];
+				$this->assertSame('object', $mcpParameters['type']);
+				$this->assertInstanceOf(\stdClass::class, $mcpParameters['properties']['filters']['properties']);
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search remotely']],
+			[['tool' => $tool, 'config' => ['tenant' => 'one']]],
+			$this->builtInOptions(['remote_search'])
+		);
+
+		$this->assertSame('Remote answer', $result['content']);
+		$this->assertSame('remote_search__mcp1', $result['toolInvocations'][0]['tool']);
+	}
+
+	public function testStreamingEmitsAssistantDeltasAndHidesStructuredToolCallArtifacts(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$completedStreamTurns = 0;
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->willReturnCallback(function () use (&$completedStreamTurns): array {
+				$this->assertSame(1, $completedStreamTurns);
+				return ['text' => 'result'];
+			});
+		$this->expectStreamTurns(
+			$llmClient,
+			[
+				$this->turn('Searching...', [$this->toolCall('stream-tool', 'search_test', '{"query":"x"}')], 'tool_calls'),
+				$this->turn('Final streamed answer', [], 'stop'),
+			],
+			[
+				[
+					['content' => 'Searching...'],
+					['tool_calls' => [['index' => 0, 'function' => ['name' => 'search_test']]]],
+				],
+				['Final ', 'streamed answer'],
+			],
+			static function () use (&$completedStreamTurns): void {
+				$completedStreamTurns++;
+			}
+		);
+		$observedAssistantPartials = [];
+		$observedToolProgress = [];
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['search_test']) + [
+				'on_partial_result' => static function (string $partial) use (&$observedAssistantPartials, &$completedStreamTurns): void {
+					$observedAssistantPartials[] = [$partial, $completedStreamTurns];
+				},
+				'on_tool_progress' => static function (string $progress) use (&$observedToolProgress, &$completedStreamTurns): void {
+					$observedToolProgress[] = [$progress, $completedStreamTurns];
+				},
+			]
+		);
+
+		$this->assertSame('Final streamed answer', $result['content']);
+		$this->assertSame([
+			['Searching...', 0],
+			['Final ', 1],
+			['streamed answer', 1],
+		], $observedAssistantPartials);
+		$this->assertSame([
+			['🔧 _Using tool: search_test..._', 1],
+		], $observedToolProgress);
+		$this->assertSame(2, $completedStreamTurns);
+		$this->assertStringNotContainsString('Searching...', $result['content']);
+	}
+
+	public function testToolOutputTruncationPreservesUtf8Boundary(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->willReturn(['text' => str_repeat('ä', 4001)]);
+		$this->expectSyncTurns(
+			$llmClient,
+			[
+				$this->turn('', [$this->toolCall('utf8', 'search_test', '{"query":"x"}')], 'tool_calls'),
+				$this->turn('Done', [], 'stop'),
+			],
+			function (int $index, array $messages): void {
+				if ($index === 1) {
+					$this->assertSame(str_repeat('ä', 4000) . '...', $messages[2]['content']);
+					$this->assertTrue(mb_check_encoding($messages[2]['content'], 'UTF-8'));
+				}
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['search_test'])
+		);
+
+		$this->assertSame(4003, mb_strlen($result['toolInvocations'][0]['response'], 'UTF-8'));
+		$this->assertTrue(mb_check_encoding($result['toolInvocations'][0]['response'], 'UTF-8'));
+	}
+
+	public function testExecutionExceptionProducesSecretSafeStructuredObservation(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->willThrowException(new \RuntimeException('secret-token-must-not-leak'));
+		$this->expectSyncTurns(
+			$llmClient,
+			[
+				$this->turn('', [$this->toolCall('failed', 'search_test', '{"query":"x"}')], 'tool_calls'),
+				$this->turn('Recovered', [], 'stop'),
+			],
+			function (int $index, array $messages): void {
+				if ($index === 1) {
+					$error = $this->decodeToolError($messages[2]['content']);
+					$this->assertSame('tool_execution_failed', $error['code']);
+					$this->assertStringNotContainsString('secret-token', $messages[2]['content']);
+				}
+			}
+		);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['search_test'])
+		);
+
+		$this->assertSame('Recovered', $result['content']);
+		$this->assertSame('error', $result['toolInvocations'][0]['status']);
+		$this->assertStringNotContainsString('secret-token', $result['toolInvocations'][0]['response']);
+	}
+
+	public function testValidToolExecutionRecordsCallImmediatelyBeforeExecutionAndThenResult(): void {
+		$traceOrder = [];
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->method('recordEvent');
+		$traceService->expects($this->once())
+			->method('recordToolCall')
+			->with(41, 'search_test', ['query' => 'trace'], 'trace-call')
+			->willReturnCallback(function () use (&$traceOrder): void {
+				$traceOrder[] = 'call';
+			});
+		$traceService->expects($this->once())
+			->method('recordToolResult')
+			->with(
+				41,
+				'search_test',
+				'ok',
+				'trace result',
+				$this->isType('int'),
+				null
+			)
+			->willReturnCallback(function () use (&$traceOrder): void {
+				$traceOrder[] = 'result';
+			});
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness(
+			[$this->searchToolDefinition()],
+			$traceService
+		);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with('search_test', ['query' => 'trace'])
+			->willReturnCallback(function () use (&$traceOrder): array {
+				$traceOrder[] = 'execute';
+				return ['text' => 'trace result'];
+			});
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('trace-call', 'search_test', '{"query":"trace"}')], 'tool_calls'),
+			$this->turn('Done', [], 'stop'),
+		]);
+
+		$result = $executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Trace']],
+			[],
+			$this->builtInOptions(['search_test']) + ['trace_run_id' => 41]
+		);
+
+		$this->assertSame('Done', $result['content']);
+		$this->assertSame(['call', 'execute', 'result'], $traceOrder);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $availableTools
+	 * @return array{AgentExecutor,LLMClient,ToolRegistry,ToolProviderRegistry,McpClient}
+	 */
+	private function createHarness(
+		array $availableTools = [],
+		?TraceService $traceService = null,
+		?callable $clock = null,
+	): array {
+		$llmClient = $this->createMock(LLMClient::class);
+		$mcpClient = $this->createMock(McpClient::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolProvider = $this->createMock(ToolProviderRegistry::class);
+		$toolProvider->method('getAvailableTools')->willReturn($availableTools);
+
+		return [
+			new AgentExecutor(
+				$llmClient,
+				$mcpClient,
+				$toolRegistry,
+				$toolProvider,
+				$this->createMock(LoggerInterface::class),
+				null,
+				null,
+				$traceService,
+				$clock,
+			),
+			$llmClient,
+			$toolRegistry,
+			$toolProvider,
+			$mcpClient,
+		];
+	}
+
+	/** @param array<int,AgentTurn> $turns */
+	private function expectSyncTurns(LLMClient $llmClient, array $turns, ?callable $inspect = null): void {
+		$index = 0;
+		$llmClient->expects($this->exactly(count($turns)))
+			->method('sendAgentTurn')
+			->willReturnCallback(function (
+				string $systemPrompt,
+				array $messages,
+				array $knownToolNames,
+				?string $model,
+				array $options,
+			) use (&$index, $turns, $inspect): AgentTurn {
+				$this->assertInstanceOf(ProviderAttemptBudget::class, $options['provider_attempt_budget'] ?? null);
+				$options['provider_attempt_budget']->consume();
+				if ($inspect !== null) {
+					$inspect($index, $messages, $knownToolNames, $options);
+				}
+				return $turns[$index++];
+			});
+	}
+
+	/**
+	 * @param array<int,AgentTurn> $turns
+	 * @param array<int,array<int,array<string,mixed>|string>> $chunks
+	 */
+	private function expectStreamTurns(
+		LLMClient $llmClient,
+		array $turns,
+		array $chunks,
+		?callable $beforeReturn = null,
+	): void {
+		$index = 0;
+		$llmClient->expects($this->exactly(count($turns)))
+			->method('streamAgentTurn')
+			->willReturnCallback(function (
+				string $systemPrompt,
+				array $messages,
+				array $knownToolNames,
+				callable $onChunk,
+				?string $model,
+				array $options,
+			) use (&$index, $turns, $chunks, $beforeReturn): AgentTurn {
+				$this->assertInstanceOf(ProviderAttemptBudget::class, $options['provider_attempt_budget'] ?? null);
+				$options['provider_attempt_budget']->consume();
+				foreach ($chunks[$index] ?? [] as $chunk) {
+					$onChunk(is_array($chunk) ? $chunk : ['content' => $chunk]);
+				}
+				if ($beforeReturn !== null) {
+					$beforeReturn($index);
+				}
+				return $turns[$index++];
+			});
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $toolCalls
+	 * @param array<string,int|string> $rateLimitHeaders
+	 */
+	private function turn(
+		string $text,
+		array $toolCalls = [],
+		?string $finishReason = 'stop',
+		array $rateLimitHeaders = [],
+		string $compatibilitySource = AgentTurn::COMPATIBILITY_NATIVE,
+	): AgentTurn {
+		return new AgentTurn(
+			$text,
+			$toolCalls,
+			$finishReason,
+			'test-model',
+			'primary:test-model',
+			'primary',
+			['total_tokens' => 10],
+			$rateLimitHeaders,
+			$compatibilitySource
+		);
+	}
+
+	/** @return array<string,mixed> */
+	private function toolCall(string $id, string $name, string $arguments): array {
+		return [
+			'id' => $id,
+			'type' => 'function',
+			'function' => ['name' => $name, 'arguments' => $arguments],
+		];
+	}
+
+	/** @param array<int,string> $names */
+	private function builtInOptions(array $names): array {
+		return [
+			'built_in_tools' => array_map(
+				static fn (string $name): array => ['name' => $name, 'config' => []],
+				$names
+			),
+		];
+	}
+
+	/** @return array<string,mixed> */
+	private function searchToolDefinition(string $name = 'search_test'): array {
+		return $this->toolDefinition($name, [
+			'type' => 'object',
+			'properties' => [
+				'query' => ['type' => 'string'],
+				'limit' => ['type' => 'integer'],
+			],
+			'required' => ['query'],
+		]);
+	}
+
+	/**
+	 * @param array<string,mixed>|null $schema
+	 * @return array<string,mixed>
+	 */
+	private function toolDefinition(string $name, ?array $schema = null): array {
+		return [
+			'name' => $name,
+			'description' => 'Test tool ' . $name,
+			'schema' => $schema ?? ['type' => 'object', 'properties' => new \stdClass()],
+		];
+	}
+
+	private function mcpTool(): Tool {
+		$tool = new Tool();
+		$tool->setId(1);
+		$tool->setName('Web search');
+		$tool->setMcpEndpointUrl('https://mcp.example.test');
+		$tool->setEnabled(true);
+		return $tool;
+	}
+
+	/** @return array<string,mixed> */
+	private function decodeToolError(string $content): array {
+		$decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+		$this->assertFalse($decoded['ok']);
+		return $decoded['error'];
 	}
 }

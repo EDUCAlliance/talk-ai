@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace OCA\EducAI\Service;
 
 use Exception;
-use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
@@ -14,10 +13,10 @@ use OCA\EducAI\Db\BotToolMapper;
 use OCA\EducAI\Db\ChatRoomMapper;
 use OCA\EducAI\Db\Conversation;
 use OCA\EducAI\Db\ConversationMapper;
-use OCA\EducAI\Db\Embedding;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Db\DoesNotExistException;
@@ -41,7 +40,6 @@ class BotService {
 	private BotMapper $botMapper;
 	private ConversationMapper $conversationMapper;
 	private ChatRoomMapper $chatRoomMapper;
-	private LLMClient $llmClient;
 	private LoggerInterface $logger;
 	private IGroupManager $groupManager;
 	private IUserManager $userManager;
@@ -58,7 +56,6 @@ class BotService {
 	private PermissionService $permissionService;
 	private SettingsService $settingsService;
 	private RoomDocumentIngestionService $roomDocumentIngestionService;
-	private ToolIntentService $toolIntentService;
 	private ?RoomImageIngestionService $roomImageIngestionService;
 	private ?WikiRootRegistryService $wikiRootRegistryService;
 	private ?WikiLocationService $wikiLocationService;
@@ -68,7 +65,6 @@ class BotService {
 		BotMapper $botMapper,
 		ConversationMapper $conversationMapper,
 		ChatRoomMapper $chatRoomMapper,
-		LLMClient $llmClient,
 		LoggerInterface $logger,
 		IGroupManager $groupManager,
 		IUserManager $userManager,
@@ -88,13 +84,11 @@ class BotService {
 		?RoomImageIngestionService $roomImageIngestionService = null,
 		?WikiRootRegistryService $wikiRootRegistryService = null,
 		?WikiLocationService $wikiLocationService = null,
-		?ToolIntentService $toolIntentService = null,
-		?TraceService $traceService = null
+		?TraceService $traceService = null,
 	) {
 		$this->botMapper = $botMapper;
 		$this->conversationMapper = $conversationMapper;
 		$this->chatRoomMapper = $chatRoomMapper;
-		$this->llmClient = $llmClient;
 		$this->logger = $logger;
 		$this->groupManager = $groupManager;
 		$this->userManager = $userManager;
@@ -114,7 +108,6 @@ class BotService {
 		$this->roomImageIngestionService = $roomImageIngestionService;
 		$this->wikiRootRegistryService = $wikiRootRegistryService;
 		$this->wikiLocationService = $wikiLocationService;
-		$this->toolIntentService = $toolIntentService ?? new ToolIntentService();
 		$this->traceService = $traceService;
 	}
 
@@ -774,6 +767,9 @@ class BotService {
 	 * @param int|null $threadRootMessageId Talk thread root used to isolate room history
 	 * @param int|null $replyToMessageId Talk message ID to reply to when a queued request completes
 	 * @param int|null $traceRunId App-owned trace run ID for best-effort personal activity capture
+	 * @param callable(?string):void|null $onExecutionError Internal error propagation for the trace owner
+	 * @param callable():void|null $onStreamMismatch Internal warning propagation for the trace owner
+	 * @param callable(string):void|null $onToolProgress Callback for executor-owned tool progress
 	 * @return string
 	 * @throws Exception
 	 */
@@ -789,7 +785,10 @@ class BotService {
 		?array $messageContext = null,
 		?int $threadRootMessageId = null,
 		?int $replyToMessageId = null,
-		?int $traceRunId = null
+		?int $traceRunId = null,
+		?callable $onExecutionError = null,
+		?callable $onStreamMismatch = null,
+		?callable $onToolProgress = null,
 	): string {
 		$effectiveBot = $this->resolveEffectiveBotForUser($bot, $userId);
 		$messageContext = $this->normalizeMessageContext($messageContext);
@@ -904,12 +903,19 @@ class BotService {
 		$attachmentSummary = $this->summarizeAttachmentContext($messageContext);
 		$forceInitialAudioTranscription = $this->shouldForceInitialAudioTranscription($attachmentSummary, $hasAudioAttachmentTool);
 		$forceInitialImageAnalysis = $this->shouldForceInitialImageAnalysis($attachmentSummary, $hasImageAttachmentTool, $messageContext['attachment_only']);
-		
-		// Check if RAG is enabled for this bot - if so, the RAG tool will be available automatically
-		// via the BuiltInToolProvider (which checks global RAG settings and bot context)
+
+		// Product-level RAG availability stays in BotService. When available, add the
+		// tool to the same explicit built-in loadout as every other executable tool.
 		$ragEnabled = $effectiveBot->getRagEnabled();
 		$hasRagTool = $ragEnabled && $this->hasIndexedDocuments($effectiveBot->getId());
-		
+		if ($hasRagTool && !in_array(BuiltInToolProvider::TOOL_RAG_SEARCH, $builtInToolNames, true)) {
+			$builtInToolLoadout[] = [
+				'name' => BuiltInToolProvider::TOOL_RAG_SEARCH,
+				'config' => [],
+			];
+			$builtInToolNames[] = BuiltInToolProvider::TOOL_RAG_SEARCH;
+		}
+
 		// If RAG is enabled and bot has documents, include RAG tool info in system prompt
 		$systemPrompt = $effectiveBot->getSystemPrompt();
 
@@ -920,7 +926,7 @@ class BotService {
 		if ($attachmentSummary['has_images'] && $hasImageAttachmentTool) {
 			$systemPrompt .= "\n\n## Current Image Attachment Context\n";
 			$systemPrompt .= "The current user message includes image attachment(s). For any question about the uploaded image, call `attachment_analyze_image` before answering.\n";
-			$systemPrompt .= "Available current image attachments: " . implode(', ', $attachmentSummary['image_names']) . ".\n";
+			$systemPrompt .= 'Available current image attachments: ' . implode(', ', $attachmentSummary['image_names']) . ".\n";
 		}
 		if ($forceInitialImageAnalysis) {
 			$systemPrompt .= "\n\n## CRITICAL: Image-Only Attachment Handling\n";
@@ -931,7 +937,7 @@ class BotService {
 		if ($attachmentSummary['has_audio'] && $hasAudioAttachmentTool) {
 			$systemPrompt .= "\n\n## Current Audio Attachment Context\n";
 			$systemPrompt .= "The current user message includes audio or voice-message attachment(s). Call `attachment_transcribe_audio` before answering questions about spoken content.\n";
-			$systemPrompt .= "Available current audio attachments: " . implode(', ', $attachmentSummary['audio_names']) . ".\n";
+			$systemPrompt .= 'Available current audio attachments: ' . implode(', ', $attachmentSummary['audio_names']) . ".\n";
 		}
 		if ($forceInitialAudioTranscription) {
 			$systemPrompt .= "\n\n## CRITICAL: Audio-Only Attachment Handling\n";
@@ -943,35 +949,37 @@ class BotService {
 		if ($attachmentSummary['has_room_documents'] && $hasRoomDocumentTool) {
 			$systemPrompt .= "\n\n## Current Room Document Context\n";
 			$systemPrompt .= "This Talk room contains uploaded room-scoped documents for the current bot. When the user refers to files uploaded in this chat, search them with `room_search_documents` before answering.\n";
-			$systemPrompt .= "Available room-document attachments from the current turn: " . implode(', ', $attachmentSummary['document_names']) . ".\n";
+			$systemPrompt .= 'Available room-document attachments from the current turn: ' . implode(', ', $attachmentSummary['document_names']) . ".\n";
 		}
 		if ($hasRoomImageTool) {
 			$systemPrompt .= "\n\n## Room Image Memory Context\n";
 			$systemPrompt .= "This Talk room may contain indexed image analyses from previous messages. When the user refers to earlier screenshots, previous images, visual evidence across multiple messages, or asks to compare images, call `room_search_images` before answering.\n";
 			if ($attachmentSummary['has_room_images']) {
-				$systemPrompt .= "Image attachments from the current turn were indexed for room image memory: " . implode(', ', $attachmentSummary['image_names']) . ".\n";
+				$systemPrompt .= 'Image attachments from the current turn were indexed for room image memory: ' . implode(', ', $attachmentSummary['image_names']) . ".\n";
 			}
 		}
 		if ($hasRagTool) {
-			$systemPrompt .= "\n\n## CRITICAL: Document Search Instructions\n";
-			$systemPrompt .= "You have access to a knowledge base with indexed documents. You MUST follow these rules:\n\n";
+			$systemPrompt .= "\n\n## Document Search Instructions\n";
+			$systemPrompt .= "You have access to a knowledge base with indexed documents. Use it when it is relevant to the user's requested scope:\n\n";
 			if ($attachmentSummary['has_room_documents'] && $hasRoomDocumentTool) {
-				$systemPrompt .= "1. **Prefer room documents first**: If the question is about files uploaded in the current Talk chat, call `room_search_documents` first.\n";
-				$systemPrompt .= "2. **Use the global KB for bot knowledge**: For the bot's permanent knowledge base, call `rag_search_documents`.\n";
-				$systemPrompt .= "3. **Never guess**: Do NOT answer from memory if the answer could be in uploaded documents. Search first!\n";
+				$systemPrompt .= "1. **Respect explicit scope**: If the user explicitly requests a different source or tool and does not ask about these documents, follow that request without calling a document-search tool.\n";
+				$systemPrompt .= "2. **Prefer room documents first**: If the question is about files uploaded in the current Talk chat, call `room_search_documents` first.\n";
+				$systemPrompt .= "3. **Use the global KB for bot knowledge**: For the bot's permanent knowledge base, call `rag_search_documents`.\n";
+				$systemPrompt .= "4. **Do not guess about documents**: Search before answering when the answer should come from uploaded documents.\n";
+				$systemPrompt .= "5. **How to search**: Convert the user's question into search keywords.\n";
+				$systemPrompt .= "6. **After searching**: Read the returned chunks carefully and synthesize an answer based on the document content.\n";
+				$systemPrompt .= "7. **If no results**: Tell the user you couldn't find that information in the documents.\n";
+				$systemPrompt .= "8. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.\n";
+			} else {
+				$systemPrompt .= "1. **Respect explicit scope**: If the user explicitly requests a different source or tool and does not ask about the knowledge base, follow that request without calling `rag_search_documents`.\n";
+				$systemPrompt .= "2. **Search when relevant**: When the user asks about the bot's indexed documents, call `rag_search_documents` before answering.\n";
+				$systemPrompt .= "3. **Do not guess about documents**: Search before answering when the answer should come from the knowledge base.\n";
 				$systemPrompt .= "4. **How to search**: Convert the user's question into search keywords.\n";
+				$systemPrompt .= "   - User asks: \"Was ist der Titel von Modul 3?\" → Search: \"Modul 3 Titel\"\n";
+				$systemPrompt .= "   - User asks: \"What are the requirements?\" → Search: \"requirements prerequisites\"\n";
 				$systemPrompt .= "5. **After searching**: Read the returned chunks carefully and synthesize an answer based on the document content.\n";
 				$systemPrompt .= "6. **If no results**: Tell the user you couldn't find that information in the documents.\n";
 				$systemPrompt .= "7. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.\n";
-			} else {
-				$systemPrompt .= "1. **ALWAYS search first**: Before answering ANY question that might be in the documents, call the `rag_search_documents` tool.\n";
-				$systemPrompt .= "2. **Never guess**: Do NOT answer from memory if the answer could be in the documents. Search first!\n";
-				$systemPrompt .= "3. **How to search**: Convert the user's question into search keywords.\n";
-				$systemPrompt .= "   - User asks: \"Was ist der Titel von Modul 3?\" → Search: \"Modul 3 Titel\"\n";
-				$systemPrompt .= "   - User asks: \"What are the requirements?\" → Search: \"requirements prerequisites\"\n";
-				$systemPrompt .= "4. **After searching**: Read the returned chunks carefully and synthesize an answer based on the document content.\n";
-				$systemPrompt .= "5. **If no results**: Tell the user you couldn't find that information in the documents.\n";
-				$systemPrompt .= "6. **Never output raw JSON**: Use proper tool calls, not JSON text in your response.\n";
 			}
 		}
 		if ($hasWikiTools) {
@@ -981,19 +989,50 @@ class BotService {
 			$systemPrompt .= "When `wiki_read_page` returns `has_more=true`, continue reading with `offset=next_offset` before finishing any incomplete file review. If you intentionally stop before the full file was reviewed, explicitly mention the page path and `next_offset` needed to continue.\n";
 			$systemPrompt .= "Only save new information when the user explicitly asks you to save, remember, document, or maintain it.\n";
 			$systemPrompt .= "If the user explicitly asks you to write, save, document, or remember information in the wiki, call `wiki_write_page` before claiming that it was written or saved.\n";
-			$systemPrompt .= "After accepted wiki updates, check whether `index.md` needs a curated overview update: add or revise short summaries, topic/entity groupings, important pages, open questions, or synthesis notes. Leave the `Existing Files` section to " . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . " automation.\n";
+			$systemPrompt .= 'After accepted wiki updates, check whether `index.md` needs a curated overview update: add or revise short summaries, topic/entity groupings, important pages, open questions, or synthesis notes. Leave the `Existing Files` section to ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . " automation.\n";
 			$systemPrompt .= "Append a concise event to `log.md` after accepted wiki updates.\n";
 			$systemPrompt .= "Treat the wiki tool response as authoritative for where a page was stored.\n";
 		}
-		
-		$hasTools = count($toolLoadout) > 0 || count($builtInToolLoadout) > 0 || $hasRagTool;
-		$forceToolCall = $this->toolIntentService->shouldForceToolCall($effectiveBot, $message, $originalMessage, $toolLoadout) && $hasTools;
+
 		$initialToolChoice = $this->buildInitialToolChoice(
 			$forceInitialAudioTranscription
 				? BuiltInToolProvider::TOOL_ATTACHMENT_AUDIO
 				: ($forceInitialImageAnalysis ? BuiltInToolProvider::TOOL_ATTACHMENT_IMAGE : null)
 		);
-		$toolQueryText = $this->buildToolQueryText($message, $originalMessage);
+
+		$partialBuffer = '';
+		$currentAssistantTurnText = '';
+		$releaseAssistantBuffer = function () use ($onProgress, &$partialBuffer): void {
+			if ($onProgress === null || $partialBuffer === '') {
+				return;
+			}
+
+			$chunk = $partialBuffer;
+			$partialBuffer = '';
+			if (trim($chunk) !== '') {
+				$onProgress($chunk);
+			}
+		};
+		$discardAssistantBuffer = static function () use (&$partialBuffer, &$currentAssistantTurnText): void {
+			$partialBuffer = '';
+			$currentAssistantTurnText = '';
+		};
+		$assistantProgress = $onProgress === null
+			? null
+			: static function (string $partial) use (&$partialBuffer, &$currentAssistantTurnText): void {
+				if ($partial === '') {
+					return;
+				}
+
+				$partialBuffer .= $partial;
+				$currentAssistantTurnText .= $partial;
+			};
+		$toolProgress = static function (string $progress) use ($onToolProgress, $discardAssistantBuffer): void {
+			$discardAssistantBuffer();
+			if ($onToolProgress !== null && $progress !== '') {
+				$onToolProgress($progress);
+			}
+		};
 
 		try {
 			$this->logger->info('Calling LLM API', [
@@ -1005,119 +1044,109 @@ class BotService {
 				'trace_run_id' => $traceRunId,
 			]);
 
-			if ($hasTools) {
-				try {
-					$this->toolProviderRegistry->setInvocationContext([
-						'bot_id' => $effectiveBot->getId(),
-						'room_token' => $roomToken,
-						'attachments' => $messageContext['attachments'],
-						'document_source_ids' => $messageContext['document_source_ids'],
-						'image_source_ids' => $messageContext['image_source_ids'],
-					]);
+			try {
+				$this->toolProviderRegistry->setInvocationContext([
+					'bot_id' => $effectiveBot->getId(),
+					'room_token' => $roomToken,
+					'attachments' => $messageContext['attachments'],
+					'document_source_ids' => $messageContext['document_source_ids'],
+					'image_source_ids' => $messageContext['image_source_ids'],
+				]);
 
-					$agentResult = $this->agentExecutor->run(
-						$systemPrompt,
-						$messages,
-						$toolLoadout,
-						array_filter([
-							'model' => $effectiveBot->getModel(),
-							'temperature' => $resolvedTemperature,
-							'force_tool_call' => $forceToolCall ?: null,
-							'initial_tool_choice' => $initialToolChoice,
-							'user_query' => $toolQueryText,
-							'on_partial_result' => $onProgress,
-							'bot_id' => $effectiveBot->getId(),
-							'built_in_tools' => $builtInToolLoadout,
-							'rag_enabled' => $hasRagTool,
-							'trace_run_id' => $traceRunId,
-						], static fn($value) => $value !== null)
-					);
-					$assistantMessage = (string)($agentResult['content'] ?? '');
-					$toolInvocations = $agentResult['toolInvocations'] ?? [];
-				} finally {
-					$this->toolProviderRegistry->setInvocationContext(null);
-				}
-			} else {
-				$llmOptions = [
+				$agentOptions = array_filter([
+					'model' => $effectiveBot->getModel(),
 					'temperature' => $resolvedTemperature,
-				];
-				$this->recordLlmRequestTrace(
-					$traceRunId,
-					'bot_direct',
+					'initial_tool_choice' => $initialToolChoice,
+					'on_partial_result' => $assistantProgress,
+					'bot_id' => $effectiveBot->getId(),
+					'built_in_tools' => $builtInToolLoadout,
+					'trace_run_id' => $traceRunId,
+				], static fn ($value) => $value !== null);
+				$agentOptions['on_tool_progress'] = $toolProgress;
+
+				$agentResult = $this->agentExecutor->run(
 					$systemPrompt,
 					$messages,
-					$effectiveBot->getModel(),
-					$llmOptions,
-					$onProgress !== null
+					$toolLoadout,
+					$agentOptions
 				);
-				if ($onProgress !== null) {
-					$buffer = '';
-					$lastFlushTime = microtime(true);
-					$response = $this->llmClient->streamChatCompletion(
-						$systemPrompt,
-						$messages,
-						function ($delta) use (&$buffer, &$lastFlushTime, $onProgress) {
-							if (isset($delta['content'])) {
-								$buffer .= $delta['content'];
-								$currentTime = microtime(true);
-								
-								// Flush on paragraph boundaries OR after 3 seconds of content accumulation
-								$shouldFlush = str_contains($buffer, "\n\n") 
-									|| ($currentTime - $lastFlushTime > 3.0 && strlen($buffer) > 100);
-								
-								if ($shouldFlush && str_contains($buffer, "\n\n")) {
-									$parts = explode("\n\n", $buffer);
-									$remainder = array_pop($parts);
-									foreach ($parts as $part) {
-										if (trim($part) !== '') {
-											$onProgress($part);
-										}
-									}
-									$buffer = $remainder;
-									$lastFlushTime = $currentTime;
-								} elseif ($shouldFlush) {
-									// Time-based flush - try to split at sentence boundary
-									$flushPoint = $this->findSentenceBoundary($buffer);
-									if ($flushPoint > 50) {
-										$toSend = substr($buffer, 0, $flushPoint);
-										$buffer = substr($buffer, $flushPoint);
-										if (trim($toSend) !== '') {
-											$onProgress(trim($toSend));
-										}
-										$lastFlushTime = $currentTime;
-									}
-								}
-							}
-						},
-						$effectiveBot->getModel(),
-						$llmOptions
-					);
-					// Always flush remaining buffer
-					if ($buffer !== '' && trim($buffer) !== '') {
-						$onProgress($buffer);
+			} finally {
+				$this->toolProviderRegistry->setInvocationContext(null);
+			}
+
+			$agentStatus = $agentResult['status'] ?? null;
+			if (!is_string($agentStatus) || !in_array($agentStatus, ['completed', 'error', 'budget_exhausted'], true)) {
+				throw new Exception('Agent execution returned an invalid status');
+			}
+
+			$terminalReason = $agentResult['terminalReason'] ?? null;
+			if (!is_string($terminalReason) || trim($terminalReason) === '') {
+				throw new Exception('Agent execution returned an invalid terminal reason');
+			}
+
+			$assistantMessage = $agentResult['content'] ?? null;
+			if (!is_string($assistantMessage)) {
+				throw new Exception('Agent execution returned invalid content');
+			}
+			$assistantMessage = AssistantContentSanitizer::sanitize($assistantMessage);
+
+			$toolInvocations = $agentResult['toolInvocations'] ?? null;
+			if (!is_array($toolInvocations)) {
+				throw new Exception('Agent execution returned invalid tool invocations');
+			}
+
+			$rateLimitHeaders = $agentResult['rateLimitHeaders'] ?? null;
+			if (!is_array($rateLimitHeaders)) {
+				throw new Exception('Agent execution returned invalid rate-limit headers');
+			}
+			$this->rateLimitService->updateFromHeaders($rateLimitHeaders);
+
+			if ($agentStatus !== 'completed') {
+				$discardAssistantBuffer();
+				throw new Exception('Agent execution terminated: ' . $terminalReason);
+			}
+			if (trim($assistantMessage) === '') {
+				$discardAssistantBuffer();
+				throw new Exception('Agent execution completed without assistant content');
+			}
+
+			if ($onProgress !== null) {
+				$sanitizedStreamedText = AssistantContentSanitizer::sanitize($currentAssistantTurnText);
+				if ($sanitizedStreamedText !== $currentAssistantTurnText) {
+					$partialBuffer = $sanitizedStreamedText;
+					$currentAssistantTurnText = $sanitizedStreamedText;
+				}
+
+				if ($currentAssistantTurnText === '') {
+					$partialBuffer .= $assistantMessage;
+					$currentAssistantTurnText = $assistantMessage;
+				} elseif ($currentAssistantTurnText !== $assistantMessage && str_starts_with($assistantMessage, $currentAssistantTurnText)) {
+					$missingSuffix = substr($assistantMessage, strlen($currentAssistantTurnText));
+					$partialBuffer .= $missingSuffix;
+					$currentAssistantTurnText = $assistantMessage;
+				} elseif ($currentAssistantTurnText !== $assistantMessage) {
+					$this->logger->warning('Streamed assistant text does not match terminal content', [
+						'bot_id' => $effectiveBot->getId(),
+						'trace_run_id' => $traceRunId,
+						'streamed_length' => strlen($currentAssistantTurnText),
+						'terminal_length' => strlen($assistantMessage),
+					]);
+					if ($onStreamMismatch !== null) {
+						try {
+							$onStreamMismatch();
+						} catch (\Throwable $statusCallbackError) {
+							$this->logger->warning('Failed to propagate stream mismatch status', [
+								'bot_id' => $effectiveBot->getId(),
+								'trace_run_id' => $traceRunId,
+								'exception' => $statusCallbackError,
+							]);
+						}
 					}
-				} else {
-					$response = $this->llmClient->sendChatCompletion(
-						$systemPrompt,
-						$messages,
-						$effectiveBot->getModel(),
-						$llmOptions
-					);
-				}
-				$assistantMessage = (string)($response['content'] ?? '');
-				$this->recordLlmResponseTrace($traceRunId, 'bot_direct', $response, $assistantMessage);
-				
-				// Update rate limit state from response headers
-				if (isset($response['rate_limit_headers']) && is_array($response['rate_limit_headers'])) {
-					$this->rateLimitService->updateFromHeaders($response['rate_limit_headers']);
+					$partialBuffer = $assistantMessage;
+					$currentAssistantTurnText = $assistantMessage;
 				}
 			}
-
-			$assistantMessage = $this->stripXmlToolCallTags($assistantMessage);
-
-			if ($assistantMessage === '') {
-				$assistantMessage = 'I was unable to generate a response.';
-			}
+			$releaseAssistantBuffer();
 
 			$this->logger->info('Got LLM response', [
 				'bot_id' => $effectiveBot->getId(),
@@ -1154,6 +1183,7 @@ class BotService {
 
 			return $assistantMessage;
 		} catch (Exception $e) {
+			$discardAssistantBuffer();
 			$this->logger->error('Failed to process bot message: ' . $e->getMessage(), [
 				'bot_id' => $effectiveBot->getId(),
 				'trace_run_id' => $traceRunId,
@@ -1168,28 +1198,20 @@ class BotService {
 				],
 				'error_message' => $e->getMessage(),
 			]);
-			$this->traceService?->finishRun($traceRunId, 'error', $e->getMessage());
+			if ($onExecutionError !== null) {
+				try {
+					$onExecutionError($e->getMessage());
+				} catch (\Throwable $statusCallbackError) {
+					$this->logger->warning('Failed to propagate bot execution status', [
+						'bot_id' => $effectiveBot->getId(),
+						'trace_run_id' => $traceRunId,
+						'exception' => $statusCallbackError,
+					]);
+				}
+			}
 
 			return self::AI_SERVICE_UNAVAILABLE_MESSAGE;
 		}
-	}
-
-	private function stripXmlToolCallTags(string $content): string {
-		$cleaned = preg_replace('/<((?:[a-z0-9_-]+:)?(?:tool_call|function_call))\b[^>]*>.*?<\/\1>/is', '', $content);
-		$cleaned = preg_replace('/<(?:[a-z0-9_-]+:)?(?:tool_call|function_call)\b[^>]*>.*$/is', '', $cleaned ?? $content);
-		$cleaned = preg_replace('/<\/(?:[a-z0-9_-]+:)?(?:tool_call|function_call)>/i', '', $cleaned ?? $content);
-		$cleaned = preg_replace('/[ \t]{2,}/', ' ', $cleaned ?? $content);
-		$cleaned = preg_replace("/\n{3,}/", "\n\n", $cleaned ?? $content);
-
-		return trim($cleaned ?? $content);
-	}
-
-	private function buildToolQueryText(string $cleanMessage, ?string $originalMessage): string {
-		$primary = trim($cleanMessage);
-		if ($primary !== '') {
-			return $primary;
-		}
-		return trim((string)$originalMessage);
 	}
 
 	/**
@@ -1301,98 +1323,6 @@ class BotService {
 		}
 
 		return rtrim($message) . "\n\n[Attachments: " . implode('; ', $labels) . ']';
-	}
-
-	/**
-	 * @param array<int,array<string,mixed>> $messages
-	 * @param array<string,mixed> $options
-	 * @param array<string,mixed> $metadata
-	 */
-	private function recordLlmRequestTrace(
-		?int $traceRunId,
-		string $stage,
-		string $systemPrompt,
-		array $messages,
-		?string $model,
-		array $options,
-		bool $streaming,
-		array $metadata = []
-	): void {
-		if ($this->traceService === null) {
-			return;
-		}
-
-		$tracePayload = $this->buildTraceChatCompletionPayload($systemPrompt, $messages, $model, $options, $streaming);
-		$providerPayload = $tracePayload['payload'] ?? [];
-		$payload = array_merge([
-			'stage' => $stage,
-			'model' => $model,
-			'streaming' => $streaming,
-			'message_count' => count($messages),
-			'tool_count' => isset($providerPayload['tools']) && is_array($providerPayload['tools']) ? count($providerPayload['tools']) : 0,
-			'tool_choice' => $providerPayload['tool_choice'] ?? null,
-			'temperature' => $providerPayload['temperature'] ?? null,
-			'max_tokens' => $providerPayload['max_tokens'] ?? null,
-			'max_completion_tokens' => $providerPayload['max_completion_tokens'] ?? null,
-			'request_endpoint' => $tracePayload['endpoint'] ?? null,
-			'request_model_reference' => $tracePayload['model_reference'] ?? null,
-			'request_payload' => $providerPayload !== [] ? $providerPayload : $tracePayload,
-		], $metadata);
-
-		if (isset($tracePayload['trace_payload_error'])) {
-			$payload['trace_payload_error'] = $tracePayload['trace_payload_error'];
-		}
-
-		$this->traceService->recordEvent($traceRunId, 'llm_request', [
-			'payload' => $payload,
-		]);
-	}
-
-	/**
-	 * @param array<int,array<string,mixed>> $messages
-	 * @param array<string,mixed> $options
-	 * @return array<string,mixed>
-	 */
-	private function buildTraceChatCompletionPayload(string $systemPrompt, array $messages, ?string $model, array $options, bool $streaming): array {
-		try {
-			return $this->llmClient->buildTraceChatCompletionPayload($systemPrompt, $messages, $model, $options, $streaming);
-		} catch (\Throwable $e) {
-			return [
-				'endpoint' => null,
-				'model_reference' => $model,
-				'payload' => [
-					'model' => $model,
-					'messages' => array_merge([['role' => 'system', 'content' => $systemPrompt]], $messages),
-					'temperature' => $options['temperature'] ?? null,
-					'max_tokens' => $options['max_tokens'] ?? null,
-					'stream' => $streaming ?: null,
-					'tools' => $options['tools'] ?? null,
-					'tool_choice' => $options['tool_choice'] ?? null,
-				],
-				'trace_payload_error' => $e->getMessage(),
-			];
-		}
-	}
-
-	/**
-	 * @param array<string,mixed> $response
-	 * @param array<string,mixed> $metadata
-	 */
-	private function recordLlmResponseTrace(?int $traceRunId, string $stage, array $response, string $content, array $metadata = []): void {
-		$this->traceService?->recordEvent($traceRunId, 'llm_response', [
-			'status' => 'ok',
-			'payload' => array_merge([
-				'stage' => $stage,
-				'model' => $response['model'] ?? null,
-				'model_reference' => $response['model_reference'] ?? null,
-				'model_endpoint' => $response['model_endpoint'] ?? null,
-				'usage' => $response['usage'] ?? null,
-				'finish_reason' => $response['finish_reason'] ?? null,
-				'content_length' => strlen($content),
-				'native_tool_calls' => count($response['tool_calls'] ?? []),
-				'raw_response' => $response['raw'] ?? null,
-			], $metadata),
-		]);
 	}
 
 	/**
@@ -2828,9 +2758,14 @@ class BotService {
 		$includedLatestUser = false;
 
 		foreach ($reversed as $conv) {
-			$content = $conv->getContent();
-			$tokens = $this->estimateTokens($content);
 			$role = $conv->getRole();
+			$content = $role === 'assistant'
+				? AssistantContentSanitizer::sanitize($conv->getContent())
+				: $conv->getContent();
+			if ($role === 'assistant' && trim($content) === '') {
+				continue;
+			}
+			$tokens = $this->estimateTokens($content);
 
 			// Always include the most recent user message (it's the current query)
 			if (!$includedLatestUser && $role === 'user') {
@@ -2858,42 +2793,6 @@ class BotService {
 
 		// Reverse back to chronological order (oldest first)
 		return array_reverse($selected);
-	}
-
-	/**
-	 * Find a good position to split text at a sentence boundary
-	 * 
-	 * @param string $text The text to analyze
-	 * @return int Position to split at, or 0 if no good boundary found
-	 */
-	private function findSentenceBoundary(string $text): int {
-		// Look for sentence endings: . ! ? followed by space or end
-		$patterns = ['. ', '! ', '? ', ".\n", "!\n", "?\n"];
-		$lastPos = 0;
-		
-		foreach ($patterns as $pattern) {
-			$pos = strrpos($text, $pattern);
-			if ($pos !== false && $pos > $lastPos) {
-				$lastPos = $pos + strlen($pattern);
-			}
-		}
-		
-		// Also check for end of text with sentence ender
-		$trimmed = rtrim($text);
-		$lastChar = substr($trimmed, -1);
-		if (in_array($lastChar, ['.', '!', '?'], true) && strlen($trimmed) === strlen($text)) {
-			return strlen($text);
-		}
-		
-		// If no sentence boundary, try to split at newline
-		if ($lastPos === 0) {
-			$newlinePos = strrpos($text, "\n");
-			if ($newlinePos !== false && $newlinePos > 30) {
-				return $newlinePos + 1;
-			}
-		}
-		
-		return $lastPos;
 	}
 
 	/**

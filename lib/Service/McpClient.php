@@ -28,7 +28,7 @@ class McpClient {
      * @return array<int,array<string,mixed>>
      * @throws Exception
      */
-    public function listTools(Tool $tool, array $context = []): array {
+    public function listTools(Tool $tool, array $context = [], ?AgentRunControl $runControl = null): array {
         $payload = [
             'jsonrpc' => '2.0',
             'id' => uniqid('mcp', true),
@@ -39,7 +39,7 @@ class McpClient {
             $payload['params'] = $context;
         }
 
-        $response = $this->sendRequest($tool, $payload);
+        $response = $this->sendRequest($tool, $payload, $runControl);
         $result = $response['result'] ?? null;
         if (!is_array($result) || !isset($result['tools']) || !is_array($result['tools'])) {
             throw new Exception('Invalid response from MCP tools/list');
@@ -51,7 +51,13 @@ class McpClient {
      * @return array<string,mixed>
      * @throws Exception
      */
-    public function callTool(Tool $tool, string $toolName, array $arguments = [], array $configOverride = []): array {
+    public function callTool(
+        Tool $tool,
+        string $toolName,
+        array $arguments = [],
+        array $configOverride = [],
+        ?AgentRunControl $runControl = null
+    ): array {
         $payload = [
             'jsonrpc' => '2.0',
             'id' => uniqid('mcp', true),
@@ -66,7 +72,7 @@ class McpClient {
             $payload['params']['config'] = (object) $configOverride;
         }
 
-        $response = $this->sendRequest($tool, $payload);
+        $response = $this->sendRequest($tool, $payload, $runControl);
         if (isset($response['error'])) {
             throw new Exception(sprintf('Tool call failed: %s', $response['error']['message'] ?? 'unknown error'));
         }
@@ -81,7 +87,7 @@ class McpClient {
      * @param array<string,mixed> $payload
      * @return array<string,mixed>
      */
-    private function sendRequest(Tool $tool, array $payload): array {
+    private function sendRequest(Tool $tool, array $payload, ?AgentRunControl $runControl = null): array {
         $url = trim($tool->getMcpEndpointUrl());
         
         $this->logger->debug('MCP request starting', [
@@ -95,6 +101,7 @@ class McpClient {
             throw new Exception('MCP endpoint URL is empty');
         }
 
+        $timeout = $runControl !== null ? $runControl->clampTimeout(60) : 60;
         $client = $this->clientService->newClient();
         $options = [
             'headers' => array_merge([
@@ -102,7 +109,7 @@ class McpClient {
                 'Accept' => 'application/json, text/event-stream',
             ], $this->collectHeaders($tool)),
             'json' => $payload,
-            'timeout' => 60,
+            'timeout' => $timeout,
         ];
 
         try {

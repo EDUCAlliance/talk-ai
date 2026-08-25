@@ -163,7 +163,7 @@ class BuiltInToolProvider {
         if ($ragConfig['rag_enabled']) {
             $tools[] = $this->withPolicy([
                 'name' => self::TOOL_RAG_SEARCH,
-                'description' => 'IMPORTANT: Always use this tool FIRST when the user asks ANY question that could be answered from the knowledge base. Search through indexed documents using semantic similarity. Returns matching text chunks ranked by relevance. You MUST call this tool before answering questions about documents, policies, procedures, or any topic that might be in the knowledge base.',
+                'description' => 'Search indexed knowledge-base documents using semantic similarity and return matching text chunks ranked by relevance. Use this for questions about the bot\'s documents, policies, or procedures. If the user explicitly requests a different source or tool and does not ask about the knowledge base, respect that scope and do not call this tool.',
                 'schema' => [
                     'type' => 'object',
                     'properties' => [
