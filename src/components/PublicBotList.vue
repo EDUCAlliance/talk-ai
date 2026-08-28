@@ -2,12 +2,14 @@
 	<div class="public-bot-list">
 		<div class="header">
 			<div class="header-content">
-				<h2>All Available Bots</h2>
-				<p class="subtitle">Browse bots you have access to and learn more about their capabilities</p>
+				<h2>{{ t('educai', 'All available bots') }}</h2>
+				<p class="subtitle">
+					{{ t('educai', 'Browse bots you have access to and learn more about their capabilities') }}
+				</p>
 			</div>
 			<a :href="createBotsUrl" class="create-bots-button">
 				<span class="icon">✏️</span>
-				Create & Edit Bots
+				{{ t('educai', 'Create and edit bots') }}
 			</a>
 		</div>
 
@@ -21,14 +23,16 @@
 		</div>
 
 		<div v-if="bots.length === 0 && !loading" class="empty-state">
-			<div class="empty-icon">🤖</div>
-			<h3>No bots available</h3>
-			<p>When bots are published and you have access, they will appear here.</p>
+			<div class="empty-icon">
+				🤖
+			</div>
+			<h3>{{ t('educai', 'No bots available') }}</h3>
+			<p>{{ t('educai', 'When bots are published and you have access, they will appear here.') }}</p>
 		</div>
 
 		<div v-if="loading" class="loading-state">
 			<span class="icon-loading" />
-			<p>Loading available bots...</p>
+			<p>{{ t('educai', 'Loading available bots…') }}</p>
 		</div>
 
 		<!-- Detail Modal -->

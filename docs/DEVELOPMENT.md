@@ -10,9 +10,29 @@ npm run build          # production build (writes bundles to js/)
 npm run watch          # rebuild on change
 npm run lint           # eslint
 npm run stylelint
+npm run test:frontend
 ```
 
 Commit the generated `js/` assets — the repository ships deployable bundles. After frontend changes, run a build and hard-refresh the browser (Nextcloud caches bundles aggressively).
+
+## Translations
+
+Use Nextcloud's localization helpers for every user-facing string:
+
+- JavaScript/Vue: import `t` or `n` from `src/l10n.js` and call them directly so the extractor can discover the source string.
+- PHP: inject `OCP\IL10N` and use `t()` or `n()` at the HTTP boundary. Return a stable `errorCode` alongside a safe localized message; keep exception details in logs and traces.
+- Do not translate technical identifiers, API codes, routes, model IDs, persisted paths, or user-provided content.
+
+Generate catalogs with Nextcloud's official `translationtool.phar` from the app root:
+
+```bash
+php /path/to/translationtool.phar create-pot-files
+# update translationfiles/de/educai.po
+msgfmt --check --check-format -o /dev/null translationfiles/de/educai.po
+php /path/to/translationtool.phar convert-po-files
+```
+
+Commit the source catalog under `translationfiles/` and the generated runtime catalogs under `l10n/`. Nextcloud selects the catalog from the signed-in user's language automatically; no app-specific language setting is needed.
 
 ## PHP
 

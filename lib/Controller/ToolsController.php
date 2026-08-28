@@ -7,8 +7,7 @@ namespace OCA\EducAI\Controller;
 use Exception;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
-use OCA\EducAI\Service\BuiltInToolProvider;
-use OCA\EducAI\ToolProvider\ToolProviderRegistry;
+use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\McpClient;
@@ -16,8 +15,10 @@ use OCA\EducAI\Service\SpeechToTextClient;
 use OCA\EducAI\Service\ToolRegistry;
 use OCA\EducAI\Service\VisionClient;
 use OCA\EducAI\Service\WikiLocationService;
+use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
@@ -33,6 +34,8 @@ class ToolsController extends Controller {
     private WikiLocationService $wikiLocationService;
     private ?string $userId;
     private LoggerInterface $logger;
+    private IL10N $l10n;
+    private BuiltInToolUiService $builtInToolUiService;
 
     public function __construct(
         string $appName,
@@ -47,7 +50,9 @@ class ToolsController extends Controller {
         CredentialService $credentialService,
         WikiLocationService $wikiLocationService,
         ?string $userId,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        IL10N $l10n,
+        BuiltInToolUiService $builtInToolUiService,
     ) {
         parent::__construct($appName, $request);
         $this->toolMapper = $toolMapper;
@@ -61,18 +66,20 @@ class ToolsController extends Controller {
         $this->wikiLocationService = $wikiLocationService;
         $this->userId = $userId;
         $this->logger = $logger;
+        $this->l10n = $l10n;
+        $this->builtInToolUiService = $builtInToolUiService;
     }
 
     /**
      * @NoAdminRequired
-     * 
+     *
      * Get all available tools (MCP tools + built-in tools) for selection
      */
     public function available(): DataResponse {
         try {
             // Get enabled MCP tools
             $mcpTools = $this->toolRegistry->getEnabledTools();
-            
+
             // Convert MCP tools to a consistent format
             $tools = [];
             foreach ($mcpTools as $tool) {
@@ -84,28 +91,31 @@ class ToolsController extends Controller {
                     'builtin_name' => null,
                 ];
             }
-            
+
             // Get available built-in tools
             $builtInTools = $this->toolProviderRegistry->getAvailableTools();
             foreach ($builtInTools as $builtIn) {
-                $label = isset($builtIn['label']) && is_string($builtIn['label']) && $builtIn['label'] !== ''
+                $fallbackLabel = isset($builtIn['label']) && is_string($builtIn['label']) && $builtIn['label'] !== ''
                     ? $builtIn['label']
-                    : $this->formatBuiltInToolName($builtIn['name']);
+                    : null;
                 $tools[] = [
                     'id' => null, // Built-in tools don't have DB IDs
-                    'name' => $label,
-                    'description' => $builtIn['description'],
+                    'name' => $this->builtInToolUiService->getLabel($builtIn['name'], $fallbackLabel),
+                    'description' => $this->builtInToolUiService->getDescription(
+                        $builtIn['name'],
+                        isset($builtIn['description']) && is_string($builtIn['description']) ? $builtIn['description'] : '',
+                    ),
                     'is_builtin' => true,
                     'builtin_name' => $builtIn['name'],
                 ];
             }
-            
+
             return new DataResponse(['tools' => $tools]);
         } catch (Exception $e) {
             $this->logger->error('Failed to list available tools', [
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 500);
+            return $this->errorResponse('tools_load_failed', $this->l10n->t('Failed to load available tools'), 500);
         }
     }
 
@@ -113,39 +123,36 @@ class ToolsController extends Controller {
      * @NoAdminRequired
      */
     public function wikiLocations(): DataResponse {
-        return new DataResponse([
-            'collectives' => $this->wikiLocationService->listEditableCollectives($this->userId),
-        ]);
-    }
-
-    /**
-     * Format built-in tool name for display
-     */
-    private function formatBuiltInToolName(string $name): string {
-        $mapping = [
-            BuiltInToolProvider::TOOL_ROOM_SEARCH => 'Room Document Search',
-            BuiltInToolProvider::TOOL_ROOM_IMAGE_SEARCH => 'Room Image Search',
-            BuiltInToolProvider::TOOL_ATTACHMENT_IMAGE => 'Image Attachment Analysis',
-            BuiltInToolProvider::TOOL_ATTACHMENT_AUDIO => 'Audio Attachment Transcription',
-            BuiltInToolProvider::TOOL_RAG_SEARCH => 'Document Search (RAG)',
-            BuiltInToolProvider::TOOL_WIKI_SEARCH => 'Wiki Search',
-            BuiltInToolProvider::TOOL_WIKI_READ_PAGE => 'Wiki Read Page',
-            BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE => 'Wiki Write Page',
-            BuiltInToolProvider::TOOL_WIKI_LOG_EVENT => 'Wiki Log Event',
-        ];
-        if (isset($mapping[$name])) {
-            return $mapping[$name];
+        try {
+            return new DataResponse([
+                'collectives' => $this->wikiLocationService->listEditableCollectives($this->userId),
+            ]);
+        } catch (Exception $e) {
+            $this->logger->error('Failed to list editable wiki locations', [
+                'user_id' => $this->userId,
+                'exception' => $e,
+            ]);
+            return $this->errorResponse(
+                'wiki_locations_load_failed',
+                $this->l10n->t('Failed to load wiki locations'),
+                500,
+            );
         }
-
-        return ucwords(str_replace('_', ' ', $name));
     }
 
     /**
      * @AdminRequired
      */
     public function index(): DataResponse {
-        $tools = $this->toolMapper->findAllTools();
-        return new DataResponse(['tools' => $tools]);
+        try {
+            $tools = $this->toolMapper->findAllTools();
+            return new DataResponse(['tools' => $tools]);
+        } catch (Exception $e) {
+            $this->logger->error('Failed to list configured tools', [
+                'exception' => $e,
+            ]);
+            return $this->errorResponse('tools_load_failed', $this->l10n->t('Failed to load configured tools'), 500);
+        }
     }
 
     /**
@@ -156,7 +163,11 @@ class ToolsController extends Controller {
             $tool = $this->toolMapper->findById($id);
             return new DataResponse($tool);
         } catch (Exception $e) {
-            return new DataResponse(['error' => $e->getMessage()], 404);
+            $this->logger->warning('Failed to load tool', [
+                'tool_id' => $id,
+                'exception' => $e,
+            ]);
+            return $this->errorResponse('tool_not_found', $this->l10n->t('Tool not found'), 404);
         }
     }
 
@@ -169,7 +180,7 @@ class ToolsController extends Controller {
         ?string $description = null,
         ?array $authentication = null,
         ?array $capabilities = null,
-        bool $enabled = false
+        bool $enabled = false,
     ): DataResponse {
         try {
             $tool = new Tool();
@@ -203,7 +214,7 @@ class ToolsController extends Controller {
                 'name' => $name,
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse('tool_create_failed', $this->l10n->t('Failed to create the tool'), 400);
         }
     }
 
@@ -217,7 +228,7 @@ class ToolsController extends Controller {
         ?string $description = null,
         ?array $authentication = null,
         ?array $capabilities = null,
-        ?bool $enabled = null
+        ?bool $enabled = null,
     ): DataResponse {
         try {
             $tool = $this->toolMapper->findById($id);
@@ -256,7 +267,7 @@ class ToolsController extends Controller {
                 'tool_id' => $id,
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse('tool_update_failed', $this->l10n->t('Failed to update the tool'), 400);
         }
     }
 
@@ -270,7 +281,11 @@ class ToolsController extends Controller {
             $this->toolRegistry->refresh();
             return new DataResponse(['success' => true]);
         } catch (Exception $e) {
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            $this->logger->error('Failed to delete tool', [
+                'tool_id' => $id,
+                'exception' => $e,
+            ]);
+            return $this->errorResponse('tool_delete_failed', $this->l10n->t('Failed to delete the tool'), 400);
         }
     }
 
@@ -279,7 +294,7 @@ class ToolsController extends Controller {
      */
     public function test(
         ?string $mcpEndpointUrl = null,
-        ?array $authentication = null
+        ?array $authentication = null,
     ): DataResponse {
         try {
             $this->logger->debug('Testing tool connection - raw params', [
@@ -289,7 +304,7 @@ class ToolsController extends Controller {
             ]);
 
             if (empty($mcpEndpointUrl)) {
-                return new DataResponse(['error' => 'MCP Endpoint URL is required'], 400);
+                return $this->errorResponse('mcp_endpoint_required', $this->l10n->t('MCP endpoint URL is required'), 400);
             }
 
             $tool = new Tool();
@@ -313,7 +328,7 @@ class ToolsController extends Controller {
                 'exception' => $e,
                 'message' => $e->getMessage(),
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse('tool_connection_failed', $this->l10n->t('Tool connection test failed'), 400);
         }
     }
 
@@ -323,12 +338,14 @@ class ToolsController extends Controller {
      */
     public function testDocling(
         ?string $doclingApiEndpoint = null,
-        ?string $doclingApiKey = null
+        ?string $doclingApiKey = null,
     ): DataResponse {
         return $this->runConnectionTest(
             'Docling',
             $doclingApiEndpoint,
-            fn(): array => $this->doclingClient->testConnection($doclingApiEndpoint, $doclingApiKey)
+            fn (): array => $this->doclingClient->testConnection($doclingApiEndpoint, $doclingApiKey),
+            'docling_connection_failed',
+            $this->l10n->t('Docling connection test failed'),
         );
     }
 
@@ -338,12 +355,14 @@ class ToolsController extends Controller {
     public function testVision(
         ?string $visionApiEndpoint = null,
         ?string $visionApiKey = null,
-        ?string $visionModel = null
+        ?string $visionModel = null,
     ): DataResponse {
         return $this->runConnectionTest(
             'Vision',
             $visionApiEndpoint,
-            fn(): array => $this->visionClient->testConnection($visionApiEndpoint, $visionApiKey, $visionModel)
+            fn (): array => $this->visionClient->testConnection($visionApiEndpoint, $visionApiKey, $visionModel),
+            'vision_connection_failed',
+            $this->l10n->t('Vision connection test failed'),
         );
     }
 
@@ -353,19 +372,27 @@ class ToolsController extends Controller {
     public function testSpeech(
         ?string $speechApiEndpoint = null,
         ?string $speechApiKey = null,
-        ?string $speechModel = null
+        ?string $speechModel = null,
     ): DataResponse {
         return $this->runConnectionTest(
             'Speech',
             $speechApiEndpoint,
-            fn(): array => $this->speechToTextClient->testConnection($speechApiEndpoint, $speechApiKey, $speechModel)
+            fn (): array => $this->speechToTextClient->testConnection($speechApiEndpoint, $speechApiKey, $speechModel),
+            'speech_connection_failed',
+            $this->l10n->t('Speech connection test failed'),
         );
     }
 
     /**
      * @param callable():array{success:bool,error?:string} $testConnection
      */
-    private function runConnectionTest(string $serviceName, ?string $endpoint, callable $testConnection): DataResponse {
+    private function runConnectionTest(
+        string $serviceName,
+        ?string $endpoint,
+        callable $testConnection,
+        string $errorCode,
+        string $failureMessage,
+    ): DataResponse {
         try {
             $result = $testConnection();
             if ($result['success']) {
@@ -375,9 +402,14 @@ class ToolsController extends Controller {
                 ]);
             }
 
+            $this->logger->warning($serviceName . ' connection test failed', [
+                'endpoint' => $endpoint ?? 'null',
+                'details' => $result['error'] ?? null,
+            ]);
             return new DataResponse([
                 'success' => false,
-                'error' => $result['error'] ?? 'Connection test failed',
+                'error' => $failureMessage,
+                'errorCode' => $errorCode,
             ], 400);
         } catch (Exception $e) {
             $this->logger->error($serviceName . ' connection test failed', [
@@ -386,8 +418,16 @@ class ToolsController extends Controller {
             ]);
             return new DataResponse([
                 'success' => false,
-                'error' => $e->getMessage(),
+                'error' => $failureMessage,
+                'errorCode' => $errorCode,
             ], 400);
         }
+    }
+
+    private function errorResponse(string $errorCode, string $error, int $status): DataResponse {
+        return new DataResponse([
+            'error' => $error,
+            'errorCode' => $errorCode,
+        ], $status);
     }
 }

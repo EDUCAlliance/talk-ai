@@ -20,7 +20,7 @@
 
 		<div class="bot-meta">
 			<span class="icon-calendar" />
-			<span>Created {{ formatDate(bot.created_at) }}</span>
+			<span>{{ t('educai', 'Created on {date}', { date: formatDate(bot.created_at) }) }}</span>
 		</div>
 
 		<div v-if="!readonly" class="bot-actions">
@@ -28,33 +28,35 @@
 				v-if="canEdit"
 				class="button"
 				@click="$emit('edit', bot)">
-				<span class="icon-rename" /> Edit
+				<span class="icon-rename" /> {{ t('educai', 'Edit') }}
 			</button>
 			<button
 				v-else-if="editBlockedReason"
 				class="button disabled"
 				:title="editBlockedReason"
 				disabled>
-				<span class="icon-lock" /> View Only
+				<span class="icon-lock" /> {{ t('educai', 'View only') }}
 			</button>
 			<button
 				v-if="approvalStatus === 'draft'"
 				class="button primary"
 				@click="$emit('submit', bot.id)">
-				<span class="icon-checkmark" /> Submit for Approval
+				<span class="icon-checkmark" /> {{ t('educai', 'Submit for approval') }}
 			</button>
 			<button class="button error" @click="$emit('delete', bot.id)">
-				<span class="icon-delete" /> Delete
+				<span class="icon-delete" /> {{ t('educai', 'Delete') }}
 			</button>
 		</div>
 
 		<div v-if="!bot.is_active && approvalStatus === 'approved'" class="bot-status">
-			<span class="icon-close" /> Inactive
+			<span class="icon-close" /> {{ t('educai', 'Inactive') }}
 		</div>
 	</div>
 </template>
 
 <script>
+import { getCanonicalLocale, t } from '../l10n.js'
+
 export default {
 	name: 'BotCard',
 	props: {
@@ -86,28 +88,28 @@ export default {
 		approvalStatusLabel() {
 			const status = this.approvalStatus
 			if (status === 'draft') {
-				return 'Draft'
+				return t('educai', 'Draft')
 			}
 			if (status === 'pending') {
-				return 'Pending Approval'
+				return t('educai', 'Pending approval')
 			}
 			if (status === 'personal') {
-				return 'Personal'
+				return t('educai', 'Personal')
 			}
 			return ''
 		},
 		visibilityLabel() {
 			const v = this.bot.visibility ? this.bot.visibility : (this.bot.is_public ? 'global' : 'groups')
 			if (v === 'global') {
-				return 'Global'
+				return t('educai', 'Global')
 			}
 			if (v === 'personal') {
-				return 'Personal'
+				return t('educai', 'Personal')
 			}
 			if (v === 'teams') {
-				return 'Team access'
+				return t('educai', 'Team access')
 			}
-			return 'Group access'
+			return t('educai', 'Group access')
 		},
 		visibilityClass() {
 			const v = this.bot.visibility ? this.bot.visibility : (this.bot.is_public ? 'global' : 'groups')
@@ -148,12 +150,11 @@ export default {
 	methods: {
 		formatDate(timestamp) {
 			const date = new Date(timestamp * 1000)
-			const formatted = date.toLocaleDateString(undefined, {
+			return date.toLocaleDateString(getCanonicalLocale(), {
 				day: 'numeric',
 				month: 'long',
 				year: 'numeric',
 			})
-			return `on ${formatted}`
 		},
 	},
 }
@@ -201,6 +202,7 @@ export default {
 	margin-bottom: 16px;
 	min-height: 60px;
 }
+
 .bot-visibility {
 	margin-bottom: 12px;
 }
@@ -237,7 +239,7 @@ export default {
 .approval-badge {
 	position: absolute;
 	top: 10px;
-	right: 10px;
+	inset-inline-end: 10px;
 	padding: 4px 10px;
 	border-radius: 12px;
 	font-size: 11px;
@@ -331,7 +333,7 @@ export default {
 .bot-status {
 	position: absolute;
 	top: 10px;
-	right: 10px;
+	inset-inline-end: 10px;
 	background: var(--color-error);
 	color: white;
 	padding: 4px 10px;

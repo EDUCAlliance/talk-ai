@@ -3,7 +3,7 @@
 		<div class="talk-start-modal">
 			<div class="modal-header">
 				<div class="header-content">
-					<h2>Start using {{ bot.bot_name }} in Talk</h2>
+					<h2>{{ t('educai', 'Start using {bot} in Talk', { bot: bot.bot_name }) }}</h2>
 					<span class="mention-badge">{{ mention }}</span>
 				</div>
 				<button class="close-button" @click="$emit('close')">
@@ -12,14 +12,14 @@
 			</div>
 
 			<div class="modal-tabs">
-				<div class="mode-tabs" role="tablist" aria-label="Talk start mode">
+				<div class="mode-tabs" role="tablist" :aria-label="t('educai', 'Talk start mode')">
 					<button
 						type="button"
 						class="mode-tab"
 						:class="{ active: mode === 'new' }"
 						:aria-selected="String(mode === 'new')"
 						@click="setMode('new')">
-						New chat
+						{{ t('educai', 'New chat') }}
 					</button>
 					<button
 						type="button"
@@ -27,36 +27,36 @@
 						:class="{ active: mode === 'existing' }"
 						:aria-selected="String(mode === 'existing')"
 						@click="setMode('existing')">
-						Existing chat
+						{{ t('educai', 'Existing chat') }}
 					</button>
 				</div>
 			</div>
 
 			<div class="modal-body">
 				<div v-if="mode === 'new'" class="form-section">
-					<label for="talk-room-name">Chat name</label>
+					<label for="talk-room-name">{{ t('educai', 'Chat name') }}</label>
 					<input
 						id="talk-room-name"
 						v-model="roomName"
 						type="text"
-						placeholder="Chat with bot">
+						:placeholder="t('educai', 'Chat with bot')">
 				</div>
 
 				<div v-if="mode === 'existing'" class="form-section">
 					<div class="section-header">
-						<label>Talk conversation</label>
+						<label>{{ t('educai', 'Talk conversation') }}</label>
 						<button
 							type="button"
 							class="refresh-button"
 							:disabled="loadingRooms"
 							@click="loadRooms">
-							Refresh
+							{{ t('educai', 'Refresh') }}
 						</button>
 					</div>
 
 					<div v-if="loadingRooms" class="room-state">
 						<span class="icon-loading" />
-						<span>Loading Talk conversations...</span>
+						<span>{{ t('educai', 'Loading Talk conversations…') }}</span>
 					</div>
 
 					<div v-else-if="roomsError" class="error-state">
@@ -64,7 +64,7 @@
 					</div>
 
 					<div v-else-if="rooms.length === 0" class="room-state">
-						No Talk conversations available.
+						{{ t('educai', 'No Talk conversations available.') }}
 					</div>
 
 					<div v-else class="room-list">
@@ -81,31 +81,33 @@
 							<span class="room-copy">
 								<span class="room-title">{{ room.displayName }}</span>
 								<span class="room-meta">
-									{{ room.isModerator ? `You can activate ${APP_DISPLAY_NAME} here` : `Only moderators can activate ${APP_DISPLAY_NAME} here` }}
+									{{ room.isModerator
+										? t('educai', 'You can activate {appName} here', { appName: APP_DISPLAY_NAME })
+										: t('educai', 'Only moderators can activate {appName} here', { appName: APP_DISPLAY_NAME }) }}
 								</span>
 							</span>
 						</label>
 					</div>
 
 					<div v-if="selectedRoom && !selectedRoom.isModerator" class="warning-state">
-						If {{ APP_DISPLAY_NAME }} is not active in this room yet, a moderator needs to activate it before you can use this bot there.
+						{{ t('educai', 'If {appName} is not active in this room yet, a moderator needs to activate it before you can use this bot there.', { appName: APP_DISPLAY_NAME }) }}
 					</div>
 				</div>
 
 				<div class="form-section">
-					<label for="talk-first-message">First message</label>
+					<label for="talk-first-message">{{ t('educai', 'First message') }}</label>
 					<textarea
 						id="talk-first-message"
 						v-model="message"
 						rows="4"
-						placeholder="@bot What can you help me with?" />
+						:placeholder="t('educai', '@bot What can you help me with?')" />
 				</div>
 
 				<label class="send-option">
 					<input v-model="sendMessage" type="checkbox">
 					<span>
-						Send this message immediately as me
-						<small v-if="mode === 'existing'">Recommended only when the selected room expects this message.</small>
+						{{ t('educai', 'Send this message immediately as me') }}
+						<small v-if="mode === 'existing'">{{ t('educai', 'Recommended only when the selected room expects this message.') }}</small>
 					</span>
 				</label>
 
@@ -116,7 +118,7 @@
 
 			<div class="modal-footer">
 				<button class="button" :disabled="submitting" @click="$emit('close')">
-					Cancel
+					{{ t('educai', 'Cancel') }}
 				</button>
 				<button class="button primary" :disabled="submitDisabled" @click="submit">
 					<span v-if="submitting" class="icon-loading" />
@@ -132,6 +134,8 @@ import axios from '@nextcloud/axios'
 import { APP_DISPLAY_NAME } from '../branding.js'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { generateUrl } from '@nextcloud/router'
+import { t } from '../l10n.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 export default {
 	name: 'BotTalkStartModal',
@@ -147,8 +151,8 @@ export default {
 			mode: 'new',
 			rooms: [],
 			selectedRoomToken: null,
-			roomName: `Chat with ${this.bot.bot_name}`,
-			message: `${this.formatMention(this.bot.mention_name)} What can you help me with?`,
+			roomName: t('educai', 'Chat with {bot}', { bot: this.bot.bot_name }),
+			message: t('educai', '{mention} What can you help me with?', { mention: this.formatMention(this.bot.mention_name) }),
 			sendMessage: true,
 			loadingRooms: false,
 			roomsLoaded: false,
@@ -175,12 +179,16 @@ export default {
 		},
 		submitLabel() {
 			if (this.submitting) {
-				return 'Opening Talk...'
+				return t('educai', 'Opening Talk…')
 			}
 			if (this.mode === 'new') {
-				return this.sendMessage ? 'Create chat, send message and open Talk' : 'Create chat and open Talk'
+				return this.sendMessage
+					? t('educai', 'Create chat, send message and open Talk')
+					: t('educai', 'Create chat and open Talk')
 			}
-			return this.sendMessage ? 'Activate, send message and open Talk' : 'Activate and open Talk'
+			return this.sendMessage
+				? t('educai', 'Activate, send message and open Talk')
+				: t('educai', 'Activate and open Talk')
 		},
 	},
 	methods: {
@@ -208,7 +216,7 @@ export default {
 				}
 			} catch (error) {
 				console.error('Failed to load Talk conversations:', error)
-				this.roomsError = this.errorFromResponse(error, 'Failed to load Talk conversations')
+				this.roomsError = this.errorFromResponse(error, t('educai', 'Failed to load Talk conversations'))
 				this.roomsLoaded = true
 			} finally {
 				this.loadingRooms = false
@@ -218,7 +226,7 @@ export default {
 			this.error = null
 
 			if (this.mode === 'existing' && !this.selectedRoomToken) {
-				this.error = 'Please select a Talk conversation.'
+				this.error = t('educai', 'Please select a Talk conversation.')
 				return
 			}
 
@@ -239,22 +247,25 @@ export default {
 				}
 
 				if (response.data?.messageSent) {
-					showSuccess('Message sent. Opening Talk...')
+					showSuccess(t('educai', 'Message sent. Opening Talk…'))
 				} else {
-					showSuccess(`${APP_DISPLAY_NAME} is ready in Talk. Mention ${this.mention} to start.`)
+					showSuccess(t('educai', '{appName} is ready in Talk. Mention {mention} to start.', {
+						appName: APP_DISPLAY_NAME,
+						mention: this.mention,
+					}))
 				}
 
 				window.location.href = talkUrl
 			} catch (error) {
 				console.error('Failed to start Talk chat:', error)
-				this.error = this.errorFromResponse(error, 'Failed to start Talk chat')
+				this.error = this.errorFromResponse(error, t('educai', 'Failed to start Talk chat'))
 				showError(this.error)
 			} finally {
 				this.submitting = false
 			}
 		},
 		errorFromResponse(error, fallback) {
-			return error?.response?.data?.error || error?.message || fallback
+			return getApiErrorMessage(error, fallback)
 		},
 	},
 }
@@ -265,7 +276,7 @@ export default {
 	position: fixed;
 	z-index: 10000;
 	top: 0;
-	left: 0;
+	inset-inline-start: 0;
 	width: 100%;
 	height: 100%;
 	background: rgba(0, 0, 0, 0.6);
@@ -365,7 +376,7 @@ export default {
 }
 
 .mode-tab + .mode-tab {
-	border-left: 1px solid var(--color-border);
+	border-inline-start: 1px solid var(--color-border);
 }
 
 .mode-tab.active {

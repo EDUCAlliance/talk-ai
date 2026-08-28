@@ -2,14 +2,16 @@
 	<div class="public-bot-card" :class="{ inactive: !bot.is_active }">
 		<div class="card-header">
 			<div class="bot-identity">
-				<h3 class="bot-name">{{ bot.bot_name }}</h3>
+				<h3 class="bot-name">
+					{{ bot.bot_name }}
+				</h3>
 				<div class="mention-row">
 					<span class="mention-badge">{{ bot.mention_name }}</span>
 					<button
 						class="copy-handle-button"
 						type="button"
-						:aria-label="`Copy ${formatMention(bot.mention_name)} handle`"
-						:title="`Copy ${formatMention(bot.mention_name)} handle`"
+						:aria-label="t('educai', 'Copy {mention} handle', { mention: formatMention(bot.mention_name) })"
+						:title="t('educai', 'Copy {mention} handle', { mention: formatMention(bot.mention_name) })"
 						@click="copyHandle">
 						<IconContentCopy :size="16" />
 					</button>
@@ -19,8 +21,12 @@
 		</div>
 
 		<div class="bot-description">
-			<p v-if="bot.description">{{ truncatedDescription }}</p>
-			<p v-else class="no-description">No description provided</p>
+			<p v-if="bot.description">
+				{{ truncatedDescription }}
+			</p>
+			<p v-else class="no-description">
+				{{ t('educai', 'No description provided') }}
+			</p>
 		</div>
 
 		<!-- Access reason for non-global bots -->
@@ -31,26 +37,26 @@
 
 		<div class="bot-meta">
 			<div class="meta-row">
-				<span class="meta-label">Created by:</span>
-				<span class="meta-value">{{ bot.owner_display_name || 'Unknown' }}</span>
+				<span class="meta-label">{{ t('educai', 'Created by:') }}</span>
+				<span class="meta-value">{{ bot.owner_display_name || t('educai', 'Unknown') }}</span>
 			</div>
 			<div class="meta-row">
-				<span class="meta-label">Created:</span>
+				<span class="meta-label">{{ t('educai', 'Created:') }}</span>
 				<span class="meta-value">{{ formatDate(bot.created_at) }}</span>
 			</div>
 		</div>
 
 		<div class="card-actions">
 			<button class="button primary-button" @click="$emit('speak-in-talk', bot)">
-				Use Bot
+				{{ t('educai', 'Use bot') }}
 			</button>
 			<button class="button secondary-button" @click="$emit('show-details', bot)">
-				Details
+				{{ t('educai', 'Details') }}
 			</button>
 		</div>
 
 		<div v-if="!bot.is_active" class="inactive-badge">
-			<span class="icon-close" /> Inactive
+			<span class="icon-close" /> {{ t('educai', 'Inactive') }}
 		</div>
 	</div>
 </template>
@@ -58,6 +64,7 @@
 <script>
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import IconContentCopy from 'vue-material-design-icons/ContentCopy.vue'
+import { getCanonicalLocale, t } from '../l10n.js'
 
 export default {
 	name: 'PublicBotCard',
@@ -77,10 +84,10 @@ export default {
 		},
 		visibilityLabel() {
 			const v = this.bot.visibility || (this.bot.is_public ? 'global' : 'groups')
-			if (v === 'personal') return 'Personal'
-			if (v === 'global') return 'Global'
-			if (v === 'teams') return 'Team access'
-			return 'Group access'
+			if (v === 'personal') return t('educai', 'Personal')
+			if (v === 'global') return t('educai', 'Global')
+			if (v === 'teams') return t('educai', 'Team access')
+			return t('educai', 'Group access')
 		},
 		visibilityClass() {
 			const v = this.bot.visibility || (this.bot.is_public ? 'global' : 'groups')
@@ -93,12 +100,12 @@ export default {
 			const reason = this.bot.access_reason
 			if (!reason) return null
 			if (reason.type === 'global') return null
-			if (reason.type === 'owner') return 'You are the owner of this bot'
+			if (reason.type === 'owner') return t('educai', 'You are the owner of this bot')
 			if (reason.type === 'group' && reason.names?.length > 0) {
-				return `Access via group: ${reason.names.join(', ')}`
+				return t('educai', 'Access via group: {groups}', { groups: reason.names.join(', ') })
 			}
 			if (reason.type === 'team' && reason.names?.length > 0) {
-				return `Access via team: ${reason.names.join(', ')}`
+				return t('educai', 'Access via team: {teams}', { teams: reason.names.join(', ') })
 			}
 			return null
 		},
@@ -124,16 +131,16 @@ export default {
 					document.execCommand('copy')
 					document.body.removeChild(textarea)
 				}
-				showSuccess(`Copied ${mention}`)
+				showSuccess(t('educai', 'Copied {mention}', { mention }))
 			} catch (error) {
 				console.error('Failed to copy bot handle:', error)
-				showError('Failed to copy bot handle')
+				showError(t('educai', 'Failed to copy bot handle'))
 			}
 		},
 		formatDate(timestamp) {
-			if (!timestamp) return 'Unknown'
+			if (!timestamp) return t('educai', 'Unknown')
 			const date = new Date(timestamp * 1000)
-			return date.toLocaleDateString(undefined, {
+			return date.toLocaleDateString(getCanonicalLocale(), {
 				day: 'numeric',
 				month: 'long',
 				year: 'numeric',
@@ -354,7 +361,7 @@ export default {
 .inactive-badge {
 	position: absolute;
 	top: 12px;
-	right: 12px;
+	inset-inline-end: 12px;
 	background: var(--color-error);
 	color: white;
 	padding: 4px 10px;

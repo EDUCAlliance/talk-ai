@@ -133,6 +133,8 @@ jobs:
           grep -Fx "$APP_NAME/appinfo/info.xml" "$archive_list" >/dev/null
           grep -Fx "$APP_NAME/vendor/autoload.php" "$archive_list" >/dev/null
           grep -Fx "$APP_NAME/js/educai-main.mjs" "$archive_list" >/dev/null
+          grep -Fx "$APP_NAME/l10n/de.js" "$archive_list" >/dev/null
+          grep -Fx "$APP_NAME/l10n/de.json" "$archive_list" >/dev/null
 
           if grep -Eq "^$APP_NAME/(node_modules|src|tests|vendor-bin|\.git)/" "$archive_list"; then
             echo "Development files were included in the release archive" >&2

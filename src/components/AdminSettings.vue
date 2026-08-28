@@ -3,7 +3,7 @@
 	<div class="admin-settings">
 		<h3 class="settings-title">
 			<span class="icon-settings" />
-			Administrator Settings
+			{{ t('educai', 'Administrator Settings') }}
 		</h3>
 
 		<form class="settings-body" autocomplete="off" @submit.prevent="saveSettings">
@@ -15,8 +15,8 @@
 					:aria-controls="sectionId('appearance')"
 					@click="toggleSection('appearance')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Appearance</span>
-						<span class="accordion-description">App icon variants for settings and navigation surfaces.</span>
+						<span class="accordion-title">{{ t('educai', 'Appearance') }}</span>
+						<span class="accordion-description">{{ t('educai', 'App icon variants for settings and navigation surfaces.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ appIconSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -26,56 +26,56 @@
 					:id="sectionId('appearance')"
 					class="accordion-panel">
 					<div class="app-icon-config">
-						<div class="icon-mode-tabs" aria-label="App icon mode">
+						<div class="icon-mode-tabs" :aria-label="t('educai', 'App icon mode')">
 							<button
 								type="button"
 								class="icon-mode-tab"
 								:class="{ 'icon-mode-tab--active': settings.appIconMode === 'default' }"
 								@click="setAppIconMode('default')">
-								Default
+								{{ t('educai', 'Default') }}
 							</button>
 							<button
 								type="button"
 								class="icon-mode-tab"
 								:class="{ 'icon-mode-tab--active': settings.appIconMode === 'custom' }"
 								@click="setAppIconMode('custom')">
-								Custom
+								{{ t('educai', 'Custom') }}
 							</button>
 						</div>
 
 						<div class="app-icon-preview-grid">
 							<div class="app-icon-preview-card app-icon-preview-card--light">
-								<span class="app-icon-preview-card__label">Black on light</span>
+								<span class="app-icon-preview-card__label">{{ t('educai', 'Black on light') }}</span>
 								<span class="app-icon-preview-card__frame">
 									<img
 										v-if="appIconBlackPreviewUrl"
 										:src="appIconBlackPreviewUrl"
-										:alt="APP_DISPLAY_NAME + ' black app icon preview'">
-									<span v-else class="app-icon-preview-card__missing">Missing</span>
+									:alt="t('educai', '{name} black app icon preview', { name: APP_DISPLAY_NAME })">
+									<span v-else class="app-icon-preview-card__missing">{{ t('educai', 'Missing') }}</span>
 								</span>
 							</div>
 							<div class="app-icon-preview-card app-icon-preview-card--dark">
-								<span class="app-icon-preview-card__label">White on dark</span>
+								<span class="app-icon-preview-card__label">{{ t('educai', 'White on dark') }}</span>
 								<span class="app-icon-preview-card__frame">
 									<img
 										v-if="appIconWhitePreviewUrl"
 										:src="appIconWhitePreviewUrl"
-										:alt="APP_DISPLAY_NAME + ' white app icon preview'">
-									<span v-else class="app-icon-preview-card__missing">Missing</span>
+									:alt="t('educai', '{name} white app icon preview', { name: APP_DISPLAY_NAME })">
+									<span v-else class="app-icon-preview-card__missing">{{ t('educai', 'Missing') }}</span>
 								</span>
 							</div>
 						</div>
 
 						<div v-if="settings.appIconMode === 'default'" class="app-icon-mode-panel">
 							<p class="hint">
-								Uses the bundled Talk AI icon pair: dark icon for light settings surfaces, white icon for app navigation.
+								{{ t('educai', 'Uses the bundled {name} icon pair: dark icon for light settings surfaces, white icon for app navigation.', { name: APP_DISPLAY_NAME }) }}
 							</p>
 						</div>
 
 						<div v-else class="app-icon-mode-panel">
 							<div class="form-grid">
 								<div class="form-group">
-									<label for="app-icon-black-url">Black icon</label>
+									<label for="app-icon-black-url">{{ t('educai', 'Black icon') }}</label>
 									<div class="app-icon-input-row">
 										<input
 											id="app-icon-black-url"
@@ -89,7 +89,7 @@
 											class="button"
 											:disabled="uploadingAppIconVariant === 'black'"
 											@click="triggerAppIconUpload('black')">
-											{{ uploadingAppIconVariant === 'black' ? 'Uploading...' : 'Upload SVG' }}
+										{{ uploadingAppIconVariant === 'black' ? t('educai', 'Uploading...') : t('educai', 'Upload SVG') }}
 										</button>
 										<input
 											ref="appIconBlackFileInput"
@@ -99,11 +99,11 @@
 											@change="uploadAppIconSvg('black', $event)">
 									</div>
 									<p class="hint">
-										Used on light settings surfaces. Enter a URL/path or upload an SVG from your computer.
+										{{ t('educai', 'Used on light settings surfaces. Enter a URL/path or upload an SVG from your computer.') }}
 									</p>
 								</div>
 								<div class="form-group">
-									<label for="app-icon-white-url">White icon</label>
+									<label for="app-icon-white-url">{{ t('educai', 'White icon') }}</label>
 									<div class="app-icon-input-row">
 										<input
 											id="app-icon-white-url"
@@ -117,7 +117,7 @@
 											class="button"
 											:disabled="uploadingAppIconVariant === 'white'"
 											@click="triggerAppIconUpload('white')">
-											{{ uploadingAppIconVariant === 'white' ? 'Uploading...' : 'Upload SVG' }}
+										{{ uploadingAppIconVariant === 'white' ? t('educai', 'Uploading...') : t('educai', 'Upload SVG') }}
 										</button>
 										<input
 											ref="appIconWhiteFileInput"
@@ -127,7 +127,7 @@
 											@change="uploadAppIconSvg('white', $event)">
 									</div>
 									<p class="hint">
-										Used in the dark app navigation/header context. Enter a URL/path or upload an SVG from your computer.
+										{{ t('educai', 'Used in the dark app navigation/header context. Enter a URL/path or upload an SVG from your computer.') }}
 									</p>
 								</div>
 							</div>
@@ -135,7 +135,7 @@
 
 						<div class="button-row app-icon-actions">
 							<button type="button" class="button" @click="resetAppIconConfig">
-								Reset to default icon
+								{{ t('educai', 'Reset to default icon') }}
 							</button>
 						</div>
 					</div>
@@ -150,8 +150,8 @@
 					:aria-controls="sectionId('essentials')"
 					@click="toggleSection('essentials')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Essentials</span>
-						<span class="accordion-description">Default creativity and Talk webhook secret.</span>
+						<span class="accordion-title">{{ t('educai', 'Essentials') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Default creativity and Talk webhook secret.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ essentialsSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -161,7 +161,7 @@
 					:id="sectionId('essentials')"
 					class="accordion-panel">
 					<div class="form-group">
-						<label for="default-temperature">Default Temperature</label>
+						<label for="default-temperature">{{ t('educai', 'Default Temperature') }}</label>
 						<input
 							id="default-temperature"
 							v-model.number="settings.defaultTemperature"
@@ -171,25 +171,23 @@
 							step="0.05"
 							placeholder="0.20">
 						<p class="hint">
-							Controls how deterministic or creative bots are by default.
-							Lower values are better for agentic, tool-using, RAG, and workflow bots.
-							Higher values can be useful for creative writing or brainstorming bots.
+							{{ t('educai', 'Controls how deterministic or creative bots are by default. Lower values are better for agentic, tool-using, RAG, and workflow bots. Higher values can be useful for creative writing or brainstorming bots.') }}
 						</p>
 						<div class="temperature-presets">
 							<button type="button" class="button" @click="applyDefaultTemperaturePreset(0.2)">
-								Precise 0.20
+								{{ t('educai', 'Precise {temperature}', { temperature: formatTemperature(0.2) }) }}
 							</button>
 							<button type="button" class="button" @click="applyDefaultTemperaturePreset(0.4)">
-								Balanced 0.40
+								{{ t('educai', 'Balanced {temperature}', { temperature: formatTemperature(0.4) }) }}
 							</button>
 							<button type="button" class="button" @click="applyDefaultTemperaturePreset(0.6)">
-								Creative 0.60
+								{{ t('educai', 'Creative {temperature}', { temperature: formatTemperature(0.6) }) }}
 							</button>
 						</div>
 					</div>
 
 					<div class="form-group">
-						<label for="webhook-secret">Webhook Secret</label>
+						<label for="webhook-secret">{{ t('educai', 'Webhook Secret') }}</label>
 						<input
 							id="webhook-secret"
 							v-model="settings.webhookSecret"
@@ -198,7 +196,7 @@
 							autocomplete="new-password"
 							placeholder="your-webhook-secret">
 						<p class="hint">
-							Secret used to verify webhook requests from Nextcloud Talk.
+							{{ t('educai', 'Secret used to verify webhook requests from Nextcloud Talk.') }}
 						</p>
 					</div>
 				</div>
@@ -212,8 +210,8 @@
 					:aria-controls="sectionId('modelEndpoints')"
 					@click="toggleSection('modelEndpoints')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Model Endpoints</span>
-						<span class="accordion-description">Primary and optional secondary OpenAI-compatible providers.</span>
+						<span class="accordion-title">{{ t('educai', 'Model Endpoints') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Primary and optional secondary OpenAI-compatible providers.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ modelEndpointsSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -223,14 +221,14 @@
 					:id="sectionId('modelEndpoints')"
 					class="accordion-panel">
 					<div class="section-heading">
-						<h4>Primary Endpoint</h4>
+						<h4>{{ t('educai', 'Primary Endpoint') }}</h4>
 						<p class="hint">
-							Used for existing raw model names and as the default provider.
+							{{ t('educai', 'Used for existing raw model names and as the default provider.') }}
 						</p>
 					</div>
 
 					<div class="form-group">
-						<label for="api-endpoint">Primary API Endpoint</label>
+						<label for="api-endpoint">{{ t('educai', 'Primary API Endpoint') }}</label>
 						<input
 							id="api-endpoint"
 							v-model="settings.apiEndpoint"
@@ -240,12 +238,12 @@
 							placeholder="https://chat-ai.academiccloud.de/v1/chat/completions"
 							required>
 						<p class="hint">
-							AcademicCloud (GWDG) or OpenAI-compatible API endpoint URL.
+							{{ t('educai', 'AcademicCloud (GWDG) or OpenAI-compatible API endpoint URL.') }}
 						</p>
 					</div>
 
 					<div class="form-group">
-						<label for="api-key">Primary API Key</label>
+						<label for="api-key">{{ t('educai', 'Primary API Key') }}</label>
 						<input
 							id="api-key"
 							v-model="settings.apiKey"
@@ -254,19 +252,19 @@
 							autocomplete="new-password"
 							placeholder="sk-...">
 						<p class="hint">
-							Used for primary endpoint requests. Stored securely and never displayed back.
+							{{ t('educai', 'Used for primary endpoint requests. Stored securely and never displayed back.') }}
 						</p>
 					</div>
 
 					<div class="section-heading">
-						<h4>Secondary Endpoint</h4>
+						<h4>{{ t('educai', 'Secondary Endpoint') }}</h4>
 						<p class="hint">
-							Optional. When configured, bots can choose models from both endpoints.
+							{{ t('educai', 'Optional. When configured, bots can choose models from both endpoints.') }}
 						</p>
 					</div>
 
 					<div class="form-group">
-						<label for="secondary-api-endpoint">Secondary API Endpoint</label>
+						<label for="secondary-api-endpoint">{{ t('educai', 'Secondary API Endpoint') }}</label>
 						<input
 							id="secondary-api-endpoint"
 							v-model="settings.secondaryApiEndpoint"
@@ -277,7 +275,7 @@
 					</div>
 
 					<div class="form-group">
-						<label for="secondary-api-key">Secondary API Key</label>
+						<label for="secondary-api-key">{{ t('educai', 'Secondary API Key') }}</label>
 						<input
 							id="secondary-api-key"
 							v-model="settings.secondaryApiKey"
@@ -286,16 +284,16 @@
 							autocomplete="new-password"
 							placeholder="sk-...">
 						<p class="hint">
-							Leave blank to keep an already stored secondary key.
+							{{ t('educai', 'Leave blank to keep an already stored secondary key.') }}
 						</p>
 					</div>
 
 					<div class="section-heading">
-						<h4>Model Selection</h4>
+						<h4>{{ t('educai', 'Model Selection') }}</h4>
 					</div>
 
 					<div class="form-group">
-						<label for="default-model">Default Model</label>
+						<label for="default-model">{{ t('educai', 'Default Model') }}</label>
 						<select
 							v-if="availableModelOptions.length > 0"
 							id="default-model"
@@ -316,10 +314,10 @@
 							:disabled="settings.allowMultipleModels"
 							placeholder="primary:llama-3.3-70b-instruct">
 						<p v-if="settings.allowMultipleModels" class="hint">
-							Disabled because Multiple Models mode is enabled.
+							{{ t('educai', 'Disabled because Multiple Models mode is enabled.') }}
 						</p>
 						<p v-else class="hint">
-							Legacy unprefixed model names continue to use the primary endpoint.
+							{{ t('educai', 'Legacy unprefixed model names continue to use the primary endpoint.') }}
 						</p>
 					</div>
 
@@ -329,29 +327,29 @@
 								v-model="settings.allowMultipleModels"
 								type="checkbox"
 								@change="onToggleMultiple">
-							Allow Multiple Models (per-bot selection)
+							{{ t('educai', 'Allow Multiple Models (per-bot selection)') }}
 						</label>
 						<p class="hint">
-							If enabled, choose which models are available for bots. Users will select one when creating a bot.
+							{{ t('educai', 'If enabled, choose which models are available for bots. Users will select one when creating a bot.') }}
 						</p>
 					</div>
 
 					<div v-if="settings.allowMultipleModels" class="form-group">
-						<label>Allowed Models</label>
+						<label>{{ t('educai', 'Allowed Models') }}</label>
 						<div v-if="loadingModels" class="hint">
-							Loading models…
+							{{ t('educai', 'Loading models…') }}
 						</div>
 						<div v-else>
 							<div v-if="modelLoadError" class="hint" style="color:var(--color-error)">
 								{{ modelLoadError }}
 							</div>
 							<div v-if="availableModelOptions.length === 0" class="hint">
-								No models loaded.
+								{{ t('educai', 'No models loaded.') }}
 								<button
 									type="button"
 									class="button"
 									@click="loadModels">
-									Load models
+									{{ t('educai', 'Load models') }}
 								</button>
 							</div>
 							<select
@@ -366,7 +364,7 @@
 								</option>
 							</select>
 							<p class="hint">
-								Hold Cmd/Ctrl to select multiple. Save after selection.
+								{{ t('educai', 'Hold Cmd/Ctrl to select multiple. Save after selection.') }}
 							</p>
 						</div>
 					</div>
@@ -381,8 +379,8 @@
 					:aria-controls="sectionId('fallbackTimeouts')"
 					@click="toggleSection('fallbackTimeouts')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Fallback &amp; Timeouts</span>
-						<span class="accordion-description">One retry model and LLM request time limits.</span>
+						<span class="accordion-title">{{ t('educai', 'Fallback & Timeouts') }}</span>
+						<span class="accordion-description">{{ t('educai', 'One retry model and LLM request time limits.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ fallbackTimeoutSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -392,12 +390,12 @@
 					:id="sectionId('fallbackTimeouts')"
 					class="accordion-panel">
 					<div class="form-group">
-						<label for="fallback-model">Fallback Model</label>
+						<label for="fallback-model">{{ t('educai', 'Fallback Model') }}</label>
 						<select
 							v-if="availableModelOptions.length > 0"
 							id="fallback-model"
 							v-model="settings.fallbackModel">
-							<option value="">No fallback</option>
+							<option value="">{{ t('educai', 'No fallback') }}</option>
 							<option
 								v-for="option in availableModelOptionsWithCurrent(settings.fallbackModel)"
 								:key="option.id"
@@ -412,13 +410,13 @@
 							type="text"
 							placeholder="secondary:qwen3-coder-next">
 						<p class="hint">
-							Used once after timeout or connection failures before the request fails finally.
+							{{ t('educai', 'Used once after timeout or connection failures before the request fails finally.') }}
 						</p>
 					</div>
 
 					<div class="form-grid form-grid--three">
 						<div class="form-group">
-							<label for="llm-chat-timeout">Chat Timeout (seconds)</label>
+							<label for="llm-chat-timeout">{{ t('educai', 'Chat Timeout (seconds)') }}</label>
 							<input
 								id="llm-chat-timeout"
 								v-model.number="settings.llmChatTimeout"
@@ -426,11 +424,11 @@
 								min="1"
 								step="1">
 							<p class="hint">
-								Maximum time to wait for a regular, non-streaming LLM response.
+								{{ t('educai', 'Maximum time to wait for a regular, non-streaming LLM response.') }}
 							</p>
 						</div>
 						<div class="form-group">
-							<label for="llm-stream-timeout">Streaming Timeout (seconds)</label>
+							<label for="llm-stream-timeout">{{ t('educai', 'Streaming Timeout (seconds)') }}</label>
 							<input
 								id="llm-stream-timeout"
 								v-model.number="settings.llmStreamTimeout"
@@ -438,11 +436,11 @@
 								min="1"
 								step="1">
 							<p class="hint">
-								Maximum time to keep a streaming response open while the model is generating.
+								{{ t('educai', 'Maximum time to keep a streaming response open while the model is generating.') }}
 							</p>
 						</div>
 						<div class="form-group">
-							<label for="llm-models-timeout">Model-List Timeout (seconds)</label>
+							<label for="llm-models-timeout">{{ t('educai', 'Model-List Timeout (seconds)') }}</label>
 							<input
 								id="llm-models-timeout"
 								v-model.number="settings.llmModelsTimeout"
@@ -462,8 +460,8 @@
 					:aria-controls="sectionId('rag')"
 					@click="toggleSection('rag')">
 					<span class="accordion-heading">
-						<span class="accordion-title">RAG &amp; Embeddings</span>
-						<span class="accordion-description">Knowledge retrieval, embedding provider, limits, and chunking.</span>
+						<span class="accordion-title">{{ t('educai', 'RAG & Embeddings') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Knowledge retrieval, embedding provider, limits, and chunking.') }}</span>
 					</span>
 					<span class="accordion-meta" :class="{ 'accordion-meta--warning': hasPendingEmbeddingConfigChange }">
 						{{ ragSummary }}
@@ -475,9 +473,9 @@
 					:id="sectionId('rag')"
 					class="accordion-panel">
 					<div class="section-heading">
-						<h4>Retrieval-Augmented Generation</h4>
+						<h4>{{ t('educai', 'Retrieval-Augmented Generation') }}</h4>
 						<p class="hint">
-							Configure embeddings and chunking parameters used when bots index Nextcloud files.
+							{{ t('educai', 'Configure embeddings and chunking parameters used when bots index Nextcloud files.') }}
 						</p>
 					</div>
 
@@ -486,15 +484,15 @@
 					<input
 						v-model="settings.ragEnabled"
 						type="checkbox">
-					Enable Retrieval-Augmented Generation
+					{{ t('educai', 'Enable Retrieval-Augmented Generation') }}
 				</label>
 				<p class="hint">
-					When enabled, bots can index approved files and surface relevant snippets in conversations.
+					{{ t('educai', 'When enabled, bots can index approved files and surface relevant snippets in conversations.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="embedding-endpoint">Embedding API Endpoint</label>
+				<label for="embedding-endpoint">{{ t('educai', 'Embedding API Endpoint') }}</label>
 				<input
 					id="embedding-endpoint"
 					v-model="settings.embeddingApiEndpoint"
@@ -503,12 +501,12 @@
 					autocomplete="off"
 					placeholder="https://chat-ai.academiccloud.de/v1/embeddings">
 				<p class="hint">
-					Optional. Leave blank to reuse the chat completion endpoint.
+					{{ t('educai', 'Optional. Leave blank to reuse the chat completion endpoint.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="embedding-key">Embedding API Key</label>
+				<label for="embedding-key">{{ t('educai', 'Embedding API Key') }}</label>
 				<input
 					id="embedding-key"
 					v-model="settings.embeddingApiKey"
@@ -517,57 +515,57 @@
 					autocomplete="new-password"
 					placeholder="sk-...">
 				<p class="hint">
-					Optional. Provide only if embeddings require a different credential. Stored securely and never displayed back.
+					{{ t('educai', 'Optional. Provide only if embeddings require a different credential. Stored securely and never displayed back.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="embedding-model">Embedding Model</label>
+				<label for="embedding-model">{{ t('educai', 'Embedding Model') }}</label>
 				<input
 					id="embedding-model"
 					v-model="settings.embeddingModel"
 					type="text"
 					placeholder="multilingual-e5-large-instruct">
 				<p class="hint">
-					Set the provider-specific embedding model identifier (e.g., multilingual-e5-large-instruct, e5-mistral-7b-instruct).
+					{{ t('educai', 'Set the provider-specific embedding model identifier (e.g., multilingual-e5-large-instruct, e5-mistral-7b-instruct).') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="embedding-rate-limit-mode">Embedding Rate Limit Mode</label>
+				<label for="embedding-rate-limit-mode">{{ t('educai', 'Embedding Rate Limit Mode') }}</label>
 				<select
 					id="embedding-rate-limit-mode"
 					v-model="settings.embeddingRateLimitMode">
 					<option value="inherit">
-						Inherit Chat Limits
+						{{ t('educai', 'Inherit Chat Limits') }}
 					</option>
 					<option value="disabled">
-						Disabled
+						{{ t('educai', 'Disabled') }}
 					</option>
 					<option value="custom">
-						Custom
+						{{ t('educai', 'Custom') }}
 					</option>
 				</select>
 				<p class="hint">
-					Use <code>inherit</code> to follow chat queue limits, <code>disabled</code> for self-hosted embedding endpoints without throttling, or <code>custom</code> for dedicated embedding quotas.
+					{{ t('educai', 'Use "inherit" to follow chat queue limits, "disabled" for self-hosted embedding endpoints without throttling, or "custom" for dedicated embedding quotas.') }}
 				</p>
 			</div>
 
 			<div v-if="settings.embeddingRateLimitMode === 'custom'" class="form-grid">
 				<div class="form-group">
-					<label for="embedding-rate-limit-second">Embedding Requests per Second</label>
+					<label for="embedding-rate-limit-second">{{ t('educai', 'Embedding Requests per Second') }}</label>
 					<input
 						id="embedding-rate-limit-second"
 						v-model.number="settings.embeddingRateLimitSecond"
 						type="number"
 						min="1"
-						placeholder="Optional">
+						:placeholder="t('educai', 'Optional')">
 					<p class="hint">
-						Optional. Leave blank if the embedding provider does not expose second-level headers.
+						{{ t('educai', 'Optional. Leave blank if the embedding provider does not expose second-level headers.') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="embedding-rate-limit-minute">Embedding Requests per Minute</label>
+					<label for="embedding-rate-limit-minute">{{ t('educai', 'Embedding Requests per Minute') }}</label>
 					<input
 						id="embedding-rate-limit-minute"
 						v-model.number="settings.embeddingRateLimitMinute"
@@ -575,11 +573,11 @@
 						min="1"
 						placeholder="100">
 					<p class="hint">
-						Default for GWDG embeddings: 100/minute.
+						{{ t('educai', 'Default for GWDG embeddings: 100/minute.') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="embedding-rate-limit-hour">Embedding Requests per Hour</label>
+					<label for="embedding-rate-limit-hour">{{ t('educai', 'Embedding Requests per Hour') }}</label>
 					<input
 						id="embedding-rate-limit-hour"
 						v-model.number="settings.embeddingRateLimitHour"
@@ -587,11 +585,11 @@
 						min="1"
 						placeholder="2000">
 					<p class="hint">
-						Default for GWDG embeddings: 2000/hour.
+						{{ t('educai', 'Default for GWDG embeddings: 2000/hour.') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="embedding-rate-limit-day">Embedding Requests per Day</label>
+					<label for="embedding-rate-limit-day">{{ t('educai', 'Embedding Requests per Day') }}</label>
 					<input
 						id="embedding-rate-limit-day"
 						v-model.number="settings.embeddingRateLimitDay"
@@ -599,20 +597,20 @@
 						min="1"
 						placeholder="4000">
 					<p class="hint">
-						Default for GWDG embeddings: 4000/day.
+						{{ t('educai', 'Default for GWDG embeddings: 4000/day.') }}
 					</p>
 				</div>
 			</div>
 			<div v-if="hasPendingEmbeddingConfigChange" class="embedding-warning">
-				<strong>Embedding settings changed.</strong>
+				<strong>{{ t('educai', 'Embedding settings changed.') }}</strong>
 				<p>
-					Save first, then run <code>Reindex All Embeddings</code> to rebuild bot vectors for the active embedding model.
+					{{ t('educai', 'Save first, then run "Reindex All Embeddings" to rebuild bot vectors for the active embedding model.') }}
 				</p>
 			</div>
 
 			<div class="form-grid">
 				<div class="form-group">
-					<label for="rag-chunk-size">Chunk Size (tokens)</label>
+					<label for="rag-chunk-size">{{ t('educai', 'Chunk Size (tokens)') }}</label>
 					<input
 						id="rag-chunk-size"
 						v-model.number="settings.ragChunkSize"
@@ -621,11 +619,11 @@
 						step="10"
 						placeholder="750">
 					<p class="hint">
-						Controls how much text each embedding covers. Larger chunks reduce recall but speed ingestion.
+						{{ t('educai', 'Controls how much text each embedding covers. Larger chunks reduce recall but speed ingestion.') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="rag-chunk-overlap">Chunk Overlap (tokens)</label>
+					<label for="rag-chunk-overlap">{{ t('educai', 'Chunk Overlap (tokens)') }}</label>
 					<input
 						id="rag-chunk-overlap"
 						v-model.number="settings.ragChunkOverlap"
@@ -634,7 +632,7 @@
 						step="5"
 						placeholder="50">
 				<p class="hint">
-					Overlap provides continuity between adjacent chunks. Increase for long-form documents.
+					{{ t('educai', 'Overlap provides continuity between adjacent chunks. Increase for long-form documents.') }}
 				</p>
 			</div>
 		</div>
@@ -649,8 +647,8 @@
 					:aria-controls="sectionId('docling')"
 					@click="toggleSection('docling')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Document Conversion</span>
-						<span class="accordion-description">Docling conversion for PDF and Office ingestion.</span>
+						<span class="accordion-title">{{ t('educai', 'Document Conversion') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Docling conversion for PDF and Office ingestion.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ doclingSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -660,10 +658,9 @@
 					:id="sectionId('docling')"
 					class="accordion-panel">
 					<div class="section-heading">
-						<h4>Document Conversion (Docling)</h4>
+						<h4>{{ t('educai', 'Document Conversion (Docling)') }}</h4>
 						<p class="hint">
-							Enable conversion of PDF, DOCX, PPTX and other binary documents to text for RAG ingestion.
-							This uses the Docling API to extract content from documents that cannot be read as plain text.
+							{{ t('educai', 'Enable conversion of PDF, DOCX, PPTX and other binary documents to text for RAG ingestion. This uses the Docling API to extract content from documents that cannot be read as plain text.') }}
 						</p>
 					</div>
 
@@ -672,16 +669,15 @@
 					<input
 						v-model="settings.doclingEnabled"
 						type="checkbox">
-					Enable Document Conversion
+					{{ t('educai', 'Enable Document Conversion') }}
 				</label>
 				<p class="hint">
-					When enabled, PDF and Office documents attached to bots will be automatically converted to text for indexing.
-					Uses the dedicated Docling API key when configured, otherwise falls back to the main API key.
+					{{ t('educai', 'When enabled, PDF and Office documents attached to bots will be automatically converted to text for indexing. Uses the dedicated Docling API key when configured, otherwise falls back to the main API key.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="docling-endpoint">Docling API Endpoint</label>
+				<label for="docling-endpoint">{{ t('educai', 'Docling API Endpoint') }}</label>
 				<input
 					id="docling-endpoint"
 					v-model="settings.doclingApiEndpoint"
@@ -690,12 +686,12 @@
 					autocomplete="off"
 					placeholder="https://chat-ai.academiccloud.de/v1/documents/convert">
 				<p class="hint">
-					Optional. Leave blank to use the default Academic Cloud endpoint.
+					{{ t('educai', 'Optional. Leave blank to use the default Academic Cloud endpoint.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="docling-key">Docling API Key</label>
+				<label for="docling-key">{{ t('educai', 'Docling API Key') }}</label>
 				<input
 					id="docling-key"
 					v-model="settings.doclingApiKey"
@@ -704,7 +700,7 @@
 					autocomplete="new-password"
 					placeholder="sk-...">
 				<p class="hint">
-					Optional. Provide only if Docling requires a different credential.
+					{{ t('educai', 'Optional. Provide only if Docling requires a different credential.') }}
 					{{ doclingKeyHint }}
 				</p>
 			</div>
@@ -715,16 +711,16 @@
 					class="button"
 					:disabled="doclingTesting"
 					@click="testDoclingConnection">
-					{{ doclingTesting ? 'Testing…' : 'Test Connection' }}
+					{{ doclingTesting ? t('educai', 'Testing…') : t('educai', 'Test Connection') }}
 				</button>
 				<span v-if="doclingTestResult" :class="doclingTestResult.success ? 'success-text' : 'error-text'">
-					{{ doclingTestResult.success ? '✓ Connection successful' : ('✗ ' + doclingTestResult.error) }}
+					{{ doclingTestResult.success ? t('educai', '✓ Connection successful') : t('educai', '✗ {error}', { error: doclingTestResult.error }) }}
 				</span>
 			</div>
 
 			<div class="supported-formats">
 				<p class="hint">
-					<strong>Supported formats:</strong> PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, PNG, JPG, TIFF, BMP
+					<strong>{{ t('educai', 'Supported formats:') }}</strong> PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, PNG, JPG, TIFF, BMP
 				</p>
 			</div>
 				</div>
@@ -738,8 +734,8 @@
 					:aria-controls="sectionId('media')"
 					@click="toggleSection('media')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Media Tools</span>
-						<span class="accordion-description">Image understanding and speech-to-text models.</span>
+						<span class="accordion-title">{{ t('educai', 'Media Tools') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Image understanding and speech-to-text models.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ mediaSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -749,14 +745,14 @@
 					:id="sectionId('media')"
 					class="accordion-panel">
 					<div class="section-heading">
-						<h4>Image Understanding</h4>
+						<h4>{{ t('educai', 'Image Understanding') }}</h4>
 						<p class="hint">
-							Configure a multimodal model for image attachments uploaded in Nextcloud Talk. Bots only get image understanding when the built-in image tool is enabled for that bot.
+							{{ t('educai', 'Configure a multimodal model for image attachments uploaded in Nextcloud Talk. Bots only get image understanding when the built-in image tool is enabled for that bot.') }}
 						</p>
 					</div>
 
 					<div class="form-group">
-				<label for="vision-endpoint">Vision API Endpoint</label>
+				<label for="vision-endpoint">{{ t('educai', 'Vision API Endpoint') }}</label>
 				<input
 					id="vision-endpoint"
 					v-model="settings.visionApiEndpoint"
@@ -765,12 +761,12 @@
 					autocomplete="off"
 					placeholder="https://chat-ai.academiccloud.de/v1/chat/completions">
 				<p class="hint">
-					Optional. Leave blank to reuse the main chat completion endpoint.
+					{{ t('educai', 'Optional. Leave blank to reuse the main chat completion endpoint.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="vision-key">Vision API Key</label>
+				<label for="vision-key">{{ t('educai', 'Vision API Key') }}</label>
 				<input
 					id="vision-key"
 					v-model="settings.visionApiKey"
@@ -779,19 +775,19 @@
 					autocomplete="new-password"
 					placeholder="sk-...">
 				<p class="hint">
-					Optional. Leave blank to reuse the main API key.
+					{{ t('educai', 'Optional. Leave blank to reuse the main API key.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="vision-model">Vision Model</label>
+				<label for="vision-model">{{ t('educai', 'Vision Model') }}</label>
 				<input
 					id="vision-model"
 					v-model="settings.visionModel"
 					type="text"
 					placeholder="llama-4-scout-17b-16e-instruct">
 				<p class="hint">
-					Set a model identifier that supports image inputs.
+					{{ t('educai', 'Set a model identifier that supports image inputs.') }}
 				</p>
 			</div>
 
@@ -801,24 +797,24 @@
 					class="button"
 					:disabled="visionTesting"
 					@click="testVisionConnection">
-					{{ visionTesting ? 'Testing…' : 'Test Vision' }}
+					{{ visionTesting ? t('educai', 'Testing…') : t('educai', 'Test Vision') }}
 				</button>
 				<span v-if="visionTestResult" :class="visionTestResult.success ? 'success-text' : 'error-text'">
-					{{ visionTestResult.success ? '✓ Vision connection successful' : ('✗ ' + visionTestResult.error) }}
+					{{ visionTestResult.success ? t('educai', '✓ Vision connection successful') : t('educai', '✗ {error}', { error: visionTestResult.error }) }}
 				</span>
 			</div>
 
 			<div class="section-divider" role="presentation" />
 
 			<div class="section-heading">
-				<h4>Speech To Text</h4>
+				<h4>{{ t('educai', 'Speech To Text') }}</h4>
 				<p class="hint">
-					Configure a transcription model for audio and voice-message attachments uploaded in Nextcloud Talk. Bots only get this ability when the built-in audio tool is enabled for that bot.
+					{{ t('educai', 'Configure a transcription model for audio and voice-message attachments uploaded in Nextcloud Talk. Bots only get this ability when the built-in audio tool is enabled for that bot.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="speech-endpoint">Speech API Endpoint</label>
+				<label for="speech-endpoint">{{ t('educai', 'Speech API Endpoint') }}</label>
 				<input
 					id="speech-endpoint"
 					v-model="settings.speechApiEndpoint"
@@ -827,12 +823,12 @@
 					autocomplete="off"
 					placeholder="https://chat-ai.academiccloud.de/v1/audio/transcriptions">
 				<p class="hint">
-					Optional. Leave blank to derive an OpenAI-compatible transcription endpoint from the main chat endpoint.
+					{{ t('educai', 'Optional. Leave blank to derive an OpenAI-compatible transcription endpoint from the main chat endpoint.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="speech-key">Speech API Key</label>
+				<label for="speech-key">{{ t('educai', 'Speech API Key') }}</label>
 				<input
 					id="speech-key"
 					v-model="settings.speechApiKey"
@@ -841,19 +837,19 @@
 					autocomplete="new-password"
 					placeholder="sk-...">
 				<p class="hint">
-					Optional. Leave blank to reuse the main API key.
+					{{ t('educai', 'Optional. Leave blank to reuse the main API key.') }}
 				</p>
 			</div>
 
 			<div class="form-group">
-				<label for="speech-model">Speech Model</label>
+				<label for="speech-model">{{ t('educai', 'Speech Model') }}</label>
 				<input
 					id="speech-model"
 					v-model="settings.speechModel"
 					type="text"
 					placeholder="whisper-large-v3">
 				<p class="hint">
-					Set the transcription model identifier, for example a Whisper-compatible model.
+					{{ t('educai', 'Set the transcription model identifier, for example a Whisper-compatible model.') }}
 				</p>
 			</div>
 
@@ -863,10 +859,10 @@
 					class="button"
 					:disabled="speechTesting"
 					@click="testSpeechConnection">
-					{{ speechTesting ? 'Testing…' : 'Test Speech' }}
+					{{ speechTesting ? t('educai', 'Testing…') : t('educai', 'Test Speech') }}
 				</button>
 				<span v-if="speechTestResult" :class="speechTestResult.success ? 'success-text' : 'error-text'">
-					{{ speechTestResult.success ? '✓ Speech connection successful' : ('✗ ' + speechTestResult.error) }}
+					{{ speechTestResult.success ? t('educai', '✓ Speech connection successful') : t('educai', '✗ {error}', { error: speechTestResult.error }) }}
 				</span>
 			</div>
 				</div>
@@ -880,8 +876,8 @@
 					:aria-controls="sectionId('limits')"
 					@click="toggleSection('limits')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Rate Limits</span>
-						<span class="accordion-description">LLM queue limits, live counters, and queue processing.</span>
+						<span class="accordion-title">{{ t('educai', 'Rate Limits') }}</span>
+						<span class="accordion-description">{{ t('educai', 'LLM queue limits, live counters, and queue processing.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ rateLimitSummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -891,10 +887,9 @@
 					:id="sectionId('limits')"
 					class="accordion-panel">
 					<div class="section-heading">
-						<h4>LLM Rate Limiting Queue</h4>
+						<h4>{{ t('educai', 'LLM Rate Limiting Queue') }}</h4>
 						<p class="hint">
-							When enabled, requests that exceed the LLM provider's rate limit will be queued and processed automatically via background jobs.
-							Configure limits based on your provider's quota. For GWDG, use 30/minute, 200/hour, and 1000/day. Leave per-second empty if your provider does not expose a second-level window.
+							{{ t('educai', 'When enabled, requests that exceed the LLM provider\'s rate limit will be queued and processed automatically via background jobs. Configure limits based on your provider\'s quota. For GWDG, use 30/minute, 200/hour, and 1000/day. Leave per-second empty if your provider does not expose a second-level window.') }}
 						</p>
 					</div>
 
@@ -903,28 +898,28 @@
 					<input
 						v-model="settings.rateLimitEnabled"
 						type="checkbox">
-					Enable Rate Limit Queue
+					{{ t('educai', 'Enable Rate Limit Queue') }}
 				</label>
 				<p class="hint">
-					When enabled, requests exceeding rate limits will be queued instead of failing. A background job will process queued requests as capacity becomes available.
+					{{ t('educai', 'When enabled, requests exceeding rate limits will be queued instead of failing. A background job will process queued requests as capacity becomes available.') }}
 				</p>
 			</div>
 
 			<div v-if="settings.rateLimitEnabled" class="form-grid">
 				<div class="form-group">
-					<label for="rate-limit-second">Requests per Second</label>
+					<label for="rate-limit-second">{{ t('educai', 'Requests per Second') }}</label>
 					<input
 						id="rate-limit-second"
 						v-model.number="settings.rateLimitSecond"
 						type="number"
 						min="1"
-						placeholder="Optional">
+						:placeholder="t('educai', 'Optional')">
 					<p class="hint">
-						Optional. Leave blank for providers like GWDG that only expose minute/hour/day headers.
+						{{ t('educai', 'Optional. Leave blank for providers like GWDG that only expose minute/hour/day headers.') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="rate-limit-minute">Requests per Minute</label>
+					<label for="rate-limit-minute">{{ t('educai', 'Requests per Minute') }}</label>
 					<input
 						id="rate-limit-minute"
 						v-model.number="settings.rateLimitMinute"
@@ -932,11 +927,11 @@
 						min="1"
 						placeholder="30">
 					<p class="hint">
-						Maximum requests per minute (GWDG default: 30)
+						{{ t('educai', 'Maximum requests per minute (GWDG default: 30)') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="rate-limit-hour">Requests per Hour</label>
+					<label for="rate-limit-hour">{{ t('educai', 'Requests per Hour') }}</label>
 					<input
 						id="rate-limit-hour"
 						v-model.number="settings.rateLimitHour"
@@ -944,11 +939,11 @@
 						min="1"
 						placeholder="200">
 					<p class="hint">
-						Maximum requests per hour (GWDG default: 200)
+						{{ t('educai', 'Maximum requests per hour (GWDG default: 200)') }}
 					</p>
 				</div>
 				<div class="form-group">
-					<label for="rate-limit-day">Requests per Day</label>
+					<label for="rate-limit-day">{{ t('educai', 'Requests per Day') }}</label>
 					<input
 						id="rate-limit-day"
 						v-model.number="settings.rateLimitDay"
@@ -956,20 +951,20 @@
 						min="1"
 						placeholder="1000">
 					<p class="hint">
-						Maximum requests per day (GWDG default: 1000)
+						{{ t('educai', 'Maximum requests per day (GWDG default: 1000)') }}
 					</p>
 				</div>
 			</div>
 
 			<div v-if="settings.rateLimitEnabled" class="form-group">
-				<label for="rate-limit-queue-message">Queue Message</label>
+				<label for="rate-limit-queue-message">{{ t('educai', 'Queue Message') }}</label>
 				<textarea
 					id="rate-limit-queue-message"
 					v-model="settings.rateLimitQueueMessage"
 					rows="4"
-					placeholder="⏳ Your request has been queued. Position: {position}, estimated wait: ~{wait} seconds." />
+					:placeholder="t('educai', '⏳ Your request has been queued. Position: {position}, estimated wait: ~{wait} seconds.', { position: '{position}', wait: '{wait}' })" />
 				<p class="hint">
-					Message shown to users when their request is queued. Use <code>{position}</code> for queue position and <code>{wait}</code> for estimated wait time in seconds. Leave empty for default message.
+					{{ t('educai', 'Message shown to users when their request is queued. Use {position} for queue position and {wait} for estimated wait time in seconds. Leave empty for the default message.', { position: '{position}', wait: '{wait}' }) }}
 				</p>
 			</div>
 
@@ -980,95 +975,95 @@
 						class="button"
 						:disabled="rateLimitLoading"
 						@click="loadRateLimitStatus">
-						{{ rateLimitLoading ? 'Loading…' : 'Refresh Status' }}
+						{{ rateLimitLoading ? t('educai', 'Loading…') : t('educai', 'Refresh Status') }}
 					</button>
 					<button
 						type="button"
 						class="button primary"
 						:disabled="queueProcessing || !chatQueueStats.pending"
 						@click="processQueueNow">
-						{{ queueProcessing ? 'Processing…' : 'Process Queue Now' }}
+						{{ queueProcessing ? t('educai', 'Processing…') : t('educai', 'Process Queue Now') }}
 					</button>
 				</div>
 				<div v-if="rateLimitStatus" class="status-grid">
 					<div class="status-card">
-						<div class="status-value">{{ chatQueueStats.pending }}</div>
-						<div class="status-label">Queued</div>
+						<div class="status-value">{{ formatNumber(chatQueueStats.pending) }}</div>
+						<div class="status-label">{{ t('educai', 'Queued') }}</div>
 					</div>
 					<div class="status-card">
-						<div class="status-value">{{ chatQueueStats.processing }}</div>
-						<div class="status-label">Processing</div>
+						<div class="status-value">{{ formatNumber(chatQueueStats.processing) }}</div>
+						<div class="status-label">{{ t('educai', 'Processing') }}</div>
 					</div>
 				</div>
 				<p v-if="rateLimitStatus" class="hint rate-limit-hint">
-					Chat requests and embeddings are tracked separately. The cards below show the last observed provider headers per endpoint.
+					{{ t('educai', 'Chat requests and embeddings are tracked separately. The cards below show the last observed provider headers per endpoint.') }}
 				</p>
 				<div v-if="rateLimitStatus" class="rate-limit-subsection">
 					<div class="rate-limit-subsection__header">
-						<h5>Chat / Queue</h5>
-						<p class="hint">Used for bot replies and queued requests.</p>
+						<h5>{{ t('educai', 'Chat / Queue') }}</h5>
+						<p class="hint">{{ t('educai', 'Used for bot replies and queued requests.') }}</p>
 					</div>
 					<div class="status-grid status-grid--compact">
 						<div class="status-card" :class="chatCanProcess ? 'status-ok' : 'status-limited'">
 							<div class="status-value">{{ chatCanProcess ? '✓' : '⏳' }}</div>
-							<div class="status-label">{{ chatCanProcess ? 'Available' : 'Rate Limited' }}</div>
+							<div class="status-label">{{ chatCanProcess ? t('educai', 'Available') : t('educai', 'Rate Limited') }}</div>
 						</div>
 						<div v-if="chatRateLimitState?.limit_minute" class="status-card">
-							<div class="status-value">{{ chatRateLimitState.remaining_minute }}/{{ chatRateLimitState.limit_minute }}</div>
-							<div class="status-label">Per Minute</div>
+							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_minute) }}/{{ formatNumber(chatRateLimitState.limit_minute) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Minute') }}</div>
 						</div>
 						<div v-if="chatRateLimitState?.limit_second" class="status-card">
-							<div class="status-value">{{ chatRateLimitState.remaining_second }}/{{ chatRateLimitState.limit_second }}</div>
-							<div class="status-label">Per Second</div>
+							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_second) }}/{{ formatNumber(chatRateLimitState.limit_second) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Second') }}</div>
 						</div>
 						<div v-if="chatRateLimitState?.limit_hour" class="status-card">
-							<div class="status-value">{{ chatRateLimitState.remaining_hour }}/{{ chatRateLimitState.limit_hour }}</div>
-							<div class="status-label">Per Hour</div>
+							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_hour) }}/{{ formatNumber(chatRateLimitState.limit_hour) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Hour') }}</div>
 						</div>
 						<div v-if="chatRateLimitState?.limit_day" class="status-card">
-							<div class="status-value">{{ chatRateLimitState.remaining_day }}/{{ chatRateLimitState.limit_day }}</div>
-							<div class="status-label">Per Day</div>
+							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_day) }}/{{ formatNumber(chatRateLimitState.limit_day) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Day') }}</div>
 						</div>
 					</div>
 				</div>
 				<div v-if="rateLimitStatus" class="rate-limit-subsection">
 					<div class="rate-limit-subsection__header">
-						<h5>Embeddings</h5>
-						<p class="hint">Embeddings are tracked independently from the chat queue.</p>
+						<h5>{{ t('educai', 'Embeddings') }}</h5>
+						<p class="hint">{{ t('educai', 'Embeddings are tracked independently from the chat queue.') }}</p>
 					</div>
 					<p v-if="embeddingRateLimitModeStatus === 'disabled'" class="hint">
-						Embedding rate limiting is disabled. Requests go straight to the configured embedding endpoint.
+						{{ t('educai', 'Embedding rate limiting is disabled. Requests go straight to the configured embedding endpoint.') }}
 					</p>
 					<p v-else-if="embeddingStatusSource === 'configured'" class="hint">
 						{{ embeddingConfiguredHint }}
 					</p>
 					<p v-else-if="embeddingStatusSource === 'observed'" class="hint">
-						Showing the last observed embedding endpoint headers.
+						{{ t('educai', 'Showing the last observed embedding endpoint headers.') }}
 					</p>
 					<div v-if="embeddingRateLimitModeStatus !== 'disabled' && embeddingRateLimitState" class="status-grid status-grid--compact">
 						<div class="status-card" :class="embeddingCanProcess ? 'status-ok' : 'status-limited'">
 							<div class="status-value">{{ embeddingCanProcess ? '✓' : '⏳' }}</div>
-							<div class="status-label">{{ embeddingCanProcess ? 'Available' : 'Rate Limited' }}</div>
+							<div class="status-label">{{ embeddingCanProcess ? t('educai', 'Available') : t('educai', 'Rate Limited') }}</div>
 						</div>
 						<div v-if="embeddingRateLimitState.limit_minute" class="status-card">
-							<div class="status-value">{{ embeddingRateLimitState.remaining_minute }}/{{ embeddingRateLimitState.limit_minute }}</div>
-							<div class="status-label">Per Minute</div>
+							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_minute) }}/{{ formatNumber(embeddingRateLimitState.limit_minute) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Minute') }}</div>
 						</div>
 						<div v-if="embeddingRateLimitState.limit_second" class="status-card">
-							<div class="status-value">{{ embeddingRateLimitState.remaining_second }}/{{ embeddingRateLimitState.limit_second }}</div>
-							<div class="status-label">Per Second</div>
+							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_second) }}/{{ formatNumber(embeddingRateLimitState.limit_second) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Second') }}</div>
 						</div>
 						<div v-if="embeddingRateLimitState.limit_hour" class="status-card">
-							<div class="status-value">{{ embeddingRateLimitState.remaining_hour }}/{{ embeddingRateLimitState.limit_hour }}</div>
-							<div class="status-label">Per Hour</div>
+							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_hour) }}/{{ formatNumber(embeddingRateLimitState.limit_hour) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Hour') }}</div>
 						</div>
 						<div v-if="embeddingRateLimitState.limit_day" class="status-card">
-							<div class="status-value">{{ embeddingRateLimitState.remaining_day }}/{{ embeddingRateLimitState.limit_day }}</div>
-							<div class="status-label">Per Day</div>
+							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_day) }}/{{ formatNumber(embeddingRateLimitState.limit_day) }}</div>
+							<div class="status-label">{{ t('educai', 'Per Day') }}</div>
 						</div>
 					</div>
 					<p v-else-if="embeddingRateLimitModeStatus !== 'disabled'" class="hint">
-						No embedding rate-limit headers observed yet.
+						{{ t('educai', 'No embedding rate-limit headers observed yet.') }}
 					</p>
 				</div>
 			</div>
@@ -1083,8 +1078,8 @@
 					:aria-controls="sectionId('memory')"
 					@click="toggleSection('memory')">
 					<span class="accordion-heading">
-						<span class="accordion-title">Conversation Memory</span>
-						<span class="accordion-description">Context history budget for bot replies.</span>
+						<span class="accordion-title">{{ t('educai', 'Conversation Memory') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Context history budget for bot replies.') }}</span>
 					</span>
 					<span class="accordion-meta">{{ memorySummary }}</span>
 					<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -1094,15 +1089,14 @@
 					:id="sectionId('memory')"
 					class="accordion-panel">
 					<div class="section-heading">
-						<h4>Conversation Memory</h4>
+						<h4>{{ t('educai', 'Conversation Memory') }}</h4>
 						<p class="hint">
-							Configure how much conversation history is sent to the LLM for context.
-							Using token-based limits prevents context window overflow with large messages.
+							{{ t('educai', 'Configure how much conversation history is sent to the LLM for context. Using token-based limits prevents context window overflow with large messages.') }}
 						</p>
 					</div>
 
 					<div class="form-group">
-				<label for="conversation-context-tokens">Context Token Limit</label>
+				<label for="conversation-context-tokens">{{ t('educai', 'Context Token Limit') }}</label>
 				<input
 					id="conversation-context-tokens"
 					v-model.number="settings.conversationContextTokens"
@@ -1111,16 +1105,14 @@
 					step="500"
 					placeholder="8000">
 				<p class="hint">
-					Maximum tokens of conversation history to include. Default: 8000 (safe for most models).
-					Higher values provide more context but may exceed model limits. Common limits:
-					Llama 3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: 32K-128K.
+					{{ t('educai', 'Maximum tokens of conversation history to include. Default: 8000 (safe for most models). Higher values provide more context but may exceed model limits. Common limits: Llama 3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: 32K-128K.') }}
 				</p>
 			</div>
 				</div>
 			</section>
 
 			<button type="submit" class="button primary" :disabled="saving">
-				{{ saving ? 'Saving...' : 'Save Settings' }}
+				{{ saving ? t('educai', 'Saving...') : t('educai', 'Save Settings') }}
 			</button>
 		</form>
 
@@ -1132,8 +1124,8 @@
 				:aria-controls="sectionId('tools')"
 				@click="toggleSection('tools')">
 				<span class="accordion-heading">
-					<span class="accordion-title">Agent Tools</span>
-					<span class="accordion-description">Model Context Protocol tool registry.</span>
+					<span class="accordion-title">{{ t('educai', 'Agent Tools') }}</span>
+					<span class="accordion-description">{{ t('educai', 'Model Context Protocol tool registry.') }}</span>
 				</span>
 				<span class="accordion-meta">{{ toolsSummary }}</span>
 				<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -1143,23 +1135,23 @@
 				:id="sectionId('tools')"
 				class="accordion-panel">
 				<div class="section-heading">
-					<h4>Agent Tool Registry</h4>
+					<h4>{{ t('educai', 'Agent Tool Registry') }}</h4>
 				<button
 					type="button"
 					class="button primary"
 					@click="openCreateTool">
-					Register Tool
+					{{ t('educai', 'Register Tool') }}
 				</button>
 			</div>
 			<p class="hint section-body">
-				Register Model Context Protocol endpoints. Enabled tools become available for bot creators to attach to their assistants.
+				{{ t('educai', 'Register Model Context Protocol endpoints. Enabled tools become available for bot creators to attach to their assistants.') }}
 			</p>
 			<div v-if="loadingTools" class="hint section-body">
-				Loading tools…
+				{{ t('educai', 'Loading tools…') }}
 			</div>
 			<template v-else>
 				<div v-if="tools.length === 0" class="hint section-body">
-					No tools registered yet.
+					{{ t('educai', 'No tools registered yet.') }}
 				</div>
 				<div v-else class="tool-list section-body">
 					<div
@@ -1171,14 +1163,14 @@
 							<div class="tool-name">
 								<span class="tool-name__label">{{ tool.name }}</span>
 								<span class="badge" :class="tool.enabled ? 'badge-success' : 'badge-muted'">
-									{{ tool.enabled ? 'Enabled' : 'Disabled' }}
+								{{ tool.enabled ? t('educai', 'Enabled') : t('educai', 'Disabled') }}
 								</span>
 							</div>
 							<p v-if="tool.description" class="hint">
 								{{ tool.description }}
 							</p>
 							<p class="hint">
-								Endpoint: <code>{{ tool.mcp_endpoint_url }}</code>
+								{{ t('educai', 'Endpoint:') }} <code>{{ tool.mcp_endpoint_url }}</code>
 							</p>
 						</div>
 						<div class="tool-actions">
@@ -1187,21 +1179,21 @@
 								class="button"
 								:disabled="toolSaving"
 								@click="toggleToolEnabled(tool)">
-								{{ tool.enabled ? 'Disable' : 'Enable' }}
+								{{ tool.enabled ? t('educai', 'Disable') : t('educai', 'Enable') }}
 							</button>
 							<button
 								type="button"
 								class="button"
 								:disabled="toolSaving"
 								@click="editTool(tool)">
-								Edit
+								{{ t('educai', 'Edit') }}
 							</button>
 							<button
 								type="button"
 								class="button danger"
 								:disabled="toolSaving"
 								@click="deleteTool(tool)">
-								Delete
+								{{ t('educai', 'Delete') }}
 							</button>
 						</div>
 					</div>
@@ -1209,10 +1201,10 @@
 			</template>
 
 			<div v-if="toolFormVisible" class="tool-form">
-				<h4>{{ toolForm.id ? 'Edit Tool' : 'Register Tool' }}</h4>
+				<h4>{{ toolForm.id ? t('educai', 'Edit Tool') : t('educai', 'Register Tool') }}</h4>
 				<form @submit.prevent="saveTool">
 					<div class="form-group">
-						<label for="tool-name">Tool Name</label>
+						<label for="tool-name">{{ t('educai', 'Tool Name') }}</label>
 						<input
 							id="tool-name"
 							v-model="toolForm.name"
@@ -1220,7 +1212,7 @@
 							required>
 					</div>
 					<div class="form-group">
-						<label for="tool-endpoint">MCP Endpoint URL</label>
+						<label for="tool-endpoint">{{ t('educai', 'MCP Endpoint URL') }}</label>
 						<input
 							id="tool-endpoint"
 							v-model="toolForm.mcpEndpointUrl"
@@ -1229,26 +1221,28 @@
 							autocomplete="off"
 							required>
 						<p class="hint">
-							HTTP or WebSocket URL exposing the MCP server.
+							{{ t('educai', 'HTTP or WebSocket URL exposing the MCP server.') }}
 						</p>
 					</div>
 					<div class="form-group">
-						<label for="tool-description">Description</label>
+						<label for="tool-description">{{ t('educai', 'Description') }}</label>
 						<textarea
 							id="tool-description"
 							v-model="toolForm.description"
 							rows="3"
-							placeholder="Short human-readable summary" />
+							:placeholder="t('educai', 'Short human-readable summary')" />
 					</div>
 					<div class="form-group">
-						<label for="tool-auth">Authentication JSON</label>
+						<label for="tool-auth">{{ t('educai', 'Authentication JSON') }}</label>
 						<textarea
 							id="tool-auth"
 							v-model="toolForm.authentication"
 							rows="4"
 							placeholder="{&quot;headers&quot;:{&quot;Authorization&quot;:&quot;Bearer &lt;token&gt;&quot;}}" />
 						<p class="hint">
-							Provide JSON describing auth headers or tokens. {{ toolHasStoredAuth ? 'Stored credentials are kept unless you enter new values (re-enter to test or rotate).' : 'Leave blank when no authentication is required.' }}
+							{{ toolHasStoredAuth
+								? t('educai', 'Provide JSON describing auth headers or tokens. Stored credentials are kept unless you enter new values (re-enter to test or rotate).')
+								: t('educai', 'Provide JSON describing auth headers or tokens. Leave blank when no authentication is required.') }}
 						</p>
 					</div>
 					<div class="form-group">
@@ -1256,7 +1250,7 @@
 							<input
 								v-model="toolForm.enabled"
 								type="checkbox">
-							Enabled by default
+							{{ t('educai', 'Enabled by default') }}
 						</label>
 					</div>
 					<div class="button-row">
@@ -1264,21 +1258,21 @@
 							type="submit"
 							class="button primary"
 							:disabled="toolSaving">
-							{{ toolForm.id ? 'Save Changes' : 'Create Tool' }}
+							{{ toolForm.id ? t('educai', 'Save Changes') : t('educai', 'Create Tool') }}
 						</button>
 						<button
 							type="button"
 							class="button"
 							:disabled="toolSaving"
 							@click="closeToolForm">
-							Cancel
+							{{ t('educai', 'Cancel') }}
 						</button>
 						<button
 							type="button"
 							class="button"
 							:disabled="toolTesting"
 							@click="testToolConnection">
-							{{ toolTesting ? 'Testing…' : 'Test Connection' }}
+							{{ toolTesting ? t('educai', 'Testing…') : t('educai', 'Test Connection') }}
 						</button>
 					</div>
 				</form>
@@ -1297,8 +1291,8 @@
 				:aria-controls="sectionId('bots')"
 				@click="toggleSection('bots')">
 				<span class="accordion-heading">
-					<span class="accordion-title">All Bots</span>
-					<span class="accordion-description">Admin overview and direct bot maintenance.</span>
+					<span class="accordion-title">{{ t('educai', 'All Bots') }}</span>
+					<span class="accordion-description">{{ t('educai', 'Admin overview and direct bot maintenance.') }}</span>
 				</span>
 				<span class="accordion-meta">{{ botsSummary }}</span>
 				<span class="accordion-chevron" aria-hidden="true">›</span>
@@ -1308,27 +1302,27 @@
 				:id="sectionId('bots')"
 				class="accordion-panel">
 				<div class="section-heading">
-					<h4>All Bots</h4>
+					<h4>{{ t('educai', 'All Bots') }}</h4>
 				<div class="actions">
 					<button
 						type="button"
 						class="button"
 						:disabled="loadingAllBots"
 						@click="loadAllBots">
-						{{ loadingAllBots ? 'Loading…' : 'Refresh' }}
+						{{ loadingAllBots ? t('educai', 'Loading…') : t('educai', 'Refresh') }}
 					</button>
 				</div>
 			</div>
-			<div v-if="loadingAllBots" class="hint">Loading bots…</div>
-			<div v-else-if="allBots.length === 0" class="hint">No bots found.</div>
+			<div v-if="loadingAllBots" class="hint">{{ t('educai', 'Loading bots…') }}</div>
+			<div v-else-if="allBots.length === 0" class="hint">{{ t('educai', 'No bots found.') }}</div>
 			<div v-else class="bot-table">
 				<div class="bot-row bot-row--header">
-					<span>Name</span>
-					<span>Mention</span>
-					<span>Owner</span>
-					<span>Visibility</span>
-					<span>Status</span>
-					<span class="actions-col">Actions</span>
+					<span>{{ t('educai', 'Name') }}</span>
+					<span>{{ t('educai', 'Mention') }}</span>
+					<span>{{ t('educai', 'Owner') }}</span>
+					<span>{{ t('educai', 'Visibility') }}</span>
+					<span>{{ t('educai', 'Status') }}</span>
+					<span class="actions-col">{{ t('educai', 'Actions') }}</span>
 				</div>
 				<div v-for="bot in allBots" :key="bot.id" class="bot-row">
 					<span>{{ bot.bot_name }}</span>
@@ -1336,11 +1330,11 @@
 					<span>{{ bot.user_id }}</span>
 					<span>{{ formatVisibility(bot.visibility) }}</span>
 					<span class="status-pill" :class="`status-${bot.approval_status || 'approved'}`">
-						{{ bot.approval_status || 'approved' }}
+						{{ formatApprovalStatus(bot.approval_status) }}
 					</span>
 					<span class="actions-col">
-						<button type="button" class="button" @click="editBotAdmin(bot)">Edit</button>
-						<button type="button" class="button danger" @click="deleteBotAdmin(bot)">Delete</button>
+						<button type="button" class="button" @click="editBotAdmin(bot)">{{ t('educai', 'Edit') }}</button>
+						<button type="button" class="button danger" @click="deleteBotAdmin(bot)">{{ t('educai', 'Delete') }}</button>
 					</span>
 				</div>
 			</div>
@@ -1361,6 +1355,8 @@ import axios from '@nextcloud/axios'
 import { APP_DISPLAY_NAME } from '../branding.js'
 import { generateUrl, imagePath } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
+import { t, n, getCanonicalLocale } from '../l10n.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 import BotForm from './BotForm.vue'
 import { applyEducAiRuntimeIconPayload } from '../utils/appIconRuntime.js'
 
@@ -1496,9 +1492,9 @@ export default {
 	computed: {
 		appIconSummary() {
 			if (this.settings.appIconMode === 'custom') {
-				return 'Custom'
+				return t('educai', 'Custom')
 			}
-			return 'Default'
+			return t('educai', 'Default')
 		},
 		appIconBlackPreviewUrl() {
 			return this.resolveAppIconPreviewUrl('black')
@@ -1546,9 +1542,9 @@ export default {
 		},
 		embeddingConfiguredHint() {
 			if (this.embeddingRateLimitModeStatus === 'custom') {
-				return 'Using the configured custom embedding limits until the provider returns dedicated headers.'
+				return t('educai', 'Using the configured custom embedding limits until the provider returns dedicated headers.')
 			}
-			return 'Using inherited chat limits until the embedding endpoint returns its own rate-limit headers.'
+			return t('educai', 'Using inherited chat limits until the embedding endpoint returns its own rate-limit headers.')
 		},
 		embeddingCanProcess() {
 			if (typeof this.rateLimitStatus?.embedding_status?.can_process === 'boolean') {
@@ -1558,25 +1554,30 @@ export default {
 		},
 		doclingKeyHint() {
 			if (this.doclingHasStoredApiKey) {
-				return 'A stored Docling key is configured and kept unless you enter a new value.'
+				return t('educai', 'A stored Docling key is configured and kept unless you enter a new value.')
 			}
-			return 'Leave blank to reuse the main API key.'
+			return t('educai', 'Leave blank to reuse the main API key.')
 		},
 		essentialsSummary() {
-			return `Temp ${this.formatTemperature(this.settings.defaultTemperature)}`
+			return t('educai', 'Temp {temperature}', { temperature: this.formatTemperature(this.settings.defaultTemperature) })
 		},
 		modelEndpointsSummary() {
 			if (this.settings.allowMultipleModels) {
-				return `${this.settings.allowedModels.length} allowed model(s)`
+				const count = this.settings.allowedModels.length
+				return n('educai', '{count} allowed model', '{count} allowed models', count, { count: this.formatNumber(count) })
 			}
 			if ((this.settings.secondaryApiEndpoint || '').trim() !== '') {
-				return 'Primary + Secondary'
+				return t('educai', 'Primary + Secondary')
 			}
-			return this.formatModelLabel(this.settings.defaultModel) || 'Primary only'
+			return this.formatModelLabel(this.settings.defaultModel) || t('educai', 'Primary only')
 		},
 		fallbackTimeoutSummary() {
 			const fallback = this.formatModelLabel(this.settings.fallbackModel)
-			return fallback || `${this.settings.llmChatTimeout || 90}/${this.settings.llmStreamTimeout || 240}/${this.settings.llmModelsTimeout || 20}s`
+			return fallback || t('educai', '{chat} / {stream} / {models} seconds', {
+				chat: this.formatNumber(this.settings.llmChatTimeout || 90),
+				stream: this.formatNumber(this.settings.llmStreamTimeout || 240),
+				models: this.formatNumber(this.settings.llmModelsTimeout || 20),
+			})
 		},
 		modelOptionMap() {
 			return this.availableModelOptions.reduce((map, option) => {
@@ -1586,43 +1587,47 @@ export default {
 		},
 		ragSummary() {
 			if (this.hasPendingEmbeddingConfigChange) {
-				return 'Changed - reindex needed'
+				return t('educai', 'Changed - reindex needed')
 			}
-			return this.settings.ragEnabled ? (this.settings.embeddingModel || 'Enabled') : 'Disabled'
+			return this.settings.ragEnabled ? (this.settings.embeddingModel || t('educai', 'Enabled')) : t('educai', 'Disabled')
 		},
 		doclingSummary() {
-			return this.settings.doclingEnabled ? 'Enabled' : 'Disabled'
+			return this.settings.doclingEnabled ? t('educai', 'Enabled') : t('educai', 'Disabled')
 		},
 		mediaSummary() {
 			const enabled = []
 			if (this.settings.visionModel) {
-				enabled.push('Vision')
+				enabled.push(t('educai', 'Vision'))
 			}
 			if (this.settings.speechModel) {
-				enabled.push('Speech')
+				enabled.push(t('educai', 'Speech'))
 			}
-			return enabled.length ? enabled.join(' + ') : 'No models'
+			return enabled.length ? enabled.join(' + ') : t('educai', 'No models')
 		},
 		rateLimitSummary() {
 			if (!this.settings.rateLimitEnabled) {
-				return 'Disabled'
+				return t('educai', 'Disabled')
 			}
-			return `${this.chatQueueStats.pending} queued`
+			const count = this.chatQueueStats.pending
+			return n('educai', '{count} queued request', '{count} queued requests', count, { count: this.formatNumber(count) })
 		},
 		memorySummary() {
-			return `${this.settings.conversationContextTokens || 8000} tokens`
+			const count = this.settings.conversationContextTokens || 8000
+			return n('educai', '{count} token', '{count} tokens', count, { count: this.formatNumber(count) })
 		},
 		toolsSummary() {
 			if (this.loadingTools) {
-				return 'Loading'
+				return t('educai', 'Loading')
 			}
-			return `${this.tools.length} registered`
+			const count = this.tools.length
+			return n('educai', '{count} registered tool', '{count} registered tools', count, { count: this.formatNumber(count) })
 		},
 		botsSummary() {
 			if (this.loadingAllBots) {
-				return 'Loading'
+				return t('educai', 'Loading')
 			}
-			return `${this.allBots.length} bot(s)`
+			const count = this.allBots.length
+			return n('educai', '{count} bot', '{count} bots', count, { count: this.formatNumber(count) })
 		},
 	},
 	mounted() {
@@ -1631,6 +1636,8 @@ export default {
 		this.loadAllBots()
 	},
 	methods: {
+		t,
+		n,
 		isSectionOpen(key) {
 			return !!this.openSections[key]
 		},
@@ -1708,7 +1715,7 @@ export default {
 			}
 
 			if (!this.isLocalSvgUpload(file)) {
-				showError('Please upload an SVG file up to 1 MB')
+				showError(t('educai', 'Please upload an SVG file up to 1 MB'))
 				input.value = ''
 				return
 			}
@@ -1728,10 +1735,10 @@ export default {
 					this.settings.appIconBlackUrl = value
 				}
 				this.appIconPreviewVersion[variant] = Date.now()
-				showSuccess('App icon SVG uploaded')
+				showSuccess(t('educai', 'App icon SVG uploaded'))
 			} catch (error) {
 				console.error('Failed to upload app icon SVG:', error)
-				showError(error?.response?.data?.error || 'Failed to upload app icon SVG')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to upload app icon SVG')))
 			} finally {
 				this.uploadingAppIconVariant = ''
 				input.value = ''
@@ -1798,17 +1805,17 @@ export default {
 
 			const blackUrl = this.normalizeAppIconUrl(this.settings.appIconBlackUrl)
 			if (blackUrl === null) {
-				showError('Black app icon must be an http(s) URL, an absolute Nextcloud path, or an uploaded SVG')
+				showError(t('educai', 'Black app icon must be an http(s) URL, an absolute Nextcloud path, or an uploaded SVG'))
 				return null
 			}
 			const whiteUrl = this.normalizeAppIconUrl(this.settings.appIconWhiteUrl)
 			if (whiteUrl === null) {
-				showError('White app icon must be an http(s) URL, an absolute Nextcloud path, or an uploaded SVG')
+				showError(t('educai', 'White app icon must be an http(s) URL, an absolute Nextcloud path, or an uploaded SVG'))
 				return null
 			}
 
 			if (!blackUrl || !whiteUrl) {
-				showError('Custom app icon mode requires both black and white icons')
+				showError(t('educai', 'Custom app icon mode requires both black and white icons'))
 				return null
 			}
 
@@ -1821,7 +1828,13 @@ export default {
 		},
 		formatTemperature(value) {
 			const temperature = this.normalizeTemperatureValue(value)
-			return temperature === null ? '0.20' : temperature.toFixed(2)
+			return new Intl.NumberFormat(getCanonicalLocale(), {
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			}).format(temperature === null ? 0.2 : temperature)
+		},
+		formatNumber(value) {
+			return new Intl.NumberFormat(getCanonicalLocale()).format(value)
 		},
 		toEndpointModelId(model) {
 			const value = (model || '').trim()
@@ -1835,7 +1848,16 @@ export default {
 			if (id === '') {
 				return ''
 			}
-			return this.modelOptionMap[id]?.label || id.replace(/^primary:/, 'Primary · ').replace(/^secondary:/, 'Secondary · ')
+			if (this.modelOptionMap[id]?.label) {
+				return this.modelOptionMap[id].label
+			}
+			if (id.startsWith('primary:')) {
+				return t('educai', 'Primary · {model}', { model: id.slice('primary:'.length) })
+			}
+			if (id.startsWith('secondary:')) {
+				return t('educai', 'Secondary · {model}', { model: id.slice('secondary:'.length) })
+			}
+			return id
 		},
 		normalizeModelOptions(rawOptions, rawModels) {
 			if (Array.isArray(rawOptions) && rawOptions.length > 0) {
@@ -1987,7 +2009,7 @@ export default {
 				}
 			} catch (e) {
 				console.error('Failed to load models', e)
-				this.modelLoadError = 'Failed to load models from provider. Check API key and endpoint.'
+				this.modelLoadError = getApiErrorMessage(e, t('educai', 'Failed to load models from provider. Check API key and endpoint.'))
 			} finally {
 				this.loadingModels = false
 			}
@@ -1997,7 +2019,7 @@ export default {
 			try {
 				const defaultTemperature = this.normalizeTemperatureValue(this.settings.defaultTemperature)
 				if (defaultTemperature === null) {
-					showError('Default temperature must be between 0.0 and 1.0')
+					showError(t('educai', 'Default temperature must be between 0.0 and 1.0'))
 					return
 				}
 				const appIconPayload = this.buildAppIconPayload()
@@ -2060,9 +2082,7 @@ export default {
 				const embeddingConfigChanged = this.hasEmbeddingConfigChange(payload)
 				if (embeddingConfigChanged) {
 					const proceed = confirm(
-						'Embedding configuration changes detected (model/endpoint/key).\n\n'
-						+ 'You must run "Reindex All Embeddings" after saving, otherwise retrieval quality will be degraded.\n\n'
-						+ 'Continue saving settings?',
+						t('educai', 'Embedding configuration changes were detected (model/endpoint/key). You must run "Reindex All Embeddings" after saving, otherwise retrieval quality will be degraded. Continue saving settings?'),
 					)
 					if (!proceed) {
 						this.saving = false
@@ -2076,9 +2096,9 @@ export default {
 				)
 				applyEducAiRuntimeIconPayload(response.data, { refreshNavigation: true })
 				if (embeddingConfigChanged) {
-					showSuccess('Settings saved. Run "Reindex All Embeddings" now to rebuild vectors for the new embedding configuration.')
+					showSuccess(t('educai', 'Settings saved. Run "Reindex All Embeddings" now to rebuild vectors for the new embedding configuration.'))
 				} else {
-					showSuccess('Settings saved successfully')
+					showSuccess(t('educai', 'Settings saved successfully'))
 				}
 				// Keep baseline in sync after successful save
 				const apiKeyUpdated = !!(payload.apiKey && payload.apiKey.trim() !== '')
@@ -2100,7 +2120,7 @@ export default {
 				}
 			} catch (error) {
 				console.error('Failed to save settings:', error)
-				showError('Failed to save settings')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to save settings')))
 			} finally {
 				this.saving = false
 			}
@@ -2141,7 +2161,7 @@ export default {
 				this.tools = Array.isArray(resp.data?.tools) ? resp.data.tools : []
 			} catch (error) {
 				console.error('Failed to load tools', error)
-				showError('Failed to load tools')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to load tools')))
 			} finally {
 				this.loadingTools = false
 			}
@@ -2161,7 +2181,7 @@ export default {
 		},
 		async saveTool() {
 			if (!this.toolForm.name || !this.toolForm.mcpEndpointUrl) {
-				showError('Tool name and endpoint are required')
+				showError(t('educai', 'Tool name and endpoint are required'))
 				return
 			}
 			const authProvided = this.toolForm.authentication && this.toolForm.authentication.trim() !== ''
@@ -2170,7 +2190,7 @@ export default {
 				try {
 					authPayload = JSON.parse(this.toolForm.authentication)
 				} catch (error) {
-					showError('Authentication must be valid JSON')
+					showError(t('educai', 'Authentication must be valid JSON'))
 					return
 				}
 			}
@@ -2192,12 +2212,12 @@ export default {
 				} else {
 					await axios.post(generateUrl('/apps/educai/api/v1/admin/tools'), payload)
 				}
-				showSuccess('Tool saved')
+				showSuccess(t('educai', 'Tool saved'))
 				await this.loadTools()
 				this.closeToolForm()
 			} catch (error) {
 				console.error('Failed to save tool', error)
-				showError('Failed to save tool')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to save tool')))
 			} finally {
 				this.toolSaving = false
 			}
@@ -2206,11 +2226,11 @@ export default {
 			this.toolSaving = true
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/admin/tools/${tool.id}`))
-				showSuccess('Tool deleted')
+				showSuccess(t('educai', 'Tool deleted'))
 				await this.loadTools()
 			} catch (error) {
 				console.error('Failed to delete tool', error)
-				showError('Failed to delete tool')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to delete tool')))
 			} finally {
 				this.toolSaving = false
 			}
@@ -2224,14 +2244,14 @@ export default {
 				await this.loadTools()
 			} catch (error) {
 				console.error('Failed to toggle tool', error)
-				showError('Failed to update tool state')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to update tool state')))
 			} finally {
 				this.toolSaving = false
 			}
 		},
 		async testToolConnection() {
 			if (!this.toolForm.mcpEndpointUrl) {
-				showError('Endpoint URL required to test')
+				showError(t('educai', 'Endpoint URL required to test'))
 				return
 			}
 			const authProvided = this.toolForm.authentication && this.toolForm.authentication.trim() !== ''
@@ -2240,7 +2260,7 @@ export default {
 				try {
 					authPayload = JSON.parse(this.toolForm.authentication)
 				} catch (error) {
-					showError('Authentication must be valid JSON')
+					showError(t('educai', 'Authentication must be valid JSON'))
 					return
 				}
 			}
@@ -2252,10 +2272,10 @@ export default {
 					authentication: authPayload,
 				})
 				this.toolTestResult = JSON.stringify(resp.data?.tools ?? [], null, 2)
-				showSuccess('Tool connection succeeded')
+				showSuccess(t('educai', 'Tool connection succeeded'))
 			} catch (error) {
 				console.error('Tool test failed', error)
-				showError('Failed to test tool connection')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to test tool connection')))
 			} finally {
 				this.toolTesting = false
 			}
@@ -2299,33 +2319,37 @@ export default {
 				if (resp.data?.success) {
 					const catalogueJobs = resp.data?.queued_catalogue_jobs ?? 0
 					const ragSources = resp.data?.queued_rag_sources ?? 0
-					showSuccess(`Queued reindex jobs: catalogue=${catalogueJobs}, bot sources=${ragSources}`)
+					showSuccess(t('educai', 'Queued reindex jobs: catalogue={catalogue}, bot sources={sources}', {
+						catalogue: this.formatNumber(catalogueJobs),
+						sources: this.formatNumber(ragSources),
+					}))
 					this.loadCatalogueStatus()
 				} else {
-					showError(resp.data?.error || 'Failed to queue global embedding reindex')
+					showError(getApiErrorMessage(resp, t('educai', 'Failed to queue global embedding reindex')))
 				}
 			} catch (error) {
 				console.error('Failed to queue global embedding reindex', error)
-				showError(error.response?.data?.error || 'Failed to queue global embedding reindex')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to queue global embedding reindex')))
 			} finally {
 				this.globalEmbeddingReindexing = false
 			}
 		},
 		formatTimestamp(timestamp) {
-			if (!timestamp) return 'Never'
+			if (!timestamp) return t('educai', 'Never')
 			const date = new Date(timestamp * 1000)
 			const now = new Date()
 			const diffMs = now - date
 			const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+			const relativeTime = new Intl.RelativeTimeFormat(getCanonicalLocale(), { numeric: 'auto' })
 			if (diffHours < 1) {
 				const diffMins = Math.floor(diffMs / (1000 * 60))
-				return `${diffMins} min ago`
+				return relativeTime.format(-Math.max(diffMins, 0), 'minute')
 			}
 			if (diffHours < 24) {
-				return `${diffHours}h ago`
+				return relativeTime.format(-diffHours, 'hour')
 			}
 			const diffDays = Math.floor(diffHours / 24)
-			return `${diffDays}d ago`
+			return relativeTime.format(-diffDays, 'day')
 		},
 		async testDoclingConnection() {
 			this.doclingTesting = true
@@ -2339,20 +2363,21 @@ export default {
 				})
 				this.doclingTestResult = {
 					success: resp.data?.success ?? false,
-					error: resp.data?.error ?? null,
+					error: getApiErrorMessage(resp, t('educai', 'Connection test failed')),
 				}
 				if (this.doclingTestResult.success) {
-					showSuccess('Docling connection successful')
+					showSuccess(t('educai', 'Docling connection successful'))
 				} else {
-					showError(this.doclingTestResult.error || 'Connection test failed')
+					showError(this.doclingTestResult.error)
 				}
 			} catch (error) {
 				console.error('Docling test failed', error)
+				const errorMessage = getApiErrorMessage(error, t('educai', 'Failed to test Docling connection'))
 				this.doclingTestResult = {
 					success: false,
-					error: error.response?.data?.error || error.message || 'Connection failed',
+					error: errorMessage,
 				}
-				showError('Failed to test Docling connection')
+				showError(errorMessage)
 			} finally {
 				this.doclingTesting = false
 			}
@@ -2368,20 +2393,21 @@ export default {
 				})
 				this.visionTestResult = {
 					success: resp.data?.success ?? false,
-					error: resp.data?.error ?? null,
+					error: getApiErrorMessage(resp, t('educai', 'Vision connection test failed')),
 				}
 				if (this.visionTestResult.success) {
-					showSuccess('Vision connection successful')
+					showSuccess(t('educai', 'Vision connection successful'))
 				} else {
-					showError(this.visionTestResult.error || 'Vision connection test failed')
+					showError(this.visionTestResult.error)
 				}
 			} catch (error) {
 				console.error('Vision test failed', error)
+				const errorMessage = getApiErrorMessage(error, t('educai', 'Failed to test vision connection'))
 				this.visionTestResult = {
 					success: false,
-					error: error.response?.data?.error || error.message || 'Connection failed',
+					error: errorMessage,
 				}
-				showError('Failed to test vision connection')
+				showError(errorMessage)
 			} finally {
 				this.visionTesting = false
 			}
@@ -2397,20 +2423,21 @@ export default {
 				})
 				this.speechTestResult = {
 					success: resp.data?.success ?? false,
-					error: resp.data?.error ?? null,
+					error: getApiErrorMessage(resp, t('educai', 'Speech connection test failed')),
 				}
 				if (this.speechTestResult.success) {
-					showSuccess('Speech connection successful')
+					showSuccess(t('educai', 'Speech connection successful'))
 				} else {
-					showError(this.speechTestResult.error || 'Speech connection test failed')
+					showError(this.speechTestResult.error)
 				}
 			} catch (error) {
 				console.error('Speech test failed', error)
+				const errorMessage = getApiErrorMessage(error, t('educai', 'Failed to test speech connection'))
 				this.speechTestResult = {
 					success: false,
-					error: error.response?.data?.error || error.message || 'Connection failed',
+					error: errorMessage,
 				}
-				showError('Failed to test speech connection')
+				showError(errorMessage)
 			} finally {
 				this.speechTesting = false
 			}
@@ -2434,15 +2461,24 @@ export default {
 				if (resp.data?.success) {
 					const processed = resp.data.processed || 0
 					const remaining = resp.data.remaining || 0
-					showSuccess(`Processed ${processed} request(s). ${remaining} remaining.`)
+					showSuccess(n(
+						'educai',
+						'Processed {processed} request. {remaining} remaining.',
+						'Processed {processed} requests. {remaining} remaining.',
+						processed,
+						{
+							processed: this.formatNumber(processed),
+							remaining: this.formatNumber(remaining),
+						},
+					))
 					// Refresh status
 					this.loadRateLimitStatus()
 				} else {
-					showError(resp.data?.error || 'Failed to process queue')
+					showError(getApiErrorMessage(resp, t('educai', 'Failed to process queue')))
 				}
 			} catch (error) {
 				console.error('Failed to process queue', error)
-				showError(error.response?.data?.error || 'Failed to process queue')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to process queue')))
 			} finally {
 				this.queueProcessing = false
 			}
@@ -2454,7 +2490,7 @@ export default {
 				this.allBots = Array.isArray(resp.data) ? resp.data : []
 			} catch (error) {
 				console.error('Failed to load all bots', error)
-				showError('Failed to load bots')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to load bots')))
 			} finally {
 				this.loadingAllBots = false
 			}
@@ -2467,46 +2503,58 @@ export default {
 		},
 		async saveBotAdmin(botData) {
 			if (!botData?.id) {
-				showError('Bot id is required')
+				showError(t('educai', 'Bot id is required'))
 				return
 			}
 			try {
 				await axios.put(generateUrl(`/apps/educai/api/v1/admin/bots/${botData.id}`), botData)
-				showSuccess('Bot updated')
+				showSuccess(t('educai', 'Bot updated'))
 				this.adminEditingBot = null
 				this.loadAllBots()
 			} catch (error) {
 				console.error('Failed to update bot as admin', error)
-				showError(error.response?.data?.error || 'Failed to update bot')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to update bot')))
 			}
 		},
 		async deleteBotAdmin(bot) {
 			if (!bot || !bot.id) {
 				return
 			}
-			if (!confirm(`Delete bot "${bot.bot_name}"? This cannot be undone.`)) {
+			if (!confirm(t('educai', 'Delete bot "{name}"? This cannot be undone.', { name: bot.bot_name }))) {
 				return
 			}
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/bots/${bot.id}`))
-				showSuccess('Bot deleted')
+				showSuccess(t('educai', 'Bot deleted'))
 				this.loadAllBots()
 			} catch (error) {
 				console.error('Failed to delete bot as admin', error)
-				showError(error.response?.data?.error || 'Failed to delete bot')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to delete bot')))
 			}
 		},
 		formatVisibility(visibility) {
 			if (visibility === 'global') {
-				return 'Global'
+				return t('educai', 'Global')
 			}
 			if (visibility === 'personal') {
-				return 'Personal'
+				return t('educai', 'Personal')
 			}
 			if (visibility === 'teams') {
-				return 'Teams'
+				return t('educai', 'Teams')
 			}
-			return 'Groups'
+			return t('educai', 'Groups')
+		},
+		formatApprovalStatus(status) {
+			if (status === 'draft') {
+				return t('educai', 'Draft')
+			}
+			if (status === 'pending') {
+				return t('educai', 'Pending approval')
+			}
+			if (status === 'personal') {
+				return t('educai', 'Personal')
+			}
+			return t('educai', 'Approved')
 		},
 	},
 }
@@ -2559,7 +2607,7 @@ export default {
 	grid-template-columns: minmax(0, 1fr) auto auto;
 	align-items: center;
 	gap: 16px;
-	text-align: left;
+	text-align: start;
 	font: inherit;
 }
 
@@ -2627,8 +2675,7 @@ export default {
 
 .settings-body .accordion-header,
 .settings-body .accordion-panel {
-	padding-left: 0;
-	padding-right: 0;
+	padding-inline: 0;
 }
 
 .settings-body .accordion-section {
@@ -2807,6 +2854,7 @@ export default {
 	align-items: center;
 	gap: 8px;
 }
+
 .form-group label.checkbox input[type="checkbox"] {
 	width: 16px;
 	height: 16px;
@@ -2922,12 +2970,6 @@ export default {
 .button.danger {
 	background: var(--color-error);
 	color: #fff;
-}
-
-.button-row {
-	display: flex;
-	gap: 12px;
-	flex-wrap: wrap;
 }
 
 .tool-form {

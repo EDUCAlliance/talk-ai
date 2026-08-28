@@ -2,7 +2,7 @@
 	<div class="modal-mask" @click.self="$emit('cancel')">
 		<div class="modal-container">
 			<div class="modal-header">
-				<h2>{{ isEditing ? 'Edit Bot' : 'Create New Bot' }}</h2>
+				<h2>{{ isEditing ? t('educai', 'Edit bot') : t('educai', 'Create new bot') }}</h2>
 				<button class="close-button" @click="$emit('cancel')">
 					<span class="icon-close" />
 				</button>
@@ -13,10 +13,9 @@
 				<div v-if="hasPendingChanges" class="pending-changes-notice">
 					<span class="icon-info" />
 					<div class="notice-content">
-						<strong>Pending Changes</strong>
+						<strong>{{ t('educai', 'Pending changes') }}</strong>
 						<p>
-							This bot has changes awaiting approval. You are viewing/editing the pending version.
-							The currently approved version remains live until these changes are approved.
+							{{ t('educai', 'This bot has changes awaiting approval. You are viewing or editing the pending version. The currently approved version remains live until these changes are approved.') }}
 						</p>
 					</div>
 				</div>
@@ -24,18 +23,18 @@
 				<form @submit.prevent="submitForm">
 					<!-- Bot Name -->
 					<div class="form-group">
-						<label for="bot-name">Bot Name</label>
+						<label for="bot-name">{{ t('educai', 'Bot name') }}</label>
 						<input
 							id="bot-name"
 							v-model="formData.botName"
 							type="text"
-							placeholder="Support Helper"
+							:placeholder="t('educai', 'Support Helper')"
 							required>
 					</div>
 
 					<!-- Mention Name -->
 					<div class="form-group">
-						<label for="mention-name">Mention Name</label>
+						<label for="mention-name">{{ t('educai', 'Mention name') }}</label>
 						<div class="input-group">
 							<span class="prefix">@</span>
 							<input
@@ -48,73 +47,76 @@
 								required>
 						</div>
 						<p class="hint">
-							Lowercase letters, numbers, hyphens, and underscores only.
-							{{ isEditing ? 'Cannot be changed after creation.' : '' }}
+							{{ t('educai', 'Lowercase letters, numbers, hyphens, and underscores only.') }}
+							{{ isEditing ? t('educai', 'Cannot be changed after creation.') : '' }}
 						</p>
 					</div>
 
 					<!-- Bot Description -->
 					<div class="form-group">
-						<label for="bot-description">Bot Description</label>
+						<label for="bot-description">{{ t('educai', 'Bot description') }}</label>
 						<textarea
 							id="bot-description"
 							v-model="formData.description"
 							rows="3"
-							placeholder="A helpful assistant that answers questions about..." />
+							:placeholder="t('educai', 'A helpful assistant that answers questions about...')" />
 						<p class="hint">
-							This description is shown in the public bot listing to help users understand what this bot does.
+							{{ t('educai', 'This description is shown in the public bot listing to help users understand what this bot does.') }}
 						</p>
 					</div>
 
 					<!-- System Prompt -->
 					<div class="form-group">
-						<label for="system-prompt">System Prompt</label>
+						<label for="system-prompt">{{ t('educai', 'System prompt') }}</label>
 						<textarea
 							id="system-prompt"
 							v-model="formData.systemPrompt"
 							rows="10"
-							placeholder="You are a helpful support assistant. Your role is to..."
+							:placeholder="t('educai', 'You are a helpful support assistant. Your role is to...')"
 							required />
 						<p class="hint">
-							This defines the bot's personality and behavior. Be specific about
-							what the bot should do and how it should respond.
+							{{ t('educai', "This defines the bot's personality and behavior. Be specific about what the bot should do and how it should respond.") }}
 						</p>
 					</div>
 
 					<!-- Availability -->
 					<div class="form-group">
-						<label for="availability-select">Availability</label>
+						<label for="availability-select">{{ t('educai', 'Availability') }}</label>
 						<select
 							id="availability-select"
 							v-model="formData.visibility">
 							<option value="personal">
-								Just for me (personal)
+								{{ t('educai', 'Just for me (personal)') }}
 							</option>
 							<option value="global">
-								Global (requires approval for non-admins)
+								{{ t('educai', 'Global (requires approval for non-admins)') }}
 							</option>
 							<option value="groups">
-								Specific groups {{ requiresApprovalForGroups ? '(requires approval)' : '' }}
+								{{ requiresApprovalForGroups
+									? t('educai', 'Specific groups (requires approval)')
+									: t('educai', 'Specific groups') }}
 							</option>
 							<option value="teams">
-								Specific teams {{ requiresApprovalForTeams ? '(requires approval)' : '' }}
+								{{ requiresApprovalForTeams
+									? t('educai', 'Specific teams (requires approval)')
+									: t('educai', 'Specific teams') }}
 							</option>
 						</select>
 						<p class="hint">
-							Choose who can use this bot. Personal bots are only visible to you.
+							{{ t('educai', 'Choose who can use this bot. Personal bots are only visible to you.') }}
 							<template v-if="userPermissions.isAdmin">
-								Global makes it available to everyone.
+								{{ t('educai', 'Global makes it available to everyone.') }}
 							</template>
-							Groups or teams restrict usage to selected audiences.
+							{{ t('educai', 'Groups or teams restrict usage to selected audiences.') }}
 						</p>
 						<div v-if="willRequireApproval && !isEditing" class="approval-notice">
 							<span class="icon-info" />
-							This bot will be saved as a draft. You'll need to submit it for approval before others can use it.
+							{{ t('educai', "This bot will be saved as a draft. You'll need to submit it for approval before others can use it.") }}
 						</div>
 					</div>
 
 					<div v-if="formData.visibility === 'groups'" class="form-group">
-						<label for="group-select">Allowed groups</label>
+						<label for="group-select">{{ t('educai', 'Allowed groups') }}</label>
 						<select
 							id="group-select"
 							v-model="formData.allowedGroups"
@@ -127,12 +129,12 @@
 							</option>
 						</select>
 						<p class="hint">
-							Only members of the selected groups (and the bot owner) can mention and use this bot.
+							{{ t('educai', 'Only members of the selected groups (and the bot owner) can mention and use this bot.') }}
 						</p>
 					</div>
 
 					<div v-if="formData.visibility === 'teams'" class="form-group">
-						<label for="team-select">Allowed teams</label>
+						<label for="team-select">{{ t('educai', 'Allowed teams') }}</label>
 						<select
 							id="team-select"
 							v-model="formData.allowedTeams"
@@ -145,12 +147,12 @@
 							</option>
 						</select>
 						<p class="hint">
-							Only members of the selected teams (and the bot owner) can mention and use this bot.
+							{{ t('educai', 'Only members of the selected teams (and the bot owner) can mention and use this bot.') }}
 						</p>
 					</div>
 
 					<div v-if="selectableModelOptions.length > 0" class="form-group">
-						<label for="model-select">Model</label>
+						<label for="model-select">{{ t('educai', 'Model') }}</label>
 						<select
 							id="model-select"
 							v-model="formData.model"
@@ -163,7 +165,7 @@
 							</option>
 						</select>
 						<p v-if="selectableModelOptions.length === 0" class="hint">
-							No models are allowed by the administrator yet.
+							{{ t('educai', 'No models are allowed by the administrator yet.') }}
 						</p>
 					</div>
 
@@ -173,10 +175,10 @@
 								v-model="formData.useCustomTemperature"
 								type="checkbox"
 								@change="onCustomTemperatureToggle">
-							Use custom temperature
+							{{ t('educai', 'Use custom temperature') }}
 						</label>
 						<div v-if="formData.useCustomTemperature" class="temperature-field">
-							<label for="bot-temperature">Temperature</label>
+							<label for="bot-temperature">{{ t('educai', 'Temperature') }}</label>
 							<input
 								id="bot-temperature"
 								v-model.number="formData.temperature"
@@ -186,18 +188,21 @@
 								step="0.05"
 								placeholder="0.20">
 							<p class="hint">
-								Lower temperature is usually better for agentic, tool-enabled, RAG, and workflow bots.
-								Use higher temperature only when you want more variation or creativity.
+								{{ t('educai', 'Lower temperature is usually better for agentic, tool-enabled, RAG, and workflow bots. Use higher temperature only when you want more variation or creativity.') }}
 							</p>
 							<p class="hint">
-								<code>0.2</code> precise and stable, <code>0.4</code> balanced, <code>0.6</code> creative.
+								{{ t('educai', '{precise} precise and stable, {balanced} balanced, {creative} creative.', {
+									precise: '0.2',
+									balanced: '0.4',
+									creative: '0.6',
+								}) }}
 							</p>
 							<p v-if="temperatureValidationError" class="inline-error">
 								{{ temperatureValidationError }}
 							</p>
 						</div>
 						<div v-else class="temperature-readonly">
-							Using the global default temperature: <strong>{{ inheritedTemperatureLabel }}</strong>
+							{{ t('educai', 'Using the global default temperature: {temperature}', { temperature: inheritedTemperatureLabel }) }}
 						</div>
 					</div>
 
@@ -208,17 +213,17 @@
 							<input
 								v-model="formData.ragEnabled"
 								type="checkbox">
-							Enable Retrieval-Augmented Responses
+							{{ t('educai', 'Enable retrieval-augmented responses') }}
 						</label>
 						<p class="hint">
-							When enabled, attach files so the bot can reference your documents during conversations.
+							{{ t('educai', 'When enabled, attach files so the bot can reference your documents during conversations.') }}
 						</p>
 						<div v-if="!isEditing" class="hint">
-							Save the bot before attaching files or folders.
+							{{ t('educai', 'Save the bot before attaching files or folders.') }}
 						</div>
 						<div v-else class="rag-source-panel">
 							<p v-if="!formData.ragEnabled" class="hint muted">
-								Attachments remain stored but are ignored until retrieval is enabled.
+								{{ t('educai', 'Attachments remain stored but are ignored until retrieval is enabled.') }}
 							</p>
 							<div class="rag-actions">
 								<button
@@ -226,14 +231,14 @@
 									class="button"
 									:disabled="rag.loading || rag.adding || !formData.ragEnabled"
 									@click="promptAddSources">
-									{{ rag.adding ? 'Adding…' : 'Attach Files or Folders' }}
+									{{ rag.adding ? t('educai', 'Adding…') : t('educai', 'Attach files or folders') }}
 								</button>
 								<button
 									type="button"
 									class="button"
 									:disabled="rag.loading || rag.addingUrl || !formData.ragEnabled"
 									@click="showUrlModal = true">
-									{{ rag.addingUrl ? 'Adding…' : 'Add Link' }}
+									{{ rag.addingUrl ? t('educai', 'Adding…') : t('educai', 'Add link') }}
 								</button>
 							</div>
 
@@ -241,14 +246,14 @@
 							<div v-if="showUrlModal" class="url-modal-overlay" @click.self="closeUrlModal">
 								<div class="url-modal">
 									<div class="url-modal-header">
-										<h3>Add URL Source</h3>
+										<h3>{{ t('educai', 'Add URL source') }}</h3>
 										<button type="button" class="close-button" @click="closeUrlModal">
 											<span class="icon-close" />
 										</button>
 									</div>
 									<div class="url-modal-body">
 										<div class="form-group">
-											<label for="url-input">URL</label>
+											<label for="url-input">{{ t('educai', 'URL') }}</label>
 											<input
 												id="url-input"
 												v-model="urlInput"
@@ -257,29 +262,29 @@
 												:disabled="rag.addingUrl"
 												@keyup.enter="submitUrl">
 											<p class="hint">
-												Enter a URL to fetch and index. Supports HTML pages, PDF documents, JSON, and plain text.
+												{{ t('educai', 'Enter a URL to fetch and index. Supports HTML pages, PDF documents, JSON, and plain text.') }}
 											</p>
 										</div>
 									</div>
 									<div class="url-modal-footer">
 										<button type="button" class="button" @click="closeUrlModal">
-											Cancel
+											{{ t('educai', 'Cancel') }}
 										</button>
 										<button
 											type="button"
 											class="button primary"
 											:disabled="!isValidUrl || rag.addingUrl"
 											@click="submitUrl">
-											{{ rag.addingUrl ? 'Adding…' : 'Add URL' }}
+											{{ rag.addingUrl ? t('educai', 'Adding…') : t('educai', 'Add URL') }}
 										</button>
 									</div>
 								</div>
 							</div>
 							<div v-if="rag.loading" class="hint">
-								Loading sources…
+								{{ t('educai', 'Loading sources…') }}
 							</div>
 							<div v-else-if="rag.sources.length === 0" class="hint">
-								No knowledge sources attached yet.
+								{{ t('educai', 'No knowledge sources attached yet.') }}
 							</div>
 							<ul v-else class="source-list">
 								<li
@@ -312,16 +317,16 @@
 										<span class="progress-label">
 											{{ formatProgressStage(source.progress_stage) }}
 											<template v-if="source.progress_total > 0">
-												({{ source.progress_current }}/{{ source.progress_total }})
+												({{ formatNumber(source.progress_current) }}/{{ formatNumber(source.progress_total) }})
 											</template>
 											<template v-else-if="source.progress > 0">
-												{{ source.progress }}%
+												{{ formatNumber(source.progress) }}%
 											</template>
 										</span>
 									</div>
 
 									<div v-if="source.last_indexed_at && source.status === 'ready'" class="source-meta">
-										Last indexed {{ formatTimestamp(source.last_indexed_at) }}
+										{{ t('educai', 'Last indexed {date}', { date: formatTimestamp(source.last_indexed_at) }) }}
 									</div>
 									<div v-if="source.error_message" class="source-meta source-error">
 										{{ source.error_message }}
@@ -332,14 +337,14 @@
 											class="button subtle"
 											:disabled="rag.reindexing[source.id] || source.status === 'pending'"
 											@click="reindexSource(source)">
-											{{ rag.reindexing[source.id] ? 'Reindexing…' : 'Reindex' }}
+											{{ rag.reindexing[source.id] ? t('educai', 'Reindexing…') : t('educai', 'Reindex') }}
 										</button>
 										<button
 											type="button"
 											class="button danger"
 											:disabled="rag.removing[source.id] || source.status === 'pending'"
 											@click="removeSource(source)">
-											{{ rag.removing[source.id] ? 'Removing…' : 'Remove' }}
+											{{ rag.removing[source.id] ? t('educai', 'Removing…') : t('educai', 'Remove') }}
 										</button>
 									</div>
 								</li>
@@ -355,20 +360,19 @@
 								v-model="formData.personalWikiEnabled"
 								type="checkbox"
 								@change="markPersonalWikiChanged">
-							Enable LLM Wiki
+							{{ t('educai', 'Enable LLM Wiki') }}
 						</label>
 						<p class="hint">
 							<template v-if="isTeamBot">
-								Let this team bot use a Markdown wiki in a Collective from one of the selected teams.
+								{{ t('educai', 'Let this team bot use a Markdown wiki in a Collective from one of the selected teams.') }}
 							</template>
 							<template v-else>
-								Let this personal bot maintain a visible Markdown wiki in your Nextcloud files for durable personal or bot knowledge.
-								The wiki can be read, edited, or deleted from Files.
+								{{ t('educai', 'Let this personal bot maintain a visible Markdown wiki in your Nextcloud files for durable personal or bot knowledge. The wiki can be read, edited, or deleted from Files.') }}
 							</template>
 						</p>
 						<div v-if="formData.personalWikiEnabled" class="wiki-path-panel">
 							<div class="form-group compact">
-								<label for="personal-wiki-location">Wiki location</label>
+								<label for="personal-wiki-location">{{ t('educai', 'Wiki location') }}</label>
 								<select
 									id="personal-wiki-location"
 									v-model="formData.personalWikiLocation"
@@ -377,24 +381,24 @@
 									<option
 										v-if="isPersonalBot"
 										value="personal_files">
-										Personal Files: {{ defaultPersonalWikiPath }}
+										{{ t('educai', 'Personal Files: {path}', { path: defaultPersonalWikiPath }) }}
 									</option>
 									<option value="collective">
-										Existing Collective
+										{{ t('educai', 'Existing Collective') }}
 									</option>
 								</select>
 							</div>
 							<div v-if="formData.personalWikiLocation === 'personal_files'">
 								<p class="hint">
-									Default path:
+									{{ t('educai', 'Default path:') }}
 									<code>{{ defaultPersonalWikiPath }}</code>
 								</p>
 								<details
 									class="advanced-settings"
 									:open="normalizePersonalWikiPath(formData.personalWikiPath) !== ''">
-									<summary>Use a custom wiki path</summary>
+									<summary>{{ t('educai', 'Use a custom wiki path') }}</summary>
 									<div class="form-group compact">
-										<label for="personal-wiki-path">Custom path</label>
+										<label for="personal-wiki-path">{{ t('educai', 'Custom path') }}</label>
 										<input
 											id="personal-wiki-path"
 											v-model="formData.personalWikiPath"
@@ -402,20 +406,20 @@
 											:placeholder="WIKI_ROOT_FOLDER + '/Personal Wikis/my-bot'"
 											@input="markPersonalWikiChanged">
 										<p class="hint">
-											Optional. Leave blank to use the default path. Custom paths must be relative and start with <code>{{ WIKI_ROOT_FOLDER }}/</code>.
+											{{ t('educai', 'Optional. Leave blank to use the default path. Custom paths must be relative and start with {prefix}.', { prefix: WIKI_ROOT_FOLDER + '/' }) }}
 										</p>
 									</div>
 								</details>
 							</div>
 							<div v-else class="form-group compact">
-								<label for="personal-wiki-collective">Collective</label>
+								<label for="personal-wiki-collective">{{ t('educai', 'Collective') }}</label>
 								<select
 									id="personal-wiki-collective"
 									v-model="formData.personalWikiCollectiveId"
 									:disabled="wikiLocationsLoading || filteredWikiCollectives.length === 0"
 									@change="markPersonalWikiChanged">
 									<option value="">
-										Select a collective
+										{{ t('educai', 'Select a collective') }}
 									</option>
 									<option
 										v-for="collective in filteredWikiCollectives"
@@ -425,16 +429,16 @@
 									</option>
 								</select>
 								<p v-if="wikiLocationsLoading" class="hint">
-									Loading collectives...
+									{{ t('educai', 'Loading collectives…') }}
 								</p>
 								<p v-else-if="availableCollectives.length === 0" class="hint">
-									No admin-owned collectives available for this account.
+									{{ t('educai', 'No admin-owned collectives available for this account.') }}
 								</p>
 								<p v-else-if="filteredWikiCollectives.length === 0" class="hint">
-									Select a team that matches one of your admin-owned collectives.
+									{{ t('educai', 'Select a team that matches one of your admin-owned collectives.') }}
 								</p>
 								<p v-else class="hint">
-									Wiki pages will be written to the selected collective and visible to its members.
+									{{ t('educai', 'Wiki pages will be written to the selected collective and visible to its members.') }}
 								</p>
 							</div>
 						</div>
@@ -446,12 +450,12 @@
 						role="presentation">
 
 					<div class="form-group">
-						<label>Agent Tools</label>
+						<label>{{ t('educai', 'Agent tools') }}</label>
 						<div v-if="toolLoading" class="hint">
-							Loading tools…
+							{{ t('educai', 'Loading tools…') }}
 						</div>
 						<div v-else-if="visibleTools.length === 0" class="hint">
-							No tools are currently enabled by the administrator.
+							{{ t('educai', 'No tools are currently enabled by the administrator.') }}
 						</div>
 						<div v-else class="tool-list">
 							<label
@@ -467,18 +471,18 @@
 								<span class="tool-info">
 									<span class="tool-name">
 										{{ tool.name }}
-										<span v-if="tool.is_builtin" class="tool-badge builtin">Built-in</span>
+										<span v-if="tool.is_builtin" class="tool-badge builtin">{{ t('educai', 'Built-in') }}</span>
 									</span>
 									<span v-if="tool.description" class="tool-description">{{ tool.description }}</span>
 									<span v-if="isToolDisabled(tool)" class="tool-description tool-unavailable">
-										Only available for personal bots.
+										{{ t('educai', 'Only available for personal bots.') }}
 									</span>
 									<span v-if="tool.mcp_endpoint_url" class="tool-endpoint">{{ tool.mcp_endpoint_url }}</span>
 								</span>
 							</label>
 						</div>
 						<p class="hint">
-							Selected tools allow the bot to call external capabilities during conversations.
+							{{ t('educai', 'Selected tools allow the bot to call external capabilities during conversations.') }}
 						</p>
 					</div>
 
@@ -486,20 +490,19 @@
 
 					<!-- Onboarding Questions -->
 					<div class="form-group">
-						<label>Onboarding Questions</label>
+						<label>{{ t('educai', 'Onboarding questions') }}</label>
 						<p class="hint">
-							Optional: Add questions that users will be asked when they first activate this bot in a chat room.
-							Answers are stored and provided as context to the bot.
+							{{ t('educai', 'Optional: Add questions that users will be asked when they first activate this bot in a chat room. Answers are stored and provided as context to the bot.') }}
 						</p>
 
 						<div v-if="formData.onboardingQuestions.questions.length === 0" class="onboarding-empty">
-							<p>No onboarding questions configured.</p>
+							<p>{{ t('educai', 'No onboarding questions configured.') }}</p>
 							<button
 								type="button"
 								class="button"
 								:disabled="formData.onboardingQuestions.questions.length >= 15"
 								@click="addOnboardingQuestion">
-								Add Question
+								{{ t('educai', 'Add question') }}
 							</button>
 						</div>
 
@@ -509,24 +512,24 @@
 								:key="question.id"
 								class="onboarding-question-card">
 								<div class="question-header">
-									<span class="question-badge">Q{{ qIndex + 1 }}</span>
+									<span class="question-badge">{{ t('educai', 'Q{number}', { number: formatNumber(qIndex + 1) }) }}</span>
 									<span class="question-id">{{ question.id }}</span>
 									<button
 										type="button"
 										class="button subtle small"
 										@click="removeOnboardingQuestion(qIndex)">
-										Remove
+										{{ t('educai', 'Remove') }}
 									</button>
 								</div>
 
 								<div class="question-body">
 									<div class="form-group compact">
-										<label :for="'q-text-' + question.id">Question Text</label>
+										<label :for="'q-text-' + question.id">{{ t('educai', 'Question text') }}</label>
 										<input
 											:id="'q-text-' + question.id"
 											v-model="question.text"
 											type="text"
-											placeholder="What is your main use case?">
+											:placeholder="t('educai', 'What is your main use case?')">
 									</div>
 
 									<div class="form-group compact">
@@ -535,7 +538,7 @@
 												type="checkbox"
 												:checked="isFreeTextQuestion(question)"
 												@change="setQuestionFreeText(qIndex, $event.target.checked)">
-											Free text answer (user reply will be stored)
+											{{ t('educai', 'Free text answer (user reply will be stored)') }}
 										</label>
 									</div>
 
@@ -551,17 +554,17 @@
 												v-if="!isFreeTextAnswer(answer)"
 												v-model="answer.text"
 												type="text"
-												placeholder="Answer text"
+												:placeholder="t('educai', 'Answer text')"
 												class="answer-text">
 											<input
 												v-else
-												:value="'Free text (user types the answer)'"
+												:value="t('educai', 'Free text (user types the answer)')"
 												type="text"
 												class="answer-text free-text"
 												disabled>
 											<select v-model="answer.next" class="answer-next">
 												<option :value="null">
-													End
+													{{ t('educai', 'End') }}
 												</option>
 												<option
 													v-for="targetQ in getAvailableNextQuestions(question.id)"
@@ -585,7 +588,7 @@
 										type="button"
 										class="button subtle small add-answer-btn"
 										@click="addAnswer(qIndex)">
-										+ Add Answer
+										{{ t('educai', '+ Add answer') }}
 									</button>
 								</div>
 							</div>
@@ -595,7 +598,7 @@
 								type="button"
 								class="button"
 								@click="addOnboardingQuestion">
-								Add Another Question
+								{{ t('educai', 'Add another question') }}
 							</button>
 						</div>
 
@@ -607,7 +610,7 @@
 					<!-- Actions -->
 					<div class="form-actions">
 						<button type="button" class="button" @click="$emit('cancel')">
-							Cancel
+							{{ t('educai', 'Cancel') }}
 						</button>
 						<button type="submit" class="button primary">
 							{{ submitButtonText }}
@@ -626,6 +629,8 @@ import { generateUrl } from '@nextcloud/router'
 import { getFilePickerBuilder, FilePickerType, showSuccess, showError } from '@nextcloud/dialogs'
 import { getClient, defaultRootPath, getDefaultPropfind, resultToNode } from '@nextcloud/files/dav'
 import NcProgressBar from '@nextcloud/vue/dist/Components/NcProgressBar.js'
+import { getCanonicalLocale, t } from '../l10n.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 const WIKI_BUILT_IN_TOOLS = new Set([
 	'wiki_search',
@@ -750,14 +755,17 @@ export default {
 			// Check for empty question texts
 			for (const q of questions) {
 				if (!q.text || q.text.trim() === '') {
-					return `Question ${q.id} has no text`
+					return t('educai', 'Question {question} has no text', { question: q.id })
 				}
 				for (const a of q.answers) {
 					if (a && a.type === 'free_text') {
 						continue
 					}
 					if (!a.text || a.text.trim() === '') {
-						return `Question ${q.id}, answer ${a.id.toUpperCase()} has no text`
+						return t('educai', 'Question {question}, answer {answer} has no text', {
+							question: q.id,
+							answer: a.id.toUpperCase(),
+						})
 					}
 				}
 			}
@@ -782,7 +790,7 @@ export default {
 
 			for (const q of questions) {
 				if (!reachable.has(q.id)) {
-					return `Question ${q.id} is unreachable from the start`
+					return t('educai', 'Question {question} is unreachable from the start', { question: q.id })
 				}
 			}
 
@@ -795,10 +803,10 @@ export default {
 
 			const value = this.normalizeTemperatureValue(this.formData.temperature)
 			if (value === null) {
-				return 'Enter a temperature between 0.0 and 1.0.'
+				return t('educai', 'Enter a temperature between 0.0 and 1.0.')
 			}
 			if (value < 0 || value > 1) {
-				return 'Temperature must be between 0.0 and 1.0.'
+				return t('educai', 'Temperature must be between 0.0 and 1.0.')
 			}
 
 			return null
@@ -913,12 +921,12 @@ export default {
 		},
 		submitButtonText() {
 			if (this.isEditing) {
-				return 'Update Bot'
+				return t('educai', 'Update bot')
 			}
 			if (this.willRequireApproval) {
-				return 'Save as Draft'
+				return t('educai', 'Save as draft')
 			}
-			return 'Create Bot'
+			return t('educai', 'Create bot')
 		},
 	},
 	watch: {
@@ -1135,7 +1143,11 @@ export default {
 			if (id === '') {
 				return ''
 			}
-			return id.replace(/^primary:/, 'Primary · ').replace(/^secondary:/, 'Secondary · ')
+			const modelName = id.replace(/^(primary|secondary):/, '')
+			if (id.startsWith('secondary:')) {
+				return t('educai', 'Secondary · {model}', { model: modelName })
+			}
+			return t('educai', 'Primary · {model}', { model: modelName })
 		},
 		normalizeTemperatureValue(value) {
 			if (value === null || value === undefined || value === '') {
@@ -1151,7 +1163,10 @@ export default {
 		},
 		formatTemperature(value) {
 			const temperature = this.normalizeTemperatureValue(value)
-			return temperature === null ? '0.20' : temperature.toFixed(2)
+			return (temperature ?? 0.2).toLocaleString(getCanonicalLocale(), {
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			})
 		},
 		onCustomTemperatureToggle() {
 			if (this.formData.useCustomTemperature && this.normalizeTemperatureValue(this.formData.temperature) === null) {
@@ -1379,7 +1394,7 @@ export default {
 					this.startPolling()
 				}
 			} catch (e) {
-				showError('Failed to load attached sources')
+				showError(t('educai', 'Failed to load attached sources'))
 			} finally {
 				this.rag.loading = false
 			}
@@ -1413,11 +1428,11 @@ export default {
 					console.log('[DEBUG] Sending to backend:', JSON.stringify(payload, null, 2))
 					await axios.post(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources`), payload)
 				}
-				showSuccess('Sources queued for indexing')
+				showSuccess(t('educai', 'Sources queued for indexing'))
 				await this.loadRagSources()
 			} catch (error) {
 				console.error('Failed to attach sources', error)
-				showError(error.response?.data?.error || 'Failed to attach sources')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to attach sources')))
 			} finally {
 				this.rag.adding = false
 			}
@@ -1429,11 +1444,11 @@ export default {
 			this.$set(this.rag.removing, source.id, true)
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources/${source.id}`))
-				showSuccess('Source removed')
+				showSuccess(t('educai', 'Source removed'))
 				await this.loadRagSources()
 			} catch (error) {
 				console.error('Failed to remove source', error)
-				showError(error.response?.data?.error || 'Failed to remove source')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to remove source')))
 			} finally {
 				this.$delete(this.rag.removing, source.id)
 			}
@@ -1445,11 +1460,11 @@ export default {
 			this.$set(this.rag.reindexing, source.id, true)
 			try {
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources/${source.id}/reindex`))
-				showSuccess('Reindex queued')
+				showSuccess(t('educai', 'Reindex queued'))
 				await this.loadRagSources()
 			} catch (error) {
 				console.error('Failed to reindex source', error)
-				showError(error.response?.data?.error || 'Failed to reindex source')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to reindex source')))
 			} finally {
 				this.$delete(this.rag.reindexing, source.id)
 			}
@@ -1466,19 +1481,19 @@ export default {
 			try {
 				const sourceUrl = this.urlInput.trim()
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources`), { sourceUrl })
-				showSuccess('URL source queued for indexing')
+				showSuccess(t('educai', 'URL source queued for indexing'))
 				this.closeUrlModal()
 				await this.loadRagSources()
 			} catch (error) {
 				console.error('Failed to add URL source', error)
-				showError(error.response?.data?.error || 'Failed to add URL source')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to add URL source')))
 			} finally {
 				this.rag.addingUrl = false
 			}
 		},
 		async pickNodes() {
 			try {
-				const picker = getFilePickerBuilder('Select files or folders')
+				const picker = getFilePickerBuilder(t('educai', 'Select files or folders'))
 					.setMultiSelect(true)
 					.allowDirectories(true)
 					.setType(FilePickerType.Choose)
@@ -1528,11 +1543,11 @@ export default {
 							})
 						} else {
 							console.warn('No fileid found for path:', path)
-							showError('Failed to get file info for ' + path)
+							showError(t('educai', 'Failed to get file info for {path}', { path }))
 						}
 					} catch (error) {
 						console.error('Failed to get file info for', path, error)
-						showError('Failed to get file info for ' + path + ': ' + (error.response?.statusText || error.message))
+						showError(getApiErrorMessage(error, t('educai', 'Failed to get file info for {path}', { path })))
 					}
 				}
 
@@ -1543,7 +1558,7 @@ export default {
 					return null
 				}
 				console.error('File picker error:', error)
-				showError('Failed to open file picker: ' + (error.message || error))
+				showError(getApiErrorMessage(error, t('educai', 'Failed to open file picker')))
 				return null
 			}
 		},
@@ -1593,7 +1608,7 @@ export default {
 			if (source.source_url) {
 				return source.source_url
 			}
-			return `Node #${source.node_id}`
+			return t('educai', 'Node #{id}', { id: source.node_id })
 		},
 		getSourceTypeIconClass(source) {
 			if (!source) {
@@ -1610,32 +1625,36 @@ export default {
 		formatSourceStatus(status) {
 			switch (status) {
 			case 'ready':
-				return 'Ready'
+				return t('educai', 'Ready')
 			case 'pending':
-				return 'Pending'
+				return t('educai', 'Pending')
 			case 'error':
-				return 'Error'
+				return t('educai', 'Error')
 			default:
-				return status || 'Unknown'
+				return t('educai', 'Unknown')
 			}
 		},
 		formatProgressStage(stage) {
 			const stages = {
-				collecting: 'Collecting files…',
-				extracting: 'Extracting text…',
-				chunking: 'Processing content…',
-				embedding: 'Generating embeddings…',
-				storing: 'Saving results…',
-				ready: 'Complete',
+				collecting: t('educai', 'Collecting files…'),
+				extracting: t('educai', 'Extracting text…'),
+				chunking: t('educai', 'Processing content…'),
+				embedding: t('educai', 'Generating embeddings…'),
+				storing: t('educai', 'Saving results…'),
+				ready: t('educai', 'Complete'),
 			}
-			return stages[stage] || 'Processing…'
+			return stages[stage] || t('educai', 'Processing…')
 		},
 		formatTimestamp(ts) {
 			if (!ts) {
 				return ''
 			}
 			const date = new Date(ts * 1000)
-			return date.toLocaleString()
+			return date.toLocaleString(getCanonicalLocale())
+		},
+		formatNumber(value) {
+			const number = Number(value)
+			return Number.isFinite(number) ? number.toLocaleString(getCanonicalLocale()) : '0'
 		},
 		addOnboardingQuestion() {
 			const questions = this.formData.onboardingQuestions.questions
@@ -1752,23 +1771,23 @@ export default {
 				return
 			}
 			if (this.formData.personalWikiEnabled && this.isTeamBot && this.formData.allowedTeams.length === 0) {
-				showError('Select at least one team before enabling the LLM Wiki.')
+				showError(t('educai', 'Select at least one team before enabling the LLM Wiki.'))
 				return
 			}
 			if (this.formData.personalWikiEnabled && this.formData.personalWikiLocation === 'collective' && !this.formData.personalWikiCollectiveId) {
-				showError('Select a collective for the LLM Wiki location.')
+				showError(t('educai', 'Select a collective for the LLM Wiki location.'))
 				return
 			}
 			if (this.formData.personalWikiEnabled && this.formData.personalWikiLocation === 'collective') {
 				const selectedCollectiveId = String(this.formData.personalWikiCollectiveId)
 				const selectedCollectiveMatchesScope = this.filteredWikiCollectives.some((collective) => String(collective.id) === selectedCollectiveId)
 				if (!selectedCollectiveMatchesScope) {
-					showError('Select a collective from one of the selected teams.')
+					showError(t('educai', 'Select a collective from one of the selected teams.'))
 					return
 				}
 			}
 			if (this.formData.personalWikiEnabled && this.isTeamBot && this.formData.personalWikiLocation !== 'collective') {
-				showError('Team bots can use LLM Wiki only with a Collective.')
+				showError(t('educai', 'Team bots can use LLM Wiki only with a Collective.'))
 				return
 			}
 
@@ -1872,7 +1891,7 @@ export default {
 	position: fixed;
 	z-index: 9998;
 	top: 0;
-	left: 0;
+	inset-inline-start: 0;
 	width: 100%;
 	height: 100%;
 	background-color: rgba(0, 0, 0, 0.5);
@@ -1971,7 +1990,7 @@ export default {
 	padding: 10px 12px;
 	background: var(--color-background-dark);
 	border: 1px solid var(--color-border);
-	border-right: none;
+	border-inline-end: none;
 	border-radius: 3px 0 0 3px;
 	font-weight: 600;
 }
@@ -2028,6 +2047,7 @@ export default {
 	align-items: center;
 	gap: 8px;
 }
+
 .form-group label.checkbox input[type="checkbox"] {
 	width: 16px;
 	height: 16px;
@@ -2267,7 +2287,7 @@ export default {
 	position: fixed;
 	z-index: 10000;
 	top: 0;
-	left: 0;
+	inset-inline-start: 0;
 	width: 100%;
 	height: 100%;
 	background-color: rgba(0, 0, 0, 0.5);
@@ -2317,7 +2337,7 @@ export default {
 .source-type-icon {
 	display: inline-flex;
 	align-items: center;
-	margin-right: 6px;
+	margin-inline-end: 6px;
 	color: var(--color-text-lighter);
 }
 
@@ -2442,7 +2462,7 @@ export default {
 }
 
 .question-header .button {
-	margin-left: auto;
+	margin-inline-start: auto;
 }
 
 .question-body {

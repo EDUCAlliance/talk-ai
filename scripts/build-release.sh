@@ -54,7 +54,7 @@ rsync -a \
 		--optimize-autoloader
 )
 
-for path in appinfo img js lib templates vendor LICENSE README.md; do
+for path in appinfo img js l10n lib templates vendor LICENSE README.md; do
 	if [[ ! -e "$WORK_ROOT/$path" ]]; then
 		echo "Required release path is missing after build: $path" >&2
 		exit 1

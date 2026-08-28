@@ -10,13 +10,13 @@ use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
-use OCA\EducAI\Service\BotService;
-use OCA\EducAI\Service\RateLimitService;
-use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\AppIconService;
+use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\LLMClient;
+use OCA\EducAI\Service\RagIngestionService;
+use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\SettingsService;
 use OCA\EducAI\Service\TraceService;
-use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Webhook\TalkHandler;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Controller;
@@ -24,6 +24,7 @@ use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\BackgroundJob\IJobList;
 use OCP\IGroupManager;
+use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 use OCP\IUserSession;
@@ -32,8 +33,8 @@ use Psr\Log\LoggerInterface;
 class SettingsController extends Controller {
 	private const DEFAULT_TEMPERATURE_NOT_PROVIDED = '__educai_default_temperature_not_provided__';
 
-    private SettingsService $settingsService;
-    private LLMClient $llmClient;
+	private SettingsService $settingsService;
+	private LLMClient $llmClient;
 	private RateLimitService $rateLimitService;
 	private RagIngestionService $ragIngestionService;
 	private BotSourceMapper $botSourceMapper;
@@ -48,6 +49,7 @@ class SettingsController extends Controller {
 	private IAppManager $appManager;
 	private LoggerInterface $logger;
 	private TraceService $traceService;
+	private IL10N $l10n;
 
 	public function __construct(
 		string $appName,
@@ -67,7 +69,8 @@ class SettingsController extends Controller {
 		IUserSession $userSession,
 		IAppManager $appManager,
 		LoggerInterface $logger,
-		TraceService $traceService
+		TraceService $traceService,
+		IL10N $l10n,
 	) {
 		parent::__construct($appName, $request);
 		$this->settingsService = $settingsService;
@@ -86,6 +89,7 @@ class SettingsController extends Controller {
 		$this->appManager = $appManager;
 		$this->logger = $logger;
 		$this->traceService = $traceService;
+		$this->l10n = $l10n;
 	}
 
 	/**
@@ -98,7 +102,7 @@ class SettingsController extends Controller {
 			return new DataResponse($this->buildSettingsPayload($settings));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to get settings: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('settings_load_failed', $this->l10n->t('Failed to load settings'), 500);
 		}
 	}
 
@@ -106,14 +110,14 @@ class SettingsController extends Controller {
 	 * @AdminRequired
 	 * Update global settings (admin-only)
 	 */
-    public function update(
-        string $apiKey,
-        string $apiEndpoint,
-        string $defaultModel,
-        $defaultTemperature = self::DEFAULT_TEMPERATURE_NOT_PROVIDED,
-        ?string $webhookSecret = null,
-        string $apiProvider = 'custom',
-        ?bool $allowMultipleModels = null,
+	public function update(
+		string $apiKey,
+		string $apiEndpoint,
+		string $defaultModel,
+		$defaultTemperature = self::DEFAULT_TEMPERATURE_NOT_PROVIDED,
+		?string $webhookSecret = null,
+		string $apiProvider = 'custom',
+		?bool $allowMultipleModels = null,
 		?array $allowedModels = null,
 		?string $embeddingApiEndpoint = null,
 		?string $embeddingApiKey = null,
@@ -154,7 +158,7 @@ class SettingsController extends Controller {
 		?string $appIconUrl = null,
 		?string $appIconMode = null,
 		?string $appIconBlackUrl = null,
-		?string $appIconWhiteUrl = null
+		?string $appIconWhiteUrl = null,
 	): DataResponse {
 		try {
 			$this->logger->info('EducAI Settings Update - catalogueApiEndpoint: ' . var_export($catalogueApiEndpoint, true) . ', catalogueEnabled: ' . var_export($catalogueEnabled, true));
@@ -165,8 +169,8 @@ class SettingsController extends Controller {
 				$apiEndpoint,
 				$defaultModel,
 				$defaultTemperature === self::DEFAULT_TEMPERATURE_NOT_PROVIDED ? null : $defaultTemperature,
-                $webhookSecret,
-                $allowMultipleModels,
+				$webhookSecret,
+				$allowMultipleModels,
 				$allowedModels,
 				$embeddingApiEndpoint,
 				$embeddingApiKey,
@@ -214,28 +218,39 @@ class SettingsController extends Controller {
 			if ($beforeRateLimitConfig !== $afterRateLimitConfig) {
 				$this->rateLimitService->resetState();
 			}
-			
+
 			return new DataResponse($this->buildSettingsPayload($settings));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to update settings: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('settings_update_failed', $this->l10n->t('Failed to update settings'), 400);
 		}
 	}
 
-    /**
-     * @NoAdminRequired
-     * List models from the configured provider
-     */
+	/**
+	 * @NoAdminRequired
+	 * List models from the configured provider
+	 */
 	public function models(): DataResponse {
 		try {
 			$modelOptions = $this->llmClient->listModelOptions();
+			$modelOptions = array_map(function (array $option): array {
+				$endpoint = (string)($option['endpoint'] ?? '');
+				$model = (string)($option['model'] ?? '');
+				if ($endpoint === 'primary') {
+					$option['label'] = $this->l10n->t('Primary') . ' · ' . $model;
+				} elseif ($endpoint === 'secondary') {
+					$option['label'] = $this->l10n->t('Secondary') . ' · ' . $model;
+				}
+
+				return $option;
+			}, $modelOptions);
 			return new DataResponse([
 				'models' => array_values(array_map(static fn (array $option): string => (string)$option['id'], $modelOptions)),
 				'model_options' => $modelOptions,
 			]);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list models: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('models_load_failed', $this->l10n->t('Failed to load models'), 400);
 		}
 	}
 
@@ -291,7 +306,7 @@ class SettingsController extends Controller {
 			return new DataResponse(['groups' => $groups]);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list groups: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('groups_load_failed', $this->l10n->t('Failed to load groups'), 400);
 		}
 	}
 
@@ -380,7 +395,11 @@ class SettingsController extends Controller {
 			return new DataResponse($status);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to get rate limit status: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse(
+				'rate_limit_status_load_failed',
+				$this->l10n->t('Failed to load rate limit status'),
+				500,
+			);
 		}
 	}
 
@@ -392,6 +411,7 @@ class SettingsController extends Controller {
 		try {
 			$processedCount = 0;
 			$errors = [];
+			$errorCodes = [];
 			$this->rateLimitService->failExhaustedPendingRequests();
 			$this->rateLimitService->recoverStaleResponseDeliveries();
 			$readyRequests = $this->rateLimitService->getResponseReadyRequests(10);
@@ -400,7 +420,7 @@ class SettingsController extends Controller {
 				if ($result['success'] && !($result['skipped'] ?? false)) {
 					$processedCount++;
 				} elseif (!$result['success']) {
-					$errors[] = $result['error'];
+					$this->appendQueueResponseError($errors, $errorCodes, $request, $result['error'] ?? null);
 				}
 			}
 
@@ -412,11 +432,13 @@ class SettingsController extends Controller {
 						'processed' => $processedCount,
 						'remaining' => $remainingStats['pending'],
 						'errors' => $errors,
+						'errorCodes' => $errorCodes,
 					]);
 				}
 				return new DataResponse([
 					'success' => false,
-					'error' => 'Rate limiting is not enabled',
+					'error' => $this->l10n->t('Rate limiting is not enabled'),
+					'errorCode' => 'rate_limiting_disabled',
 				], 400);
 			}
 
@@ -428,12 +450,13 @@ class SettingsController extends Controller {
 						'processed' => $processedCount,
 						'remaining' => 0,
 						'errors' => $errors,
+						'errorCodes' => $errorCodes,
 					]);
 				}
 				return new DataResponse([
 					'success' => true,
 					'processed' => 0,
-					'message' => 'No pending requests in queue',
+					'message' => $this->l10n->t('No pending requests in queue'),
 				]);
 			}
 
@@ -456,7 +479,7 @@ class SettingsController extends Controller {
 				if ($result['success'] && !($result['skipped'] ?? false)) {
 					$processedCount++;
 				} elseif (!$result['success']) {
-					$errors[] = $result['error'];
+					$this->appendQueueResponseError($errors, $errorCodes, $request, $result['error'] ?? null);
 				}
 
 				// Small delay between requests
@@ -470,14 +493,37 @@ class SettingsController extends Controller {
 				'processed' => $processedCount,
 				'remaining' => $remainingStats['pending'],
 				'errors' => $errors,
+				'errorCodes' => $errorCodes,
 			]);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to process queue: ' . $e->getMessage());
 			return new DataResponse([
 				'success' => false,
-				'error' => $e->getMessage(),
+				'error' => $this->l10n->t('Failed to process the queue'),
+				'errorCode' => 'queue_processing_failed',
 			], 500);
 		}
+	}
+
+	/**
+	 * Sanitize per-item queue diagnostics at the synchronous admin API boundary.
+	 * Queue persistence and trace records retain their technical details.
+	 *
+	 * @param array<int,string> $errors
+	 * @param array<int,string> $errorCodes
+	 */
+	private function appendQueueResponseError(
+		array &$errors,
+		array &$errorCodes,
+		QueuedRequest $request,
+		?string $technicalError,
+	): void {
+		$this->logger->warning('Queued request failed during manual queue processing', [
+			'request_id' => $request->getId(),
+			'error' => $technicalError,
+		]);
+		$errors[] = $this->l10n->t('A queued request could not be processed.');
+		$errorCodes[] = 'queued_request_failed';
 	}
 
 	/**
@@ -866,7 +912,7 @@ class SettingsController extends Controller {
 			return new DataResponse([
 				'success' => true,
 				'queued_rag_sources' => $queuedRagSources,
-				'message' => 'Reindex jobs queued. Processing happens via background jobs.',
+				'message' => $this->l10n->t('Reindex jobs queued. Processing happens via background jobs.'),
 			]);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to queue global embedding reindex', [
@@ -874,7 +920,8 @@ class SettingsController extends Controller {
 			]);
 			return new DataResponse([
 				'success' => false,
-				'error' => $e->getMessage(),
+				'error' => $this->l10n->t('Failed to queue reindex jobs'),
+				'errorCode' => 'reindex_failed',
 			], 500);
 		}
 	}
@@ -895,6 +942,13 @@ class SettingsController extends Controller {
 		$data['app_icon_runtime_urls'] = $this->appIconService->getRuntimeIconUrls();
 
 		return $data;
+	}
+
+	private function errorResponse(string $errorCode, string $error, int $status): DataResponse {
+		return new DataResponse([
+			'error' => $error,
+			'errorCode' => $errorCode,
+		], $status);
 	}
 
 	/**

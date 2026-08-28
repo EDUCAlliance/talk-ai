@@ -2,8 +2,8 @@
 	<section class="activity-view">
 		<div class="activity-title-row">
 			<div>
-				<h3>Activity</h3>
-				<p>This page shows {{ APP_DISPLAY_NAME }} interactions you started. Detailed tool inputs and results are visible only to you.</p>
+				<h3>{{ t('educai', 'Activity') }}</h3>
+				<p>{{ t('educai', 'This page shows {appName} interactions you started. Detailed tool inputs and results are visible only to you.', { appName: APP_DISPLAY_NAME }) }}</p>
 			</div>
 			<div class="activity-actions">
 				<button
@@ -12,7 +12,7 @@
 					:disabled="loading"
 					@click="loadTraces">
 					<span class="icon-history" />
-					Refresh
+					{{ t('educai', 'Refresh') }}
 				</button>
 				<button
 					type="button"
@@ -20,50 +20,50 @@
 					:disabled="traces.length === 0 || clearing"
 					@click="clearActivity">
 					<span class="icon-delete" />
-					Clear my activity
+					{{ t('educai', 'Clear my activity') }}
 				</button>
 			</div>
 		</div>
 
 		<p class="privacy-note">
-			Only interactions started by your account are shown here. We take privacy seriously: your trace history is private to your account and cannot be viewed by anyone else.
+			{{ t('educai', 'Only interactions started by your account are shown here. We take privacy seriously: your trace history is private to your account and cannot be viewed by anyone else.') }}
 		</p>
 
 		<div class="filters">
 			<label>
-				<span>Search</span>
+				<span>{{ t('educai', 'Search') }}</span>
 				<input
 					v-model.trim="filters.q"
 					type="search"
-					placeholder="Message, bot, or error"
+					:placeholder="t('educai', 'Message, bot, or error')"
 					@keyup.enter="applyFilters">
 			</label>
 			<label>
-				<span>Status</span>
+				<span>{{ t('educai', 'Status') }}</span>
 				<select v-model="filters.status" @change="applyFilters">
-					<option value="">Any status</option>
-					<option value="running">Running</option>
-					<option value="success">Success</option>
-					<option value="error">Error</option>
-					<option value="partial">Partial</option>
+					<option value="">{{ t('educai', 'Any status') }}</option>
+					<option value="running">{{ t('educai', 'Running') }}</option>
+					<option value="success">{{ t('educai', 'Success') }}</option>
+					<option value="error">{{ t('educai', 'Error') }}</option>
+					<option value="partial">{{ t('educai', 'Partial') }}</option>
 				</select>
 			</label>
 			<label>
-				<span>Bot mention name</span>
+				<span>{{ t('educai', 'Bot mention name') }}</span>
 				<input
 					v-model.trim="filters.botMentionName"
 					type="search"
 					@keyup.enter="applyFilters">
 			</label>
 			<label>
-				<span>From</span>
+				<span>{{ t('educai', 'From') }}</span>
 				<input
 					v-model="filters.fromDate"
 					type="date"
 					@change="applyFilters">
 			</label>
 			<label>
-				<span>To</span>
+				<span>{{ t('educai', 'To') }}</span>
 				<input
 					v-model="filters.toDate"
 					type="date"
@@ -71,15 +71,15 @@
 			</label>
 			<label class="checkbox-label">
 				<input v-model="filters.onlyErrors" type="checkbox" @change="applyFilters">
-				<span>Only errors</span>
+				<span>{{ t('educai', 'Only errors') }}</span>
 			</label>
 			<label class="checkbox-label">
 				<input v-model="filters.onlyWithTools" type="checkbox" @change="applyFilters">
-				<span>Only with tools</span>
+				<span>{{ t('educai', 'Only with tools') }}</span>
 			</label>
 			<button type="button" class="button primary" @click="applyFilters">
 				<span class="icon-search" />
-				Apply
+				{{ t('educai', 'Apply') }}
 			</button>
 		</div>
 
@@ -89,13 +89,13 @@
 
 		<div v-if="loading" class="loading">
 			<span class="icon-loading" />
-			<p>Loading activity...</p>
+			<p>{{ t('educai', 'Loading activity…') }}</p>
 		</div>
 
 		<div v-else-if="traces.length === 0" class="empty-state">
 			<span class="icon-comment" />
-			<h3>No activity yet</h3>
-			<p>Use a bot in Nextcloud Talk and your own trace history will appear here.</p>
+			<h3>{{ t('educai', 'No activity yet') }}</h3>
+			<p>{{ t('educai', 'Use a bot in Nextcloud Talk and your own trace history will appear here.') }}</p>
 		</div>
 
 		<div v-else class="activity-layout">
@@ -113,10 +113,10 @@
 							<span>{{ trace.bot_mention_name || APP_DISPLAY_NAME }}</span>
 							<span class="status-badge" :class="trace.status">{{ formatStatus(trace.status) }}</span>
 						</span>
-						<span class="trace-preview">{{ trace.user_message_preview || 'No message preview' }}</span>
+						<span class="trace-preview">{{ trace.user_message_preview || t('educai', 'No message preview') }}</span>
 					</span>
 					<span class="trace-counts">
-						<span>{{ trace.tool_call_count }} tools</span>
+						<span>{{ formatToolCount(trace.tool_call_count) }}</span>
 						<span>{{ formatDuration(trace.duration_ms) }}</span>
 					</span>
 				</button>
@@ -127,15 +127,15 @@
 						class="button"
 						:disabled="offset === 0"
 						@click="previousPage">
-						Previous
+						{{ t('educai', 'Previous') }}
 					</button>
-					<span>{{ offset + 1 }}-{{ Math.min(offset + limit, total) }} of {{ total }}</span>
+					<span>{{ paginationLabel }}</span>
 					<button
 						type="button"
 						class="button"
 						:disabled="offset + limit >= total"
 						@click="nextPage">
-						Next
+						{{ t('educai', 'Next') }}
 					</button>
 				</div>
 			</div>
@@ -143,7 +143,7 @@
 			<aside class="trace-detail">
 				<div v-if="detailLoading" class="loading-small">
 					<span class="icon-loading" />
-					<span>Loading trace details...</span>
+					<span>{{ t('educai', 'Loading trace details…') }}</span>
 				</div>
 				<div v-else-if="detailError" class="error-banner">
 					{{ detailError }}
@@ -151,9 +151,13 @@
 				<div v-else-if="selectedTrace">
 					<div class="detail-header">
 						<div>
-							<h4>{{ selectedTrace.bot_mention_name || (APP_DISPLAY_NAME + ' run') }}</h4>
+							<h4>{{ selectedTrace.bot_mention_name || t('educai', '{appName} run', { appName: APP_DISPLAY_NAME }) }}</h4>
 							<p>
-								{{ formatDate(selectedTrace.started_at) }} - {{ formatStatus(selectedTrace.status) }} - {{ selectedTrace.event_count }} events
+								{{ t('educai', '{date} - {status} - {events}', {
+									date: formatDate(selectedTrace.started_at),
+									status: formatStatus(selectedTrace.status),
+									events: formatEventCount(selectedTrace.event_count),
+								}) }}
 							</p>
 						</div>
 						<div class="detail-actions">
@@ -162,23 +166,23 @@
 								class="button"
 								@click="exportSelectedTrace">
 								<span class="icon-download" />
-								Export JSON
+								{{ t('educai', 'Export JSON') }}
 							</button>
 							<button
 								type="button"
 								class="button error"
 								@click="deleteSelectedTrace">
 								<span class="icon-delete" />
-								Delete
+								{{ t('educai', 'Delete') }}
 							</button>
 						</div>
 					</div>
 
 					<div class="run-summary">
-						<div><strong>Status</strong><span>{{ formatStatus(selectedTrace.status) }}</span></div>
-						<div><strong>Duration</strong><span>{{ formatDuration(selectedTrace.duration_ms) }}</span></div>
-						<div><strong>Tools</strong><span>{{ selectedTrace.tool_call_count }}</span></div>
-						<div><strong>Tokens</strong><span>{{ formatTokens(selectedTrace.total_token_count) }}</span></div>
+						<div><strong>{{ t('educai', 'Status') }}</strong><span>{{ formatStatus(selectedTrace.status) }}</span></div>
+						<div><strong>{{ t('educai', 'Duration') }}</strong><span>{{ formatDuration(selectedTrace.duration_ms) }}</span></div>
+						<div><strong>{{ t('educai', 'Tools') }}</strong><span>{{ formatNumber(selectedTrace.tool_call_count) }}</span></div>
+						<div><strong>{{ t('educai', 'Tokens') }}</strong><span>{{ formatTokens(selectedTrace.total_token_count) }}</span></div>
 					</div>
 
 					<ol class="event-list">
@@ -193,22 +197,22 @@
 								{{ event.error_message }}
 							</p>
 							<details v-if="getRawLlmPayload(event)" class="raw-llm-payload">
-								<summary>Raw LLM payload</summary>
+								<summary>{{ t('educai', 'Raw LLM payload') }}</summary>
 								<pre>{{ formatJson(getRawLlmPayload(event)) }}</pre>
 							</details>
 							<div v-if="event.payload_preview" class="event-block">
-								<strong>Payload</strong>
+								<strong>{{ t('educai', 'Payload') }}</strong>
 								<pre>{{ event.payload_preview }}</pre>
 								<details v-if="event.payload_json">
-									<summary>Show JSON</summary>
+									<summary>{{ t('educai', 'Show JSON') }}</summary>
 									<pre>{{ formatJson(event.payload_json) }}</pre>
 								</details>
 							</div>
 							<div v-if="event.result_preview" class="event-block">
-								<strong>Result</strong>
+								<strong>{{ t('educai', 'Result') }}</strong>
 								<pre>{{ event.result_preview }}</pre>
 								<details v-if="event.result_json">
-									<summary>Show JSON</summary>
+									<summary>{{ t('educai', 'Show JSON') }}</summary>
 									<pre>{{ formatJson(event.result_json) }}</pre>
 								</details>
 							</div>
@@ -219,7 +223,7 @@
 					</ol>
 				</div>
 				<div v-else class="empty-detail">
-					Select an activity run to inspect its timeline.
+					{{ t('educai', 'Select an activity run to inspect its timeline.') }}
 				</div>
 			</aside>
 		</div>
@@ -231,6 +235,8 @@ import axios from '@nextcloud/axios'
 import { APP_DISPLAY_NAME } from '../branding.js'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { generateUrl } from '@nextcloud/router'
+import { getCanonicalLocale, n, t } from '../l10n.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 export default {
 	name: 'PersonalActivity',
@@ -260,6 +266,16 @@ export default {
 				onlyWithTools: false,
 			},
 		}
+	},
+
+	computed: {
+		paginationLabel() {
+			return t('educai', '{start}–{end} of {total}', {
+				start: this.formatNumber(this.offset + 1),
+				end: this.formatNumber(Math.min(this.offset + this.limit, this.total)),
+				total: this.formatNumber(this.total),
+			})
+		},
 	},
 
 	mounted() {
@@ -308,7 +324,7 @@ export default {
 					this.clearSelection()
 				}
 			} catch (error) {
-				this.error = error.response?.data?.error || 'Failed to load traces'
+				this.error = getApiErrorMessage(error, t('educai', 'Failed to load activity'))
 				showError(this.error)
 			} finally {
 				this.loading = false
@@ -330,7 +346,7 @@ export default {
 				this.selectedTrace = response.data.trace
 				this.events = response.data.events || []
 			} catch (error) {
-				this.detailError = error.response?.data?.error || 'Trace details unavailable'
+				this.detailError = getApiErrorMessage(error, t('educai', 'Activity details unavailable'))
 				showError(this.detailError)
 			} finally {
 				this.detailLoading = false
@@ -338,31 +354,31 @@ export default {
 		},
 
 		async deleteSelectedTrace() {
-			if (!this.selectedTrace || !confirm('Delete this activity trace?')) {
+			if (!this.selectedTrace || !confirm(t('educai', 'Delete this activity trace?'))) {
 				return
 			}
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/traces/${this.selectedTrace.id}`))
-				showSuccess('Trace deleted')
+				showSuccess(t('educai', 'Activity trace deleted'))
 				this.clearSelection()
 				await this.loadTraces()
 			} catch (error) {
-				showError(error.response?.data?.error || 'Deletion failed')
+				showError(getApiErrorMessage(error, t('educai', 'Deletion failed')))
 			}
 		},
 
 		async clearActivity() {
-			if (!confirm(`Clear all of your ${APP_DISPLAY_NAME} activity traces?`)) {
+			if (!confirm(t('educai', 'Clear all of your {appName} activity traces?', { appName: APP_DISPLAY_NAME }))) {
 				return
 			}
 			this.clearing = true
 			try {
 				await axios.delete(generateUrl('/apps/educai/api/v1/traces'))
-				showSuccess('Activity cleared')
+				showSuccess(t('educai', 'Activity cleared'))
 				this.clearSelection()
 				await this.loadTraces()
 			} catch (error) {
-				showError(error.response?.data?.error || 'Deletion failed')
+				showError(getApiErrorMessage(error, t('educai', 'Deletion failed')))
 			} finally {
 				this.clearing = false
 			}
@@ -408,7 +424,7 @@ export default {
 			if (!timestamp) {
 				return '-'
 			}
-			return new Date(timestamp * 1000).toLocaleString()
+			return new Date(timestamp * 1000).toLocaleString(getCanonicalLocale())
 		},
 
 		formatDuration(durationMs) {
@@ -416,9 +432,14 @@ export default {
 				return '-'
 			}
 			if (durationMs < 1000) {
-				return `${durationMs} ms`
+				return t('educai', '{duration} ms', { duration: this.formatNumber(durationMs) })
 			}
-			return `${(durationMs / 1000).toFixed(1)} s`
+			return t('educai', '{duration} s', {
+				duration: (durationMs / 1000).toLocaleString(getCanonicalLocale(), {
+					minimumFractionDigits: 1,
+					maximumFractionDigits: 1,
+				}),
+			})
 		},
 
 		formatTokens(value) {
@@ -429,18 +450,69 @@ export default {
 			if (!Number.isFinite(tokens)) {
 				return '-'
 			}
-			return `${tokens.toLocaleString()} ${tokens === 1 ? 'token' : 'tokens'}`
+			return n('educai', '{count} token', '{count} tokens', tokens, {
+				count: tokens.toLocaleString(getCanonicalLocale()),
+			})
+		},
+
+		formatToolCount(value) {
+			const count = Number(value) || 0
+			return n('educai', '{count} tool', '{count} tools', count, {
+				count: count.toLocaleString(getCanonicalLocale()),
+			})
+		},
+
+		formatEventCount(value) {
+			const count = Number(value) || 0
+			return n('educai', '{count} event', '{count} events', count, {
+				count: count.toLocaleString(getCanonicalLocale()),
+			})
+		},
+
+		formatNumber(value) {
+			const number = Number(value)
+			return Number.isFinite(number) ? number.toLocaleString(getCanonicalLocale()) : '-'
 		},
 
 		formatStatus(status) {
 			if (!status) {
-				return 'Unknown'
+				return t('educai', 'Unknown')
 			}
-			return status.charAt(0).toUpperCase() + status.slice(1)
+			const labels = {
+				running: t('educai', 'Running'),
+				success: t('educai', 'Success'),
+				error: t('educai', 'Error'),
+				partial: t('educai', 'Partial'),
+				ok: t('educai', 'OK'),
+				started: t('educai', 'Started'),
+				used: t('educai', 'Used'),
+				reconciliation_deferred: t('educai', 'Reconciliation deferred'),
+				completed: t('educai', 'Completed'),
+				skipped: t('educai', 'Skipped'),
+				registered: t('educai', 'Registered'),
+				unregistered: t('educai', 'Unregistered'),
+			}
+			return labels[status] || t('educai', 'Unknown status')
 		},
 
 		formatEventType(type) {
-			return (type || '').replaceAll('_', ' ')
+			const labels = {
+				assistant_response: t('educai', 'Assistant response'),
+				conversation_history: t('educai', 'Conversation history'),
+				error: t('educai', 'Error'),
+				llm_request: t('educai', 'LLM request'),
+				llm_response: t('educai', 'LLM response'),
+				provider_attempt: t('educai', 'Provider attempt'),
+				provider_attempt_budget_exhausted: t('educai', 'Provider attempt budget exhausted'),
+				provider_compatibility: t('educai', 'Provider compatibility'),
+				queue_delivery: t('educai', 'Queue delivery'),
+				queue_persistence: t('educai', 'Queue persistence'),
+				tool_call: t('educai', 'Tool call'),
+				tool_rejected: t('educai', 'Tool rejected'),
+				tool_result: t('educai', 'Tool result'),
+				user_message: t('educai', 'User message'),
+			}
+			return labels[type] || t('educai', 'Unknown event')
 		},
 
 		getRawLlmPayload(event) {
@@ -503,7 +575,7 @@ export default {
 
 .privacy-note {
 	padding: 10px 12px;
-	border-left: 3px solid var(--color-primary-element);
+	border-inline-start: 3px solid var(--color-primary-element);
 	background: var(--color-background-hover);
 }
 
@@ -579,7 +651,7 @@ export default {
 	border-radius: var(--border-radius);
 	background: var(--color-main-background);
 	color: var(--color-main-text);
-	text-align: left;
+	text-align: start;
 	cursor: pointer;
 }
 
@@ -704,7 +776,7 @@ export default {
 }
 
 .event-time {
-	margin-left: auto;
+	margin-inline-start: auto;
 }
 
 .event-error {
@@ -735,7 +807,7 @@ export default {
 	font-size: 12px;
 	line-height: 1.35;
 	white-space: pre-wrap;
-	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .event-block {
@@ -750,7 +822,7 @@ export default {
 	border-radius: var(--border-radius);
 	background: var(--color-background-dark);
 	white-space: pre-wrap;
-	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .event-duration {

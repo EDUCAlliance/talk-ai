@@ -7,13 +7,13 @@ namespace OCA\EducAI\Service;
 use OCA\EducAI\Db\Bot;
 use OCP\App\IAppManager;
 use OCP\IGroupManager;
-use OCP\IUser;
+use OCP\IL10N;
 use OCP\IUserManager;
 use Psr\Log\LoggerInterface;
 
 /**
  * Service to check user permissions for bot creation and approval.
- * 
+ *
  * Permission hierarchy:
  * - Nextcloud admins: Full access to create any bot type directly
  * - Group admins: Can create bots for their groups directly
@@ -25,6 +25,7 @@ class PermissionService {
     private IUserManager $userManager;
     private IAppManager $appManager;
     private LoggerInterface $logger;
+    private IL10N $l10n;
 
     /** @var array<string, array<string, mixed>> Cache for user permissions */
     private array $permissionCache = [];
@@ -33,12 +34,14 @@ class PermissionService {
         IGroupManager $groupManager,
         IUserManager $userManager,
         IAppManager $appManager,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        IL10N $l10n,
     ) {
         $this->groupManager = $groupManager;
         $this->userManager = $userManager;
         $this->appManager = $appManager;
         $this->logger = $logger;
+        $this->l10n = $l10n;
     }
 
     /**
@@ -69,7 +72,7 @@ class PermissionService {
 
     /**
      * Get list of group IDs where user is an admin (subadmin).
-     * 
+     *
      * @return array<string>
      */
     public function getAdminGroups(string $userId): array {
@@ -81,7 +84,7 @@ class PermissionService {
         try {
             $subAdmin = \OC::$server->get(\OCP\Group\ISubAdmin::class);
             $groups = $subAdmin->getSubAdminsGroups($user);
-            
+
             return array_map(static function ($group) {
                 return $group->getGID();
             }, $groups);
@@ -94,7 +97,7 @@ class PermissionService {
     /**
      * Check if user is a team admin, moderator, or owner for any team.
      * Uses Circles API - level >= 4 (Moderator) grants admin-like permissions.
-     * 
+     *
      * Levels in Circles:
      * - 1: Member
      * - 4: Moderator
@@ -108,7 +111,7 @@ class PermissionService {
 
     /**
      * Get list of team IDs where user is moderator, admin, or owner.
-     * 
+     *
      * @return array<string>
      */
     public function getAdminTeams(string $userId): array {
@@ -139,7 +142,7 @@ class PermissionService {
         try {
             // Get all circles the user is a member of
             $circles = \OCA\Circles\Api\v1\Circles::joinedCircles($userId, true);
-            
+
             foreach ($circles as $circle) {
                 try {
                     // Only consider actual teams (source type 16 or 10001)
@@ -159,7 +162,7 @@ class PermissionService {
                     if ($member !== null) {
                         $level = 0;
                         if (method_exists($member, 'getLevel')) {
-                            $level = (int) $member->getLevel();
+                            $level = (int)$member->getLevel();
                         }
 
                         // Level >= 4 means Moderator or higher (Admin=8, Owner=9)
@@ -230,7 +233,7 @@ class PermissionService {
         string $userId,
         string $visibility,
         ?array $groups = null,
-        ?array $teams = null
+        ?array $teams = null,
     ): bool {
         if ($visibility === 'personal') {
             return true;
@@ -267,7 +270,7 @@ class PermissionService {
 
     /**
      * Get user's permission summary for frontend.
-     * 
+     *
      * @return array{
      *   isAdmin: bool,
      *   isGroupAdmin: bool,
@@ -302,7 +305,7 @@ class PermissionService {
 
     /**
      * Get available visibility options for a user when creating a bot.
-     * 
+     *
      * @return array<array{value: string, label: string, requiresApproval: bool}>
      */
     public function getAvailableVisibilities(string $userId): array {
@@ -315,7 +318,7 @@ class PermissionService {
         // Personal is always available
         $options[] = [
             'value' => 'personal',
-            'label' => 'Just for me (personal)',
+            'label' => $this->l10n->t('Just for me (personal)'),
             'requiresApproval' => false,
         ];
 
@@ -323,7 +326,7 @@ class PermissionService {
         if ($isAdmin) {
             $options[] = [
                 'value' => 'global',
-                'label' => 'Global (available to all users)',
+                'label' => $this->l10n->t('Global (available to all users)'),
                 'requiresApproval' => false,
             ];
         }
@@ -331,14 +334,14 @@ class PermissionService {
         // Groups - available to all, but may require approval
         $options[] = [
             'value' => 'groups',
-            'label' => 'Specific groups',
+            'label' => $this->l10n->t('Specific groups'),
             'requiresApproval' => !$isAdmin && !$isGroupAdmin,
         ];
 
         // Teams - available to all, but may require approval
         $options[] = [
             'value' => 'teams',
-            'label' => 'Specific teams',
+            'label' => $this->l10n->t('Specific teams'),
             'requiresApproval' => !$isAdmin && !$isTeamAdmin,
         ];
 

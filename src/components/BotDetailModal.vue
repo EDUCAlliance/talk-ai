@@ -13,20 +13,24 @@
 
 			<div v-if="loading" class="modal-loading">
 				<span class="icon-loading" />
-				<p>Loading bot details...</p>
+				<p>{{ t('educai', 'Loading bot details…') }}</p>
 			</div>
 
 			<div v-else class="modal-body">
 				<!-- Description Section -->
 				<section class="detail-section">
-					<h3>Description</h3>
-					<p v-if="details.description" class="description-text">{{ details.description }}</p>
-					<p v-else class="no-content">No description provided</p>
+					<h3>{{ t('educai', 'Description') }}</h3>
+					<p v-if="details.description" class="description-text">
+						{{ details.description }}
+					</p>
+					<p v-else class="no-content">
+						{{ t('educai', 'No description provided') }}
+					</p>
 				</section>
 
 				<!-- Visibility & Access -->
 				<section class="detail-section">
-					<h3>Visibility</h3>
+					<h3>{{ t('educai', 'Visibility') }}</h3>
 					<div class="visibility-info">
 						<span class="visibility-badge" :class="visibilityClass">{{ visibilityLabel }}</span>
 						<span v-if="accessReasonText" class="access-reason">{{ accessReasonText }}</span>
@@ -35,16 +39,16 @@
 
 				<!-- Creator Info -->
 				<section class="detail-section">
-					<h3>Created By</h3>
+					<h3>{{ t('educai', 'Created by') }}</h3>
 					<div class="creator-info">
-						<span class="creator-name">{{ details.owner_display_name || 'Unknown' }}</span>
+						<span class="creator-name">{{ details.owner_display_name || t('educai', 'Unknown') }}</span>
 						<span class="creation-date">{{ formatDate(details.created_at) }}</span>
 					</div>
 				</section>
 
 				<!-- System Prompt -->
 				<section class="detail-section">
-					<h3>System Prompt</h3>
+					<h3>{{ t('educai', 'System prompt') }}</h3>
 					<div class="system-prompt-container">
 						<pre class="system-prompt">{{ details.system_prompt }}</pre>
 					</div>
@@ -52,35 +56,37 @@
 
 				<!-- Tools -->
 				<section v-if="details.tools && details.tools.length > 0" class="detail-section">
-					<h3>Enabled Tools</h3>
+					<h3>{{ t('educai', 'Enabled tools') }}</h3>
 					<ul class="tools-list">
 						<li v-for="(tool, index) in details.tools" :key="index" class="tool-item">
 							<div class="tool-header">
 								<span class="tool-name">{{ tool.name }}</span>
-								<span v-if="tool.is_builtin" class="tool-badge builtin">Built-in</span>
+								<span v-if="tool.is_builtin" class="tool-badge builtin">{{ t('educai', 'Built-in') }}</span>
 							</div>
-							<p v-if="tool.description" class="tool-description">{{ tool.description }}</p>
+							<p v-if="tool.description" class="tool-description">
+								{{ tool.description }}
+							</p>
 						</li>
 					</ul>
 				</section>
 
 				<!-- RAG Status -->
 				<section v-if="details.rag_enabled" class="detail-section">
-					<h3>Knowledge Base</h3>
+					<h3>{{ t('educai', 'Knowledge base') }}</h3>
 					<div class="rag-status">
 						<span class="rag-icon">📚</span>
-						<span v-if="details.rag_source_count > 0">
-							This bot has access to {{ details.rag_source_count }} knowledge source{{ details.rag_source_count !== 1 ? 's' : '' }}
-						</span>
+						<span v-if="details.rag_source_count > 0">{{ knowledgeSourceSummary }}</span>
 						<span v-else>
-							Knowledge base enabled but no sources attached yet
+							{{ t('educai', 'Knowledge base enabled but no sources attached yet') }}
 						</span>
 					</div>
 				</section>
 			</div>
 
 			<div class="modal-footer">
-				<button class="button" @click="$emit('close')">Close</button>
+				<button class="button" @click="$emit('close')">
+					{{ t('educai', 'Close') }}
+				</button>
 			</div>
 		</div>
 	</div>
@@ -90,6 +96,7 @@
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError } from '@nextcloud/dialogs'
+import { getCanonicalLocale, n, t } from '../l10n.js'
 
 export default {
 	name: 'BotDetailModal',
@@ -106,12 +113,22 @@ export default {
 		}
 	},
 	computed: {
+		knowledgeSourceSummary() {
+			const count = Number(this.details.rag_source_count) || 0
+			return n(
+				'educai',
+				'This bot has access to {count} knowledge source',
+				'This bot has access to {count} knowledge sources',
+				count,
+				{ count: count.toLocaleString(getCanonicalLocale()) },
+			)
+		},
 		visibilityLabel() {
 			const v = this.details.visibility || (this.details.is_public ? 'global' : 'groups')
-			if (v === 'personal') return 'Personal'
-			if (v === 'global') return 'Global (available to all users)'
-			if (v === 'teams') return 'Team access'
-			return 'Group access'
+			if (v === 'personal') return t('educai', 'Personal')
+			if (v === 'global') return t('educai', 'Global (available to all users)')
+			if (v === 'teams') return t('educai', 'Team access')
+			return t('educai', 'Group access')
 		},
 		visibilityClass() {
 			const v = this.details.visibility || (this.details.is_public ? 'global' : 'groups')
@@ -124,12 +141,12 @@ export default {
 			const reason = this.details.access_reason
 			if (!reason) return null
 			if (reason.type === 'global') return null
-			if (reason.type === 'owner') return 'You are the owner of this bot'
+			if (reason.type === 'owner') return t('educai', 'You are the owner of this bot')
 			if (reason.type === 'group' && reason.names?.length > 0) {
-				return `Access via group: ${reason.names.join(', ')}`
+				return t('educai', 'Access via group: {groups}', { groups: reason.names.join(', ') })
 			}
 			if (reason.type === 'team' && reason.names?.length > 0) {
-				return `Access via team: ${reason.names.join(', ')}`
+				return t('educai', 'Access via team: {teams}', { teams: reason.names.join(', ') })
 			}
 			return null
 		},
@@ -145,16 +162,16 @@ export default {
 				this.details = response.data
 			} catch (error) {
 				console.error('Failed to load bot details:', error)
-				showError('Failed to load bot details')
+				showError(t('educai', 'Failed to load bot details'))
 				this.details = this.bot // Fallback to basic info
 			} finally {
 				this.loading = false
 			}
 		},
 		formatDate(timestamp) {
-			if (!timestamp) return 'Unknown'
+			if (!timestamp) return t('educai', 'Unknown')
 			const date = new Date(timestamp * 1000)
-			return date.toLocaleDateString(undefined, {
+			return date.toLocaleDateString(getCanonicalLocale(), {
 				day: 'numeric',
 				month: 'long',
 				year: 'numeric',
@@ -171,7 +188,7 @@ export default {
 	position: fixed;
 	z-index: 9999;
 	top: 0;
-	left: 0;
+	inset-inline-start: 0;
 	width: 100%;
 	height: 100%;
 	background: rgba(0, 0, 0, 0.6);

@@ -12,13 +12,14 @@ use OCP\AppFramework\Controller;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\Http\Client\IClientService;
+use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 use Psr\Log\LoggerInterface;
 
 /**
  * Controller to proxy Talk bot API calls for the Smart Picker.
- * 
+ *
  * This controller handles checking and enabling the "Talk AI" Talk bot
  * in conversations, which is required for the bot to receive messages.
  */
@@ -32,6 +33,7 @@ class TalkBotController extends Controller {
 	private BotService $botService;
 	private LoggerInterface $logger;
 	private ?string $userId;
+	private IL10N $l10n;
 
 	public function __construct(
 		string $appName,
@@ -41,7 +43,8 @@ class TalkBotController extends Controller {
 		BotMapper $botMapper,
 		BotService $botService,
 		LoggerInterface $logger,
-		?string $userId
+		?string $userId,
+		IL10N $l10n,
 	) {
 		parent::__construct($appName, $request);
 		$this->clientService = $clientService;
@@ -51,23 +54,24 @@ class TalkBotController extends Controller {
 		$this->botService = $botService;
 		$this->logger = $logger;
 		$this->userId = $userId;
+		$this->l10n = $l10n;
 	}
 
 	/**
 	 * @NoAdminRequired
-	 * 
+	 *
 	 * Get the status of the Talk AI bot in a Talk room.
-	 * 
+	 *
 	 * @param string $roomToken The Talk room token
 	 * @return DataResponse Contains:
-	 *   - botEnabled: boolean (is Talk AI bot enabled in room)
-	 *   - isModerator: boolean (can user enable bots)
-	 *   - educAiBotId: int|null (the Talk bot ID for "Talk AI")
+	 *                      - botEnabled: boolean (is Talk AI bot enabled in room)
+	 *                      - isModerator: boolean (can user enable bots)
+	 *                      - educAiBotId: int|null (the Talk bot ID for "Talk AI")
 	 */
 	public function status(string $roomToken): DataResponse {
 		try {
 			if ($this->userId === null) {
-				return new DataResponse(['error' => 'Not authenticated'], 401);
+				return $this->errorResponse('not_authenticated', $this->l10n->t('Not authenticated'), 401);
 			}
 
 			// Get room info to check if user is moderator
@@ -105,23 +109,23 @@ class TalkBotController extends Controller {
 				'roomToken' => $roomToken,
 				'exception' => $e,
 			]);
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('talk_status_failed', $this->l10n->t('Failed to get Talk bot status'), 500);
 		}
 	}
 
 	/**
 	 * @NoAdminRequired
-	 * 
+	 *
 	 * Enable the Talk AI bot in a Talk room.
 	 * Only moderators can enable bots.
-	 * 
+	 *
 	 * @param string $roomToken The Talk room token
 	 * @return DataResponse
 	 */
 	public function enableBot(string $roomToken): DataResponse {
 		try {
 			if ($this->userId === null) {
-				return new DataResponse(['error' => 'Not authenticated'], 401);
+				return $this->errorResponse('not_authenticated', $this->l10n->t('Not authenticated'), 401);
 			}
 
 			$roomInfo = $this->getRoomInfo($roomToken);
@@ -135,9 +139,11 @@ class TalkBotController extends Controller {
 				$this->logger->warning(self::EDUC_AI_BOT_NAME . ' bot not found in Talk', [
 					'roomToken' => $roomToken,
 				]);
-				return new DataResponse([
-					'error' => self::EDUC_AI_BOT_NAME . ' bot is not registered in Talk. Please ask an administrator to register it.',
-				], 404);
+				return $this->errorResponse(
+					'talk_bot_not_registered',
+					$this->l10n->t('%s bot is not registered in Talk. Please ask an administrator to register it.', [self::EDUC_AI_BOT_NAME]),
+					404,
+				);
 			}
 
 			$botId = $educAiBot['id'];
@@ -146,7 +152,7 @@ class TalkBotController extends Controller {
 			if (($educAiBot['state'] ?? 0) === 1) {
 				return new DataResponse([
 					'success' => true,
-					'message' => 'Bot already enabled',
+					'message' => $this->l10n->t('Bot already enabled'),
 				]);
 			}
 
@@ -156,9 +162,11 @@ class TalkBotController extends Controller {
 					'userId' => $this->userId,
 				]);
 
-				return new DataResponse([
-					'error' => 'You do not have permission to enable bots in this conversation. Only moderators can enable bots.',
-				], 403);
+				return $this->errorResponse(
+					'talk_bot_enable_forbidden',
+					$this->l10n->t('You do not have permission to enable bots in this conversation. Only moderators can enable bots.'),
+					403,
+				);
 			}
 
 			// Enable the bot
@@ -172,22 +180,29 @@ class TalkBotController extends Controller {
 
 			return new DataResponse([
 				'success' => true,
-				'message' => 'Bot enabled successfully',
+				'message' => $this->l10n->t('Bot enabled successfully'),
 			]);
+		} catch (TalkApiException $e) {
+			$this->logger->error('Failed to enable Talk bot: ' . $e->getMessage(), [
+				'roomToken' => $roomToken,
+				'statusCode' => $e->getStatusCode(),
+			]);
+
+			if ($e->getStatusCode() === 403) {
+				return $this->errorResponse(
+					'talk_bot_enable_forbidden',
+					$this->l10n->t('You do not have permission to enable bots in this conversation. Only moderators can enable bots.'),
+					403,
+				);
+			}
+
+			return $this->errorResponse('talk_bot_enable_failed', $this->l10n->t('Failed to enable the Talk bot'), 500);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to enable Talk bot: ' . $e->getMessage(), [
 				'roomToken' => $roomToken,
 				'exception' => $e,
 			]);
-			
-			// Check if it's a permission error
-			if (strpos($e->getMessage(), '403') !== false || strpos($e->getMessage(), 'Forbidden') !== false) {
-				return new DataResponse([
-					'error' => 'You do not have permission to enable bots in this conversation. Only moderators can enable bots.',
-				], 403);
-			}
-			
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('talk_bot_enable_failed', $this->l10n->t('Failed to enable the Talk bot'), 500);
 		}
 	}
 
@@ -199,7 +214,7 @@ class TalkBotController extends Controller {
 	public function rooms(): DataResponse {
 		try {
 			if ($this->userId === null) {
-				return new DataResponse(['error' => 'Not authenticated'], 401);
+				return $this->errorResponse('not_authenticated', $this->l10n->t('Not authenticated'), 401);
 			}
 
 			$rooms = $this->listRooms();
@@ -213,6 +228,7 @@ class TalkBotController extends Controller {
 
 			return new DataResponse([
 				'error' => $this->formatTalkAvailabilityError($e),
+				'errorCode' => $e->getStatusCode() === 404 ? 'talk_rooms_unavailable' : 'talk_rooms_load_failed',
 			], $this->mapTalkFailureStatus($e));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list Talk rooms: ' . $e->getMessage(), [
@@ -220,7 +236,7 @@ class TalkBotController extends Controller {
 				'exception' => $e,
 			]);
 
-			return new DataResponse(['error' => 'Failed to load Talk conversations'], 500);
+			return $this->errorResponse('talk_rooms_load_failed', $this->l10n->t('Failed to load Talk conversations'), 500);
 		}
 	}
 
@@ -233,22 +249,22 @@ class TalkBotController extends Controller {
 	public function startBotChat(): DataResponse {
 		try {
 			if ($this->userId === null) {
-				return new DataResponse(['error' => 'Not authenticated'], 401);
+				return $this->errorResponse('not_authenticated', $this->l10n->t('Not authenticated'), 401);
 			}
 
 			$botId = (int)$this->ncRequest->getParam('botId', 0);
 			if ($botId <= 0) {
-				return new DataResponse(['error' => 'Missing botId'], 400);
+				return $this->errorResponse('missing_bot_id', $this->l10n->t('Missing bot ID'), 400);
 			}
 
 			try {
 				$bot = $this->botMapper->findById($botId);
 			} catch (DoesNotExistException $e) {
-				return new DataResponse(['error' => 'Bot not found'], 404);
+				return $this->errorResponse('bot_not_found', $this->l10n->t('Bot not found'), 404);
 			}
 
 			if (!$bot->getIsActive() || !$this->botService->userCanAccessBot($bot, $this->userId)) {
-				return new DataResponse(['error' => 'You do not have access to this bot'], 403);
+				return $this->errorResponse('bot_access_denied', $this->l10n->t('You do not have access to this bot'), 403);
 			}
 
 			$mode = (string)$this->ncRequest->getParam('mode', 'new');
@@ -263,7 +279,7 @@ class TalkBotController extends Controller {
 			if ($mode === 'new') {
 				$roomName = trim((string)$this->ncRequest->getParam('roomName', ''));
 				if ($roomName === '') {
-					$roomName = 'Chat with ' . $bot->getBotName();
+					$roomName = $this->l10n->t('Chat with %s', [$bot->getBotName()]);
 				}
 				$roomInfo = $this->createGroupRoom($roomName);
 				$roomToken = $this->extractRoomToken($roomInfo);
@@ -274,11 +290,11 @@ class TalkBotController extends Controller {
 			} elseif ($mode === 'existing') {
 				$roomToken = trim((string)$this->ncRequest->getParam('roomToken', ''));
 				if ($roomToken === '') {
-					return new DataResponse(['error' => 'Please select a Talk conversation'], 400);
+					return $this->errorResponse('talk_room_required', $this->l10n->t('Please select a Talk conversation'), 400);
 				}
 				$roomInfo = $this->getRoomInfo($roomToken);
 			} else {
-				return new DataResponse(['error' => 'Unsupported Talk start mode'], 400);
+				return $this->errorResponse('talk_start_mode_unsupported', $this->l10n->t('Unsupported Talk start mode'), 400);
 			}
 
 			$enableResult = $this->ensureEducAiBotEnabled($roomToken, $roomInfo);
@@ -316,6 +332,7 @@ class TalkBotController extends Controller {
 			$status = $this->mapTalkFailureStatus($e);
 			return new DataResponse([
 				'error' => $this->formatStartChatTalkError($e),
+				'errorCode' => $this->getStartChatTalkErrorCode($e),
 			], $status);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to start Talk AI Talk chat: ' . $e->getMessage(), [
@@ -323,13 +340,13 @@ class TalkBotController extends Controller {
 				'exception' => $e,
 			]);
 
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('talk_start_failed', $this->l10n->t('Failed to start the Talk conversation'), 500);
 		}
 	}
 
 	/**
 	 * Get room information from Talk API.
-	 * 
+	 *
 	 * @param string $roomToken
 	 * @return array Room data
 	 * @throws Exception
@@ -340,7 +357,7 @@ class TalkBotController extends Controller {
 
 	/**
 	 * Get list of bots in a Talk room.
-	 * 
+	 *
 	 * @param string $roomToken
 	 * @return array List of bots
 	 * @throws Exception
@@ -364,7 +381,7 @@ class TalkBotController extends Controller {
 			$participantType = (int)($room['participantType'] ?? 3);
 			$mapped[] = [
 				'token' => (string)$room['token'],
-				'displayName' => (string)($room['displayName'] ?? $room['name'] ?? 'Talk conversation'),
+				'displayName' => (string)($room['displayName'] ?? $room['name'] ?? $this->l10n->t('Talk conversation')),
 				'type' => (int)($room['type'] ?? 0),
 				'participantType' => $participantType,
 				'isModerator' => $participantType <= 2,
@@ -400,7 +417,9 @@ class TalkBotController extends Controller {
 		if ($educAiBot === null) {
 			throw new TalkApiException(
 				self::EDUC_AI_BOT_NAME . ' bot is not registered in Talk. Please ask an administrator to register it.',
-				404
+				404,
+				'',
+				'bot_not_registered',
 			);
 		}
 
@@ -412,7 +431,9 @@ class TalkBotController extends Controller {
 		if (!$this->isModerator($roomInfo)) {
 			throw new TalkApiException(
 				'You do not have permission to enable bots in this conversation. Only moderators can enable bots.',
-				403
+				403,
+				'',
+				'enable_forbidden',
 			);
 		}
 
@@ -455,19 +476,20 @@ class TalkBotController extends Controller {
 			throw new TalkApiException(
 				'Talk API request failed with HTTP ' . $statusCode,
 				$statusCode,
-				mb_substr($body, 0, 500)
+				mb_substr($body, 0, 500),
+				'http_error',
 			);
 		}
 
 		$decoded = json_decode($body, true);
 		if (!is_array($decoded)) {
-			throw new TalkApiException('Talk API returned an invalid JSON response', $statusCode, mb_substr($body, 0, 500));
+			throw new TalkApiException('Talk API returned an invalid JSON response', $statusCode, mb_substr($body, 0, 500), 'invalid_response');
 		}
 
 		$ocsStatusCode = (int)($decoded['ocs']['meta']['statuscode'] ?? 200);
 		if ($ocsStatusCode >= 400) {
 			$message = (string)($decoded['ocs']['meta']['message'] ?? 'Talk API request failed');
-			throw new TalkApiException($message, $ocsStatusCode, mb_substr($body, 0, 500));
+			throw new TalkApiException($message, $ocsStatusCode, mb_substr($body, 0, 500), 'ocs_error');
 		}
 
 		$responseData = $decoded['ocs']['data'] ?? [];
@@ -476,7 +498,7 @@ class TalkBotController extends Controller {
 
 	/**
 	 * Enable a bot in a Talk room.
-	 * 
+	 *
 	 * @param string $roomToken
 	 * @param int $botId
 	 * @throws Exception
@@ -488,7 +510,7 @@ class TalkBotController extends Controller {
 	private function extractRoomToken(array $roomInfo): string {
 		$token = trim((string)($roomInfo['token'] ?? ''));
 		if ($token === '') {
-			throw new TalkApiException('Talk did not return a room token after creating the conversation', 502);
+			throw new TalkApiException('Talk did not return a room token after creating the conversation', 502, '', 'room_token_missing');
 		}
 
 		return $token;
@@ -538,7 +560,7 @@ class TalkBotController extends Controller {
 
 	/**
 	 * Find the Talk AI bot in a list of bots.
-	 * 
+	 *
 	 * @param array $bots
 	 * @return array|null Bot data or null if not found
 	 */
@@ -575,33 +597,54 @@ class TalkBotController extends Controller {
 
 	private function formatTalkAvailabilityError(TalkApiException $e): string {
 		if ($e->getStatusCode() === 404) {
-			return 'Nextcloud Talk is not available. Please ask an administrator to enable the Talk app.';
+			return $this->l10n->t('Nextcloud Talk is not available. Please ask an administrator to enable the Talk app.');
 		}
 
-		return 'Failed to load Talk conversations: ' . $e->getMessage();
+		return $this->l10n->t('Failed to load Talk conversations');
 	}
 
 	private function formatStartChatTalkError(TalkApiException $e): string {
 		$status = $e->getStatusCode();
-		if ($status === 403) {
-			return $e->getMessage();
+		if ($e->getReason() === 'bot_not_registered') {
+			return $this->l10n->t('%s bot is not registered in Talk. Please ask an administrator to register it.', [self::EDUC_AI_BOT_NAME]);
 		}
-		if ($status === 404 && str_contains($e->getMessage(), self::EDUC_AI_BOT_NAME . ' bot')) {
-			return $e->getMessage();
+		if ($status === 403) {
+			return $this->l10n->t('You do not have permission to enable bots in this conversation. Only moderators can enable bots.');
 		}
 		if ($status === 404) {
-			return 'Nextcloud Talk is not available or the selected conversation could not be found.';
+			return $this->l10n->t('Nextcloud Talk is not available or the selected conversation could not be found.');
 		}
 		if ($status >= 500 || $status === 0) {
-			return 'Talk could not complete this action right now: ' . $e->getMessage();
+			return $this->l10n->t('Talk could not complete this action right now.');
 		}
 
-		return $e->getMessage();
+		return $this->l10n->t('Talk could not complete this action.');
+	}
+
+	private function getStartChatTalkErrorCode(TalkApiException $e): string {
+		if ($e->getReason() === 'bot_not_registered') {
+			return 'talk_bot_not_registered';
+		}
+		if ($e->getStatusCode() === 403) {
+			return 'talk_start_forbidden';
+		}
+		if ($e->getStatusCode() === 404) {
+			return 'talk_start_unavailable';
+		}
+
+		return 'talk_start_failed';
+	}
+
+	private function errorResponse(string $errorCode, string $error, int $status): DataResponse {
+		return new DataResponse([
+			'error' => $error,
+			'errorCode' => $errorCode,
+		], $status);
 	}
 
 	/**
 	 * Get headers for internal API calls, including auth forwarding.
-	 * 
+	 *
 	 * @return array
 	 */
 	private function getRequestHeaders(): array {
@@ -609,31 +652,31 @@ class TalkBotController extends Controller {
 			'OCS-APIRequest' => 'true',
 			'Accept' => 'application/json',
 		];
-		
+
 		// Forward Authorization header if present (for basic auth)
 		$authHeader = $this->ncRequest->getHeader('Authorization');
 		if (!empty($authHeader)) {
 			$headers['Authorization'] = $authHeader;
 		}
-		
+
 		return $headers;
 	}
 
 	/**
 	 * Get cookies from the current request to forward to internal API calls.
 	 * This enables session-based authentication for the Talk API.
-	 * 
+	 *
 	 * @return \GuzzleHttp\Cookie\CookieJar
 	 */
 	private function getForwardedCookies(): \GuzzleHttp\Cookie\CookieJar {
 		$jar = new \GuzzleHttp\Cookie\CookieJar();
-		
+
 		// Get cookies from $_COOKIE superglobal
 		$cookies = $_COOKIE;
-		
+
 		// Parse the host for the cookie domain
 		$host = $this->ncRequest->getServerHost();
-		
+
 		foreach ($cookies as $name => $value) {
 			$jar->setCookie(new \GuzzleHttp\Cookie\SetCookie([
 				'Name' => $name,
@@ -642,7 +685,7 @@ class TalkBotController extends Controller {
 				'Path' => '/',
 			]));
 		}
-		
+
 		return $jar;
 	}
 }

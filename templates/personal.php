@@ -2,6 +2,8 @@
 use OCA\EducAI\AppInfo\Application;
 use OCP\IURLGenerator;
 
+translation(Application::APP_ID);
+
 $personalScriptPath = __DIR__ . '/../js/educai-personal.mjs';
 $personalScriptVersion = is_file($personalScriptPath) ? (string)filemtime($personalScriptPath) : '0';
 $personalScriptUrl = \OCP\Server::get(IURLGenerator::class)->linkTo(Application::APP_ID, 'js/educai-personal.mjs', ['v' => $personalScriptVersion]);
@@ -9,4 +11,3 @@ $personalScriptUrl = \OCP\Server::get(IURLGenerator::class)->linkTo(Application:
 
 <div id="educai-personal-root"></div>
 <?php emit_script_tag($personalScriptUrl, '', 'module'); ?>
-

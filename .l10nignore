@@ -1,0 +1,9 @@
+# Compiled and third-party files must not be scanned for translation calls.
+js/
+node_modules/
+vendor/
+vendor-bin/
+build/
+docs/
+tests/
+translationfiles/

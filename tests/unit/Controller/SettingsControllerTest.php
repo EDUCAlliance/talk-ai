@@ -20,6 +20,7 @@ use OCA\EducAI\Webhook\TalkHandler;
 use OCP\App\IAppManager;
 use OCP\BackgroundJob\IJobList;
 use OCP\IGroupManager;
+use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 use OCP\IUserSession;
@@ -27,6 +28,58 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class SettingsControllerTest extends TestCase {
+	public function testRateLimitStatusReturnsSafeLocalizedErrorCode(): void {
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$rateLimitService->method('getStatus')->willThrowException(new \RuntimeException('database password leaked'));
+		$controller = $this->createController(
+			$rateLimitService,
+			$this->createMock(BotService::class),
+			$this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class),
+			$this->createMock(TraceService::class),
+		);
+
+		$response = $controller->rateLimitStatus();
+
+		$this->assertSame(500, $response->getStatus());
+		$this->assertSame('rate_limit_status_load_failed', $response->getData()['errorCode']);
+		$this->assertSame('Failed to load rate limit status', $response->getData()['error']);
+		$this->assertStringNotContainsString('password', $response->getData()['error']);
+	}
+
+	public function testModelsLocalizesEndpointLabelsWithoutChangingModelIds(): void {
+		$llmClient = $this->createMock(LLMClient::class);
+		$llmClient->method('listModelOptions')->willReturn([
+			['id' => 'primary:model-a', 'label' => 'Primary · model-a', 'model' => 'model-a', 'endpoint' => 'primary'],
+			['id' => 'secondary:model-b', 'label' => 'Secondary · model-b', 'model' => 'model-b', 'endpoint' => 'secondary'],
+		]);
+		$l10nBuilder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$l10nBuilder->addMethods(['t']);
+		}
+		$l10n = $l10nBuilder->getMock();
+		$l10n->method('t')->willReturnCallback(static fn (string $text): string => match ($text) {
+			'Primary' => 'Primär',
+			'Secondary' => 'Sekundär',
+			default => $text,
+		});
+		$controller = $this->createController(
+			$this->createMock(RateLimitService::class),
+			$this->createMock(BotService::class),
+			$this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class),
+			$this->createMock(TraceService::class),
+			$llmClient,
+			$l10n,
+		);
+
+		$data = $controller->models()->getData();
+
+		$this->assertSame(['primary:model-a', 'secondary:model-b'], $data['models']);
+		$this->assertSame('Primär · model-a', $data['model_options'][0]['label']);
+		$this->assertSame('Sekundär · model-b', $data['model_options'][1]['label']);
+	}
+
 	public function testTypedAgentFailureTerminatesQueueAndSendsOnlySafeReply(): void {
 		$request = new QueuedRequest();
 		$request->setId(99);
@@ -131,7 +184,8 @@ class SettingsControllerTest extends TestCase {
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => ['Agent execution terminated: max_turns'],
+			'errors' => ['A queued request could not be processed.'],
+			'errorCodes' => ['queued_request_failed'],
 		], $controller->processQueue()->getData());
 	}
 
@@ -205,6 +259,7 @@ class SettingsControllerTest extends TestCase {
 			'processed' => 1,
 			'remaining' => 0,
 			'errors' => [],
+			'errorCodes' => [],
 		], $controller->processQueue()->getData());
 	}
 
@@ -290,7 +345,8 @@ class SettingsControllerTest extends TestCase {
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => ['Talk API returned permanent HTTP 400'],
+			'errors' => ['A queued request could not be processed.'],
+			'errorCodes' => ['queued_request_failed'],
 		], $controller->processQueue()->getData());
 		$this->assertSame('Queued answer.', $request->getResult());
 	}
@@ -365,7 +421,8 @@ class SettingsControllerTest extends TestCase {
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => [$error],
+			'errors' => ['A queued request could not be processed.'],
+			'errorCodes' => ['queued_request_failed'],
 		], $controller->processQueue()->getData());
 		$this->assertSame('Queued answer.', $request->getResult());
 		$this->assertSame(QueuedRequest::STATUS_DELIVERING, $request->getStatus());
@@ -427,6 +484,7 @@ class SettingsControllerTest extends TestCase {
 			'processed' => 1,
 			'remaining' => 0,
 			'errors' => [],
+			'errorCodes' => [],
 		], $controller->processQueue()->getData());
 		$this->assertSame(QueuedRequest::STATUS_COMPLETED, $request->getStatus());
 	}
@@ -503,9 +561,12 @@ class SettingsControllerTest extends TestCase {
 		$second = $controller->processQueue()->getData();
 		$terminal = $controller->processQueue()->getData();
 
-		$this->assertSame(['Queued response delivered, but completion persistence failed: database unavailable'], $first['errors']);
+		$this->assertSame(['A queued request could not be processed.'], $first['errors']);
 		$this->assertSame($first['errors'], $second['errors']);
-		$this->assertSame(['Queued response delivery attempts exhausted'], $terminal['errors']);
+		$this->assertSame(['A queued request could not be processed.'], $terminal['errors']);
+		$this->assertSame(['queued_request_failed'], $first['errorCodes']);
+		$this->assertSame($first['errorCodes'], $second['errorCodes']);
+		$this->assertSame(['queued_request_failed'], $terminal['errorCodes']);
 		$this->assertSame([$referenceId, $referenceId], $referenceIds);
 		$this->assertSame(QueuedRequest::STATUS_FAILED, $terminalReload->getStatus());
 	}
@@ -548,6 +609,7 @@ class SettingsControllerTest extends TestCase {
 			'processed' => 0,
 			'remaining' => 0,
 			'errors' => [],
+			'errorCodes' => [],
 		], $controller->processQueue()->getData());
 	}
 
@@ -591,6 +653,7 @@ class SettingsControllerTest extends TestCase {
 			'processed' => 0,
 			'remaining' => 0,
 			'errors' => [],
+			'errorCodes' => [],
 		], $controller->processQueue()->getData());
 		$this->assertSame(QueuedRequest::STATUS_PENDING, $request->getStatus());
 		$this->assertSame(1, $request->getAttempts());
@@ -646,6 +709,7 @@ class SettingsControllerTest extends TestCase {
 			'processed' => 0,
 			'remaining' => 0,
 			'errors' => [],
+			'errorCodes' => [],
 		], $controller->processQueue()->getData());
 		$this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
 		$this->assertSame('Queued answer.', $request->getResult());
@@ -705,7 +769,8 @@ class SettingsControllerTest extends TestCase {
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => [$summary],
+			'errors' => ['A queued request could not be processed.'],
+			'errorCodes' => ['queued_request_failed'],
 		], $controller->processQueue()->getData());
 		$this->assertSame(QueuedRequest::STATUS_RESPONSE_READY, $request->getStatus());
 		$this->assertSame('Queued answer.', $request->getResult());
@@ -754,6 +819,7 @@ class SettingsControllerTest extends TestCase {
 			'processed' => 0,
 			'remaining' => 0,
 			'errors' => [],
+			'errorCodes' => [],
 		], $controller->processQueue()->getData());
 	}
 
@@ -804,7 +870,8 @@ class SettingsControllerTest extends TestCase {
 			'success' => true,
 			'processed' => 0,
 			'remaining' => 0,
-			'errors' => [$error],
+			'errors' => ['A queued request could not be processed.'],
+			'errorCodes' => ['queued_request_failed'],
 		], $controller->processQueue()->getData());
 	}
 
@@ -873,12 +940,15 @@ class SettingsControllerTest extends TestCase {
 		BotMapper $botMapper,
 		TalkHandler $talkHandler,
 		TraceService $traceService,
+		?LLMClient $llmClient = null,
+		?IL10N $l10n = null,
 	): SettingsController {
+		$l10n ??= $this->createL10n();
 		return new SettingsController(
 			'educai',
 			$this->createMock(IRequest::class),
 			$this->createMock(SettingsService::class),
-			$this->createMock(LLMClient::class),
+			$llmClient ?? $this->createMock(LLMClient::class),
 			$rateLimitService,
 			$this->createMock(RagIngestionService::class),
 			$this->createMock(BotSourceMapper::class),
@@ -892,7 +962,21 @@ class SettingsControllerTest extends TestCase {
 			$this->createMock(IUserSession::class),
 			$this->createMock(IAppManager::class),
 			$this->createMock(LoggerInterface::class),
-			$traceService
+			$traceService,
+			$l10n,
 		);
+	}
+
+	private function createL10n(): IL10N {
+		$builder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$builder->addMethods(['t']);
+		}
+		$l10n = $builder->getMock();
+		$l10n->method('t')->willReturnCallback(static function (string $text, array $parameters = []): string {
+			return $parameters === [] ? $text : vsprintf($text, $parameters);
+		});
+
+		return $l10n;
 	}
 }
