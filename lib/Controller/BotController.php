@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace OCA\EducAI\Controller;
 
 use Exception;
+use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\PermissionService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
@@ -19,6 +22,8 @@ class BotController extends Controller {
 	private PermissionService $permissionService;
 	private ?string $userId;
 	private LoggerInterface $logger;
+	private IL10N $l10n;
+	private BuiltInToolUiService $builtInToolUiService;
 
 	public function __construct(
 		string $appName,
@@ -26,13 +31,17 @@ class BotController extends Controller {
 		BotService $botService,
 		PermissionService $permissionService,
 		?string $userId,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		IL10N $l10n,
+		BuiltInToolUiService $builtInToolUiService,
 	) {
 		parent::__construct($appName, $request);
 		$this->botService = $botService;
 		$this->permissionService = $permissionService;
 		$this->userId = $userId;
 		$this->logger = $logger;
+		$this->l10n = $l10n;
+		$this->builtInToolUiService = $builtInToolUiService;
 	}
 
 	/**
@@ -45,7 +54,7 @@ class BotController extends Controller {
 			return new DataResponse($bots);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list bots: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('bots_load_failed', $this->l10n->t('Failed to load bots'), 500);
 		}
 	}
 
@@ -56,15 +65,19 @@ class BotController extends Controller {
 	public function show(int $id): DataResponse {
 		try {
 			$bot = $this->botService->getBot($id);
-			
+
 			// Verify ownership
 			if ($bot->getUserId() !== $this->userId) {
-				return new DataResponse(['error' => 'Unauthorized'], 403);
+				return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
 			}
-			
+
 			return new DataResponse($bot);
 		} catch (Exception $e) {
-			return new DataResponse(['error' => $e->getMessage()], 404);
+			$this->logger->warning('Failed to load bot', [
+				'bot_id' => $id,
+				'exception' => $e,
+			]);
+			return $this->errorResponse('bot_not_found', $this->l10n->t('Bot not found'), 404);
 		}
 	}
 
@@ -85,7 +98,7 @@ class BotController extends Controller {
 		$ragEnabled = null,
 		?array $tools = null,
 		?string $description = null,
-		?array $onboardingQuestions = null
+		?array $onboardingQuestions = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
@@ -106,11 +119,11 @@ class BotController extends Controller {
 				$description,
 				$onboardingQuestions
 			);
-			
+
 			return new DataResponse($bot, 201);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to create bot: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('bot_create_failed', $this->l10n->t('Failed to create bot'), 400);
 		}
 	}
 
@@ -131,7 +144,7 @@ class BotController extends Controller {
 		$ragEnabled = null,
 		?array $tools = null,
 		?string $description = null,
-		?array $onboardingQuestions = null
+		?array $onboardingQuestions = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
@@ -153,11 +166,18 @@ class BotController extends Controller {
 				$description,
 				$onboardingQuestions
 			);
-			
+
 			return new DataResponse($bot);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to update bot: ' . $e->getMessage());
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to update this bot'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to update bot: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('bot_update_failed', $this->l10n->t('Failed to update bot'), 400);
 		}
 	}
 
@@ -168,14 +188,24 @@ class BotController extends Controller {
 		try {
 			$tools = $this->botService->getBotTools($id, $this->userId);
 			return new DataResponse(['tools' => $tools]);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to list bot tools', [
+				'bot_id' => $id,
+				'user_id' => $this->userId,
+				'exception' => $e,
+			]);
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to view this bot'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list bot tools', [
 				'bot_id' => $id,
 				'user_id' => $this->userId,
 				'exception' => $e,
 			]);
-			$status = $e->getMessage() === 'You do not have permission to view this bot' ? 403 : 400;
-			return new DataResponse(['error' => $e->getMessage()], $status);
+			return $this->errorResponse('bot_tools_load_failed', $this->l10n->t('Failed to load bot tools'), 400);
 		}
 	}
 
@@ -189,7 +219,7 @@ class BotController extends Controller {
 			return new DataResponse($bots);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list public bots: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('public_bots_load_failed', $this->l10n->t('Failed to load public bots'), 500);
 		}
 	}
 
@@ -201,12 +231,19 @@ class BotController extends Controller {
 		try {
 			$botDetails = $this->botService->getPublicBotDetails($id, (string)$this->userId);
 			if ($botDetails === null) {
-				return new DataResponse(['error' => 'Bot not found or access denied'], 404);
+				return $this->errorResponse(
+					'public_bot_unavailable',
+					$this->l10n->t('Bot not found or access denied'),
+					404,
+				);
+			}
+			if (isset($botDetails['tools']) && is_array($botDetails['tools'])) {
+				$botDetails['tools'] = $this->localizeBuiltInTools($botDetails['tools']);
 			}
 			return new DataResponse($botDetails);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to get public bot details: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('public_bots_load_failed', $this->l10n->t('Failed to load public bot details'), 500);
 		}
 	}
 
@@ -218,9 +255,16 @@ class BotController extends Controller {
 		try {
 			$this->botService->deleteBot($id, $this->userId);
 			return new DataResponse(['success' => true]);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to delete bot: ' . $e->getMessage());
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to delete this bot'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to delete bot: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('bot_delete_failed', $this->l10n->t('Failed to delete bot'), 400);
 		}
 	}
 
@@ -239,9 +283,16 @@ class BotController extends Controller {
 				$this->request->getParam('testing_description')
 			);
 			return new DataResponse($bot);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to submit bot for approval: ' . $e->getMessage());
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to submit this bot for approval'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to submit bot for approval: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('bot_submit_failed', $this->l10n->t('Failed to submit bot for approval'), 400);
 		}
 	}
 
@@ -253,14 +304,24 @@ class BotController extends Controller {
 		try {
 			$bot = $this->botService->enableTesting($id, (string)$this->userId);
 			return new DataResponse($bot);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to enable testing for bot', [
+				'bot_id' => $id,
+				'user_id' => $this->userId,
+				'exception' => $e,
+			]);
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to enable testing for this bot'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to enable testing for bot', [
 				'bot_id' => $id,
 				'user_id' => $this->userId,
 				'exception' => $e,
 			]);
-			$status = str_contains($e->getMessage(), 'permission') ? 403 : 400;
-			return new DataResponse(['error' => $e->getMessage()], $status);
+			return $this->errorResponse('bot_test_enable_failed', $this->l10n->t('Failed to enable bot testing'), 400);
 		}
 	}
 
@@ -272,10 +333,16 @@ class BotController extends Controller {
 		try {
 			$bot = $this->botService->approveBot($id, $this->userId);
 			return new DataResponse($bot);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to approve bot: ' . $e->getMessage());
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to approve this bot'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to approve bot: ' . $e->getMessage());
-			$status = str_contains($e->getMessage(), 'permission') ? 403 : 400;
-			return new DataResponse(['error' => $e->getMessage()], $status);
+			return $this->errorResponse('bot_approve_failed', $this->l10n->t('Failed to approve bot'), 400);
 		}
 	}
 
@@ -287,10 +354,16 @@ class BotController extends Controller {
 		try {
 			$bot = $this->botService->rejectBot($id, $this->userId, $reason);
 			return new DataResponse($bot);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to reject bot: ' . $e->getMessage());
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to reject this bot'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to reject bot: ' . $e->getMessage());
-			$status = str_contains($e->getMessage(), 'permission') ? 403 : 400;
-			return new DataResponse(['error' => $e->getMessage()], $status);
+			return $this->errorResponse('bot_reject_failed', $this->l10n->t('Failed to reject bot'), 400);
 		}
 	}
 
@@ -302,10 +375,20 @@ class BotController extends Controller {
 		try {
 			$bots = $this->botService->getPendingApprovals($this->userId);
 			return new DataResponse(['bots' => $bots]);
+		} catch (AuthorizationException $e) {
+			$this->logger->error('Failed to list pending approvals: ' . $e->getMessage());
+			return $this->errorResponse(
+				'forbidden',
+				$this->l10n->t('You do not have permission to view pending approvals'),
+				403,
+			);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list pending approvals: ' . $e->getMessage());
-			$status = str_contains($e->getMessage(), 'permission') ? 403 : 400;
-			return new DataResponse(['error' => $e->getMessage()], $status);
+			return $this->errorResponse(
+				'pending_approvals_load_failed',
+				$this->l10n->t('Failed to load pending approvals'),
+				400,
+			);
 		}
 	}
 
@@ -330,19 +413,19 @@ class BotController extends Controller {
 			}
 			$permissions = $this->permissionService->getPermissionSummary($this->userId);
 			$visibilities = $this->permissionService->getAvailableVisibilities($this->userId);
-			
+
 			$this->logger->debug('User permissions loaded', [
 				'user_id' => $this->userId,
 				'permissions' => $permissions,
 			]);
-			
+
 			return new DataResponse([
 				'permissions' => $permissions,
 				'visibilities' => $visibilities,
 			]);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to get permissions: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('permissions_load_failed', $this->l10n->t('Failed to load permissions'), 500);
 		}
 	}
 
@@ -353,13 +436,13 @@ class BotController extends Controller {
 	public function adminIndex(): DataResponse {
 		try {
 			if (!$this->permissionService->isAdmin((string)$this->userId)) {
-				return new DataResponse(['error' => 'Unauthorized'], 403);
+				return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
 			}
 			$bots = $this->botService->getAllBots();
 			return new DataResponse($bots);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list all bots: ' . $e->getMessage());
-			return new DataResponse(['error' => $e->getMessage()], 500);
+			return $this->errorResponse('admin_bots_load_failed', $this->l10n->t('Failed to load all bots'), 500);
 		}
 	}
 
@@ -370,13 +453,17 @@ class BotController extends Controller {
 	public function adminUpdate(int $id): DataResponse {
 		try {
 			if (!$this->permissionService->isAdmin((string)$this->userId)) {
-				return new DataResponse(['error' => 'Unauthorized'], 403);
+				return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
 			}
 
 			$botName = (string)$this->request->getParam('botName', '');
 			$systemPrompt = (string)$this->request->getParam('systemPrompt', '');
 			if ($botName === '' || $systemPrompt === '') {
-				return new DataResponse(['error' => 'botName and systemPrompt are required'], 400);
+				return $this->errorResponse(
+					'bot_fields_required',
+					$this->l10n->t('Bot name and system prompt are required'),
+					400,
+				);
 			}
 
 			$bot = $this->botService->updateBot(
@@ -403,7 +490,7 @@ class BotController extends Controller {
 				'user_id' => $this->userId,
 				'exception' => $e,
 			]);
-			return new DataResponse(['error' => $e->getMessage()], 400);
+			return $this->errorResponse('bot_update_failed', $this->l10n->t('Failed to update bot'), 400);
 		}
 	}
 
@@ -427,5 +514,35 @@ class BotController extends Controller {
 			return true;
 		}
 		return (bool)$value;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $tools
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function localizeBuiltInTools(array $tools): array {
+		foreach ($tools as &$tool) {
+			if (($tool['is_builtin'] ?? false) !== true || !isset($tool['builtin_name']) || !is_string($tool['builtin_name'])) {
+				continue;
+			}
+			$tool['name'] = $this->builtInToolUiService->getLabel(
+				$tool['builtin_name'],
+				isset($tool['name']) && is_string($tool['name']) ? $tool['name'] : null,
+			);
+			$tool['description'] = $this->builtInToolUiService->getDescription(
+				$tool['builtin_name'],
+				isset($tool['description']) && is_string($tool['description']) ? $tool['description'] : null,
+			);
+		}
+		unset($tool);
+
+		return $tools;
+	}
+
+	private function errorResponse(string $errorCode, string $error, int $status): DataResponse {
+		return new DataResponse([
+			'error' => $error,
+			'errorCode' => $errorCode,
+		], $status);
 	}
 }

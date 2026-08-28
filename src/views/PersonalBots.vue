@@ -1,10 +1,10 @@
 <template>
 	<div class="bot-management">
 		<div class="header">
-			<h2>{{ APP_DISPLAY_NAME }} - Multi-Bot Manager</h2>
+			<h2>{{ t('educai', '{appName} - Multi-bot manager', { appName: APP_DISPLAY_NAME }) }}</h2>
 			<button class="button primary" @click="showCreateForm = true">
 				<span class="icon-add" />
-				Create New Bot
+				{{ t('educai', 'Create new bot') }}
 			</button>
 		</div>
 
@@ -22,32 +22,32 @@
 
 		<div v-if="bots.length === 0 && !loading" class="empty-state">
 			<span class="icon-comment" />
-			<h3>No bots created yet</h3>
-			<p>Create your first AI bot to get started with Nextcloud Talk integration</p>
+			<h3>{{ t('educai', 'No bots created yet') }}</h3>
+			<p>{{ t('educai', 'Create your first AI bot to get started with Nextcloud Talk integration') }}</p>
 			<button class="button primary" @click="showCreateForm = true">
-				Create Your First Bot
+				{{ t('educai', 'Create your first bot') }}
 			</button>
 		</div>
 
 		<div v-if="loading" class="loading">
 			<span class="icon-loading" />
-			<p>Loading bots...</p>
+			<p>{{ t('educai', 'Loading bots…') }}</p>
 		</div>
 
 		<!-- Approval Queue Section (only visible to users with approval rights) -->
 		<div v-if="userPermissions.hasApprovalRights" class="approval-section">
 			<div class="section-header">
-				<h3>Pending Approvals</h3>
-				<span v-if="pendingApprovals.length > 0" class="badge">{{ pendingApprovals.length }}</span>
+				<h3>{{ t('educai', 'Pending approvals') }}</h3>
+				<span v-if="pendingApprovals.length > 0" class="badge">{{ formatNumber(pendingApprovals.length) }}</span>
 			</div>
 
 			<div v-if="loadingApprovals" class="loading-small">
 				<span class="icon-loading" />
-				<span>Loading pending approvals...</span>
+				<span>{{ t('educai', 'Loading pending approvals…') }}</span>
 			</div>
 
 			<div v-else-if="pendingApprovals.length === 0" class="empty-approvals">
-				<p>No bots are pending approval.</p>
+				<p>{{ t('educai', 'No bots are pending approval.') }}</p>
 			</div>
 
 			<div v-else class="approval-grid">
@@ -59,56 +59,56 @@
 						<h4>{{ getReviewTarget(bot).bot_name }}</h4>
 						<span class="mention-badge">{{ bot.mention_name }}</span>
 						<p class="owner">
-							Submitted by {{ bot.owner_name }}
+							{{ t('educai', 'Submitted by {owner}', { owner: bot.owner_name }) }}
 						</p>
 						<p class="visibility">
 							<span class="visibility-badge" :class="getReviewTarget(bot).visibility || 'groups'">
 								{{ formatVisibility(getReviewTarget(bot).visibility) }}
 							</span>
 							<span v-if="getReviewTarget(bot).is_update" class="update-badge">
-								Update to existing bot
+								{{ t('educai', 'Update to existing bot') }}
 							</span>
 							<span v-else class="new-badge">
-								New bot
+								{{ t('educai', 'New bot') }}
 							</span>
 						</p>
 						<p v-if="getReviewTarget(bot).is_update" class="review-note">
-							Reviewing the submitted pending version. The currently approved version stays live until approval.
+							{{ t('educai', 'Reviewing the submitted pending version. The currently approved version stays live until approval.') }}
 						</p>
 						<div class="questionnaire">
 							<p v-if="bot.approval_reason">
-								<strong>Why share:</strong>
+								<strong>{{ t('educai', 'Why share:') }}</strong>
 								{{ bot.approval_reason }}
 							</p>
 							<p v-if="bot.bot_capabilities">
-								<strong>What it does well:</strong>
+								<strong>{{ t('educai', 'What it does well:') }}</strong>
 								{{ bot.bot_capabilities }}
 							</p>
 							<p v-if="bot.rag_source_description">
-								<strong>RAG sources:</strong>
+								<strong>{{ t('educai', 'RAG sources:') }}</strong>
 								{{ bot.rag_source_description }}
 							</p>
 							<p v-if="bot.testing_description">
-								<strong>Testing done:</strong>
+								<strong>{{ t('educai', 'Testing done:') }}</strong>
 								{{ bot.testing_description }}
 							</p>
 						</div>
 						<p v-if="bot.submitted_at" class="submitted-time">
-							Submitted {{ formatDate(bot.submitted_at) }}
+							{{ t('educai', 'Submitted {date}', { date: formatDate(bot.submitted_at) }) }}
 						</p>
 					</div>
 					<div class="approval-actions">
 						<button class="button" @click="enableTest(bot)">
-							<span class="icon-play" /> Test Bot
+							<span class="icon-play" /> {{ t('educai', 'Test bot') }}
 						</button>
 						<button class="button" @click="previewBot(bot)">
-							<span class="icon-details" /> Preview
+							<span class="icon-details" /> {{ t('educai', 'Preview') }}
 						</button>
 						<button class="button primary" @click="approveBot(bot.id)">
-							<span class="icon-checkmark" /> Approve
+							<span class="icon-checkmark" /> {{ t('educai', 'Approve') }}
 						</button>
 						<button class="button error" @click="rejectBot(bot.id)">
-							<span class="icon-close" /> Reject
+							<span class="icon-close" /> {{ t('educai', 'Reject') }}
 						</button>
 					</div>
 				</div>
@@ -126,38 +126,38 @@
 		<div v-if="showSubmitModal" class="modal-mask" @click.self="closeSubmitModal">
 			<div class="modal-container">
 				<div class="modal-header">
-					<h2>Submit for Approval</h2>
+					<h2>{{ t('educai', 'Submit for approval') }}</h2>
 					<button class="close-button" @click="closeSubmitModal">
 						<span class="icon-close" />
 					</button>
 				</div>
 				<div class="modal-body">
 					<p class="hint">
-						You can test the bot yourself in Nextcloud Talk before submitting. Mention <strong>{{ submitForm.mentionName }}</strong> in any conversation.
+						{{ t('educai', 'You can test the bot yourself in Nextcloud Talk before submitting. Mention {mention} in any conversation.', { mention: submitForm.mentionName }) }}
 					</p>
 					<div class="form-group">
-						<label>Why do you want to share your bot with this specific group (or global)?</label>
+						<label>{{ t('educai', 'Why do you want to share your bot with this specific group (or globally)?') }}</label>
 						<textarea v-model="submitForm.approvalReason" rows="3" />
 					</div>
 					<div class="form-group">
-						<label>What is your bot good at?</label>
+						<label>{{ t('educai', 'What is your bot good at?') }}</label>
 						<textarea v-model="submitForm.botCapabilities" rows="3" />
 					</div>
 					<div class="form-group">
-						<label>What is/are the source(s) of the information you fed the RAG?</label>
+						<label>{{ t('educai', 'What are the sources of the information you provided to RAG?') }}</label>
 						<textarea v-model="submitForm.ragSourceDescription" rows="3" />
 					</div>
 					<div class="form-group">
-						<label>Describe fully how you tested your bot so we can reproduce its behaviour.</label>
+						<label>{{ t('educai', 'Describe fully how you tested your bot so we can reproduce its behavior.') }}</label>
 						<textarea v-model="submitForm.testingDescription" rows="3" />
 					</div>
 				</div>
 				<div class="modal-footer">
 					<button class="button" @click="closeSubmitModal">
-						Cancel
+						{{ t('educai', 'Cancel') }}
 					</button>
 					<button class="button primary" @click="confirmSubmitForApproval">
-						Submit
+						{{ t('educai', 'Submit') }}
 					</button>
 				</div>
 			</div>
@@ -172,53 +172,53 @@
 					</button>
 				</div>
 				<div class="modal-body">
-					<p class="hint">
-						Review target for <strong>{{ reviewPreviewBot.mention_name }}</strong>
-						<span v-if="getReviewTarget(reviewPreviewBot).is_update">
-							. This is the pending version that owner and enabled reviewer can test in Talk.
-						</span>
+					<p v-if="getReviewTarget(reviewPreviewBot).is_update" class="hint">
+						{{ t('educai', 'Review target for {mention}. This is the pending version that the owner and enabled reviewer can test in Talk.', { mention: reviewPreviewBot.mention_name }) }}
+					</p>
+					<p v-else class="hint">
+						{{ t('educai', 'Review target for {mention}', { mention: reviewPreviewBot.mention_name }) }}
 					</p>
 					<div class="form-group">
-						<label>Description</label>
+						<label>{{ t('educai', 'Description') }}</label>
 						<p class="preview-block">
-							{{ getReviewTarget(reviewPreviewBot).description || 'No description provided' }}
+							{{ getReviewTarget(reviewPreviewBot).description || t('educai', 'No description provided') }}
 						</p>
 					</div>
 					<div class="form-group">
-						<label>Visibility</label>
+						<label>{{ t('educai', 'Visibility') }}</label>
 						<p class="preview-block">
 							{{ formatVisibility(getReviewTarget(reviewPreviewBot).visibility) }}
 						</p>
 					</div>
 					<div class="form-group">
-						<label>Temperature</label>
+						<label>{{ t('educai', 'Temperature') }}</label>
 						<p class="preview-block">
 							{{ getReviewTarget(reviewPreviewBot).temperature === null || getReviewTarget(reviewPreviewBot).temperature === undefined
-								? 'Uses global default'
+								? t('educai', 'Uses global default')
 								: formatTemperature(getReviewTarget(reviewPreviewBot).temperature) }}
 						</p>
 					</div>
 					<div
 						v-if="getReviewTarget(reviewPreviewBot).allowed_groups?.length || getReviewTarget(reviewPreviewBot).allowed_teams?.length"
 						class="form-group">
-						<label>Target Audience</label>
+						<label>{{ t('educai', 'Target audience') }}</label>
 						<p v-if="getReviewTarget(reviewPreviewBot).allowed_groups?.length" class="preview-block">
-							Groups: {{ getReviewTarget(reviewPreviewBot).allowed_groups.join(', ') }}
+							{{ t('educai', 'Groups: {groups}', { groups: getReviewTarget(reviewPreviewBot).allowed_groups.join(', ') }) }}
 						</p>
 						<p v-if="getReviewTarget(reviewPreviewBot).allowed_teams?.length" class="preview-block">
-							Teams: {{ reviewTeamNames(getReviewTarget(reviewPreviewBot)).join(', ') }}
+							{{ t('educai', 'Teams: {teams}', { teams: reviewTeamNames(getReviewTarget(reviewPreviewBot)).join(', ') }) }}
 						</p>
 					</div>
 					<div v-if="getReviewTarget(reviewPreviewBot).rag_enabled" class="form-group">
-						<label>RAG Sources</label>
+						<label>{{ t('educai', 'RAG sources') }}</label>
 						<p v-if="reviewSourcesLoading" class="preview-block">
-							Loading sources...
+							{{ t('educai', 'Loading sources…') }}
 						</p>
 						<p v-else-if="reviewSourcesError" class="preview-block error-text">
 							{{ reviewSourcesError }}
 						</p>
 						<p v-else-if="reviewSources.length === 0" class="preview-block">
-							No knowledge sources attached
+							{{ t('educai', 'No knowledge sources attached') }}
 						</p>
 						<ul v-else class="preview-source-list">
 							<li v-for="source in reviewSources" :key="`${reviewPreviewBot.id}-source-${source.id}`">
@@ -232,17 +232,17 @@
 									:href="sourceOpenUrl(source)"
 									target="_blank"
 									rel="noopener noreferrer">
-									Open
+									{{ t('educai', 'Open') }}
 								</a>
 							</li>
 						</ul>
 					</div>
 					<div class="form-group">
-						<label>System Prompt</label>
+						<label>{{ t('educai', 'System prompt') }}</label>
 						<pre class="preview-code">{{ getReviewTarget(reviewPreviewBot).system_prompt }}</pre>
 					</div>
 					<div class="form-group">
-						<label>Enabled Tools</label>
+						<label>{{ t('educai', 'Enabled tools') }}</label>
 						<ul v-if="getReviewTarget(reviewPreviewBot).tools && getReviewTarget(reviewPreviewBot).tools.length > 0" class="preview-tool-list">
 							<li v-for="(tool, index) in getReviewTarget(reviewPreviewBot).tools" :key="`${reviewPreviewBot.id}-tool-${index}`">
 								<strong>{{ tool.name }}</strong>
@@ -250,13 +250,13 @@
 							</li>
 						</ul>
 						<p v-else class="preview-block">
-							No tools configured
+							{{ t('educai', 'No tools configured') }}
 						</p>
 					</div>
 				</div>
 				<div class="modal-footer">
 					<button class="button" @click="closeReviewPreview">
-						Close
+						{{ t('educai', 'Close') }}
 					</button>
 				</div>
 			</div>
@@ -271,6 +271,8 @@ import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import BotCard from '../components/BotCard.vue'
 import BotForm from '../components/BotForm.vue'
+import { getCanonicalLocale, t } from '../l10n.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 export default {
 	name: 'PersonalBots',
@@ -350,7 +352,7 @@ export default {
 				this.bots = response.data
 			} catch (error) {
 				console.error('Failed to load bots:', error)
-				showError('Failed to load bots')
+				showError(t('educai', 'Failed to load bots'))
 			} finally {
 				this.loading = false
 			}
@@ -365,13 +367,13 @@ export default {
 					const updatedBot = response.data
 					const status = updatedBot.approval_status || 'approved'
 					if (status === 'draft') {
-						showSuccess('Bot updated and saved as draft. Submit for approval when ready.')
+						showSuccess(t('educai', 'Bot updated and saved as draft. Submit for approval when ready.'))
 					} else if (status === 'pending') {
-						showSuccess('Bot updated. Approval is required before the new shared version goes live.')
+						showSuccess(t('educai', 'Bot updated. Approval is required before the new shared version goes live.'))
 					} else if (status === 'personal') {
-						showSuccess('Personal bot updated successfully')
+						showSuccess(t('educai', 'Personal bot updated successfully'))
 					} else {
-						showSuccess('Bot updated successfully')
+						showSuccess(t('educai', 'Bot updated successfully'))
 					}
 				} else {
 					const response = await axios.post(
@@ -381,24 +383,24 @@ export default {
 					const newBot = response.data
 					const status = newBot.approval_status || 'approved'
 					if (status === 'draft') {
-						showSuccess('Bot saved as draft. Submit for approval when ready.')
+						showSuccess(t('educai', 'Bot saved as draft. Submit for approval when ready.'))
 					} else if (status === 'personal') {
-						showSuccess('Personal bot created successfully')
+						showSuccess(t('educai', 'Personal bot created successfully'))
 					} else {
-						showSuccess('Bot created successfully')
+						showSuccess(t('educai', 'Bot created successfully'))
 					}
 				}
 				await this.loadBots()
 				this.closeForm()
 			} catch (error) {
 				console.error('Failed to save bot:', error)
-				showError(error.response?.data?.error || 'Failed to save bot')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to save bot')))
 			}
 		},
 		submitForApproval(botId) {
 			const bot = this.bots.find(b => b.id === botId)
 			if (!bot) {
-				showError('Bot not found')
+				showError(t('educai', 'Bot not found'))
 				return
 			}
 			this.submitForm.botId = botId
@@ -420,12 +422,12 @@ export default {
 					rag_source_description: this.submitForm.ragSourceDescription,
 					testing_description: this.submitForm.testingDescription,
 				})
-				showSuccess('Bot submitted for approval')
+				showSuccess(t('educai', 'Bot submitted for approval'))
 				await this.loadBots()
 				this.closeSubmitModal()
 			} catch (error) {
 				console.error('Failed to submit bot for approval:', error)
-				showError(error.response?.data?.error || 'Failed to submit for approval')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to submit for approval')))
 			}
 		},
 		closeSubmitModal() {
@@ -435,22 +437,22 @@ export default {
 		async approveBot(botId) {
 			try {
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${botId}/approve`))
-				showSuccess('Bot approved successfully')
+				showSuccess(t('educai', 'Bot approved successfully'))
 				await this.loadPendingApprovals()
 			} catch (error) {
 				console.error('Failed to approve bot:', error)
-				showError(error.response?.data?.error || 'Failed to approve bot')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to approve bot')))
 			}
 		},
 		async rejectBot(botId) {
-			const reason = prompt('Optional: Enter a reason for rejection')
+			const reason = prompt(t('educai', 'Optional: Enter a reason for rejection'))
 			try {
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${botId}/reject`), { reason })
-				showSuccess('Bot rejected and returned to draft')
+				showSuccess(t('educai', 'Bot rejected and returned to draft'))
 				await this.loadPendingApprovals()
 			} catch (error) {
 				console.error('Failed to reject bot:', error)
-				showError(error.response?.data?.error || 'Failed to reject bot')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to reject bot')))
 			}
 		},
 		getReviewTarget(bot) {
@@ -492,7 +494,7 @@ export default {
 				this.reviewSources = Array.isArray(sources) ? sources : []
 			} catch (error) {
 				console.error('Failed to load RAG sources for review:', error)
-				this.reviewSourcesError = error.response?.data?.error || 'Failed to load RAG sources'
+				this.reviewSourcesError = getApiErrorMessage(error, t('educai', 'Failed to load RAG sources'))
 			} finally {
 				this.reviewSourcesLoading = false
 			}
@@ -513,7 +515,7 @@ export default {
 			if (source.source_url) {
 				return source.source_url
 			}
-			return `Source #${source.id}`
+			return t('educai', 'Source #{id}', { id: source.id })
 		},
 		sourceOpenUrl(source) {
 			if (!source) {
@@ -529,37 +531,37 @@ export default {
 		},
 		formatSourceStatus(status) {
 			if (status === 'ready') {
-				return 'Ready'
+				return t('educai', 'Ready')
 			}
 			if (status === 'error') {
-				return 'Error'
+				return t('educai', 'Error')
 			}
 			if (status === 'pending') {
-				return 'Pending'
+				return t('educai', 'Pending')
 			}
-			return status || 'Unknown'
+			return t('educai', 'Unknown')
 		},
 		async enableTest(bot) {
 			try {
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${bot.id}/enable-test`))
-				showSuccess(`Testing enabled. Mention ${bot.mention_name} in Nextcloud Talk to try the pending version.`)
+				showSuccess(t('educai', 'Testing enabled. Mention {mention} in Nextcloud Talk to try the pending version.', { mention: bot.mention_name }))
 			} catch (error) {
 				console.error('Failed to enable testing:', error)
-				showError(error.response?.data?.error || 'Failed to enable testing')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to enable testing')))
 			}
 		},
 		async deleteBot(botId) {
-			if (!confirm('Delete this bot? All conversation history will be lost.')) {
+			if (!confirm(t('educai', 'Delete this bot? All conversation history will be lost.'))) {
 				return
 			}
 
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/bots/${botId}`))
-				showSuccess('Bot deleted successfully')
+				showSuccess(t('educai', 'Bot deleted successfully'))
 				await this.loadBots()
 			} catch (error) {
 				console.error('Failed to delete bot:', error)
-				showError(error.response?.data?.error || 'Failed to delete bot')
+				showError(getApiErrorMessage(error, t('educai', 'Failed to delete bot')))
 			}
 		},
 		editBot(bot) {
@@ -571,22 +573,22 @@ export default {
 		},
 		formatVisibility(visibility) {
 			if (visibility === 'global') {
-				return 'Global'
+				return t('educai', 'Global')
 			}
 			if (visibility === 'personal') {
-				return 'Personal'
+				return t('educai', 'Personal')
 			}
 			if (visibility === 'teams') {
-				return 'Team access'
+				return t('educai', 'Team access')
 			}
-			return 'Group access'
+			return t('educai', 'Group access')
 		},
 		formatDate(timestamp) {
 			if (!timestamp) {
 				return ''
 			}
 			const date = new Date(timestamp * 1000)
-			return date.toLocaleDateString(undefined, {
+			return date.toLocaleDateString(getCanonicalLocale(), {
 				day: 'numeric',
 				month: 'short',
 				year: 'numeric',
@@ -597,9 +599,16 @@ export default {
 		formatTemperature(value) {
 			const numeric = Number(value)
 			if (!Number.isFinite(numeric)) {
-				return 'Uses global default'
+				return t('educai', 'Uses global default')
 			}
-			return numeric.toFixed(2)
+			return numeric.toLocaleString(getCanonicalLocale(), {
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			})
+		},
+		formatNumber(value) {
+			const number = Number(value)
+			return Number.isFinite(number) ? number.toLocaleString(getCanonicalLocale()) : '0'
 		},
 	},
 }
@@ -607,16 +616,27 @@ export default {
 
 <style scoped>
 .bot-management { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+
 .header h2 { margin: 0; font-size: 24px; font-weight: 600; }
+
 .bot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-bottom: 40px; }
+
 .empty-state { text-align: center; padding: 60px 20px; }
+
 .loading { text-align: center; padding: 40px; }
+
 .button { padding: 8px 16px; border: 1px solid var(--color-border); background: var(--color-main-background); border-radius: 3px; cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+
 .button:hover { background: var(--color-background-hover); }
+
 .button.primary { background-color: var(--color-primary); color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 14px; }
+
 .button.primary:hover { background-color: var(--color-primary-element-light); }
+
 .button.error { color: var(--color-error); }
+
 .button.error:hover { background: var(--color-error); color: white; border-color: var(--color-error); }
 
 /* Approval Section */
@@ -740,7 +760,7 @@ export default {
 	font-weight: 600;
 	background: var(--color-primary-element);
 	color: #fff;
-	margin-left: 6px;
+	margin-inline-start: 6px;
 }
 
 .new-badge {
@@ -751,7 +771,7 @@ export default {
 	font-weight: 600;
 	background: var(--color-success);
 	color: #000;
-	margin-left: 6px;
+	margin-inline-start: 6px;
 }
 
 .approval-info .submitted-time {
@@ -777,7 +797,7 @@ export default {
 	position: fixed;
 	z-index: 9998;
 	top: 0;
-	left: 0;
+	inset-inline-start: 0;
 	width: 100%;
 	height: 100%;
 	background-color: rgba(0, 0, 0, 0.5);
@@ -879,7 +899,7 @@ export default {
 
 .preview-tool-list {
 	margin: 0;
-	padding-left: 18px;
+	padding-inline-start: 18px;
 }
 
 .preview-tool-list li {

@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\Controller;
 use OCA\EducAI\Controller\TraceController;
 use OCA\EducAI\Service\TraceService;
 use OCP\AppFramework\Db\DoesNotExistException;
+use OCP\IL10N;
 use OCP\IRequest;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -20,13 +21,14 @@ class TraceControllerTest extends TestCase {
 
 		$this->assertSame(401, $response->getStatus());
 		$this->assertSame('Not authenticated', $response->getData()['error']);
+		$this->assertSame('not_authenticated', $response->getData()['errorCode']);
 	}
 
 	public function testIndexScopesListToCurrentUser(): void {
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->once())
 			->method('listRunsForUser')
-			->with('alice', $this->callback(static fn(array $filters): bool => $filters['status'] === 'error'))
+			->with('alice', $this->callback(static fn (array $filters): bool => $filters['status'] === 'error'))
 			->willReturn([
 				'traces' => [['id' => 1, 'status' => 'error']],
 				'total' => 1,
@@ -44,7 +46,7 @@ class TraceControllerTest extends TestCase {
 		$traceService = $this->createMock(TraceService::class);
 		$traceService->expects($this->once())
 			->method('listRunsForUser')
-			->with('alice', $this->callback(static fn(array $filters): bool => $filters['botMentionName'] === '@cute-hajs'))
+			->with('alice', $this->callback(static fn (array $filters): bool => $filters['botMentionName'] === '@cute-hajs'))
 			->willReturn([
 				'traces' => [],
 				'total' => 0,
@@ -68,6 +70,7 @@ class TraceControllerTest extends TestCase {
 
 		$this->assertSame(404, $response->getStatus());
 		$this->assertSame('Trace not found', $response->getData()['error']);
+		$this->assertSame('trace_not_found', $response->getData()['errorCode']);
 	}
 
 	public function testDeleteScopesToCurrentUser(): void {
@@ -84,14 +87,26 @@ class TraceControllerTest extends TestCase {
 
 	private function createController(TraceService $traceService, ?string $userId, array $params = []): TraceController {
 		$request = $this->createMock(IRequest::class);
-		$request->method('getParam')->willReturnCallback(static fn(string $key, $default = null) => $params[$key] ?? $default);
+		$request->method('getParam')->willReturnCallback(static fn (string $key, $default = null) => $params[$key] ?? $default);
 
 		return new TraceController(
 			'educai',
 			$request,
 			$traceService,
 			$userId,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createL10n(),
 		);
+	}
+
+	private function createL10n(): IL10N {
+		$builder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$builder->addMethods(['t']);
+		}
+		$l10n = $builder->getMock();
+		$l10n->method('t')->willReturnCallback(static fn (string $text, array $parameters = []): string => $text);
+
+		return $l10n;
 	}
 }

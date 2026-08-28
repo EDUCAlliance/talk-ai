@@ -95,6 +95,7 @@
 <script>
 import { generateUrl } from '@nextcloud/router'
 import { APP_DISPLAY_NAME } from '../branding.js'
+import { t } from '../l10n.js'
 import axios from '@nextcloud/axios'
 
 import NcTextField from '@nextcloud/vue/dist/Components/NcTextField.js'

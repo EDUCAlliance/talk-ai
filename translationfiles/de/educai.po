@@ -1,0 +1,3978 @@
+# German translations for EducAI.
+# Copyright (C) 2026 EducAI contributors
+# This file is distributed under the same license as the EducAI package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: EducAI\n"
+"Report-Msgid-Bugs-To: translations\\@example.com\n"
+"POT-Creation-Date: 2026-08-28 11:33+0200\n"
+"PO-Revision-Date: 2026-08-28 11:01+0200\n"
+"Last-Translator: EducAI contributors\n"
+"Language-Team: German\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: lib/Controller/AppIconController.php:59
+msgid "No SVG file was uploaded."
+msgstr "Es wurde keine SVG-Datei hochgeladen."
+
+#: lib/Controller/AppIconController.php:69
+msgid "The app icon must be an SVG file."
+msgstr "Das App-Symbol muss eine SVG-Datei sein."
+
+#: lib/Controller/AppIconController.php:78
+msgid "The uploaded SVG file could not be read."
+msgstr "Die hochgeladene SVG-Datei konnte nicht gelesen werden."
+
+#: lib/Controller/AppIconController.php:101
+msgid "The uploaded app icon is invalid."
+msgstr "Das hochgeladene App-Symbol ist ungültig."
+
+#: lib/Controller/AppIconController.php:111
+msgid "Failed to upload the app icon"
+msgstr "Das App-Symbol konnte nicht hochgeladen werden"
+
+#: lib/Controller/BotController.php:57
+#: specialVueFakeDummyForL10nScript.js:1141
+#: specialVueFakeDummyForL10nScript.js:4601
+msgid "Failed to load bots"
+msgstr "Bots konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:71
+#: lib/Controller/BotController.php:439
+#: lib/Controller/BotController.php:456
+#: lib/Controller/RagController.php:70
+#: lib/Controller/RagController.php:101
+#: lib/Controller/RagController.php:106
+#: lib/Controller/RagController.php:291
+#: lib/Controller/RagController.php:321
+msgid "Unauthorized"
+msgstr "Nicht autorisiert"
+
+#: lib/Controller/BotController.php:80
+#: lib/Controller/TalkBotController.php:263
+#: specialVueFakeDummyForL10nScript.js:4649
+msgid "Bot not found"
+msgstr "Bot nicht gefunden"
+
+#: lib/Controller/BotController.php:126
+msgid "Failed to create bot"
+msgstr "Bot konnte nicht erstellt werden"
+
+#: lib/Controller/BotController.php:175
+msgid "You do not have permission to update this bot"
+msgstr "Du hast keine Berechtigung, diesen Bot zu aktualisieren"
+
+#: lib/Controller/BotController.php:180
+#: lib/Controller/BotController.php:493
+#: specialVueFakeDummyForL10nScript.js:1164
+msgid "Failed to update bot"
+msgstr "Bot konnte nicht aktualisiert werden"
+
+#: lib/Controller/BotController.php:199
+msgid "You do not have permission to view this bot"
+msgstr "Du hast keine Berechtigung, diesen Bot anzusehen"
+
+#: lib/Controller/BotController.php:208
+msgid "Failed to load bot tools"
+msgstr "Bot-Tools konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:222
+msgid "Failed to load public bots"
+msgstr "Öffentliche Bots konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:236
+msgid "Bot not found or access denied"
+msgstr "Bot nicht gefunden oder Zugriff verweigert"
+
+#: lib/Controller/BotController.php:246
+msgid "Failed to load public bot details"
+msgstr "Details des öffentlichen Bots konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:262
+msgid "You do not have permission to delete this bot"
+msgstr "Du hast keine Berechtigung, diesen Bot zu löschen"
+
+#: lib/Controller/BotController.php:267
+#: specialVueFakeDummyForL10nScript.js:1180
+#: specialVueFakeDummyForL10nScript.js:4810
+msgid "Failed to delete bot"
+msgstr "Bot konnte nicht gelöscht werden"
+
+#: lib/Controller/BotController.php:290
+msgid "You do not have permission to submit this bot for approval"
+msgstr "Du hast keine Berechtigung, diesen Bot zur Freigabe einzureichen"
+
+#: lib/Controller/BotController.php:295
+msgid "Failed to submit bot for approval"
+msgstr "Bot konnte nicht zur Freigabe eingereicht werden"
+
+#: lib/Controller/BotController.php:315
+msgid "You do not have permission to enable testing for this bot"
+msgstr "Du hast keine Berechtigung, Tests für diesen Bot zu aktivieren"
+
+#: lib/Controller/BotController.php:324
+msgid "Failed to enable bot testing"
+msgstr "Bot-Test konnte nicht aktiviert werden"
+
+#: lib/Controller/BotController.php:340
+msgid "You do not have permission to approve this bot"
+msgstr "Du hast keine Berechtigung, diesen Bot freizugeben"
+
+#: lib/Controller/BotController.php:345
+#: specialVueFakeDummyForL10nScript.js:4690
+msgid "Failed to approve bot"
+msgstr "Bot konnte nicht freigegeben werden"
+
+#: lib/Controller/BotController.php:361
+msgid "You do not have permission to reject this bot"
+msgstr "Du hast keine Berechtigung, diesen Bot abzulehnen"
+
+#: lib/Controller/BotController.php:366
+#: specialVueFakeDummyForL10nScript.js:4701
+msgid "Failed to reject bot"
+msgstr "Bot konnte nicht abgelehnt werden"
+
+#: lib/Controller/BotController.php:382
+msgid "You do not have permission to view pending approvals"
+msgstr "Du hast keine Berechtigung, ausstehende Freigaben anzusehen"
+
+#: lib/Controller/BotController.php:389
+msgid "Failed to load pending approvals"
+msgstr "Ausstehende Freigaben konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:428
+msgid "Failed to load permissions"
+msgstr "Berechtigungen konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:445
+msgid "Failed to load all bots"
+msgstr "Alle Bots konnten nicht geladen werden"
+
+#: lib/Controller/BotController.php:464
+msgid "Bot name and system prompt are required"
+msgstr "Bot-Name und System-Prompt sind erforderlich"
+
+#: lib/Controller/RagController.php:85
+msgid "Failed to load knowledge sources"
+msgstr "Wissensquellen konnten nicht geladen werden"
+
+#: lib/Controller/RagController.php:118
+msgid "Either a source URL or a file or folder must be provided."
+msgstr ""
+"Du musst entweder eine Quell-URL, eine Datei oder einen Ordner angeben."
+
+#: lib/Controller/RagController.php:124
+msgid "Invalid source type"
+msgstr "Ungültiger Quellentyp"
+
+#: lib/Controller/RagController.php:152
+msgid "Failed to add the knowledge source"
+msgstr "Wissensquelle konnte nicht hinzugefügt werden"
+
+#: lib/Controller/RagController.php:166
+msgid "Invalid URL. Only http:// and https:// URLs are allowed."
+msgstr "Ungültige URL. Es sind nur URLs mit http:// oder https:// erlaubt."
+
+#: lib/Controller/RagController.php:204
+msgid "The knowledge source could not be processed."
+msgstr "Die Wissensquelle konnte nicht verarbeitet werden."
+
+#: lib/Controller/RagController.php:308
+msgid "Failed to delete the knowledge source"
+msgstr "Wissensquelle konnte nicht gelöscht werden"
+
+#: lib/Controller/RagController.php:337
+msgid "Failed to reindex the knowledge source"
+msgstr "Wissensquelle konnte nicht neu indiziert werden"
+
+#: lib/Controller/SettingsController.php:105
+msgid "Failed to load settings"
+msgstr "Einstellungen konnten nicht geladen werden"
+
+#: lib/Controller/SettingsController.php:225
+msgid "Failed to update settings"
+msgstr "Einstellungen konnten nicht aktualisiert werden"
+
+#: lib/Controller/SettingsController.php:240
+msgid "Primary"
+msgstr "Primär"
+
+#: lib/Controller/SettingsController.php:242
+msgid "Secondary"
+msgstr "Sekundär"
+
+#: lib/Controller/SettingsController.php:253
+msgid "Failed to load models"
+msgstr "Modelle konnten nicht geladen werden"
+
+#: lib/Controller/SettingsController.php:309
+msgid "Failed to load groups"
+msgstr "Gruppen konnten nicht geladen werden"
+
+#: lib/Controller/SettingsController.php:400
+msgid "Failed to load rate limit status"
+msgstr "Status der Anfragelimits konnte nicht geladen werden"
+
+#: lib/Controller/SettingsController.php:440
+msgid "Rate limiting is not enabled"
+msgstr "Anfragelimits sind nicht aktiviert"
+
+#: lib/Controller/SettingsController.php:459
+msgid "No pending requests in queue"
+msgstr "Keine ausstehenden Anfragen in der Warteschlange"
+
+#: lib/Controller/SettingsController.php:502
+msgid "Failed to process the queue"
+msgstr "Warteschlange konnte nicht verarbeitet werden"
+
+#: lib/Controller/SettingsController.php:525
+msgid "A queued request could not be processed."
+msgstr "Eine Anfrage in der Warteschlange konnte nicht verarbeitet werden."
+
+#: lib/Controller/SettingsController.php:915
+msgid "Reindex jobs queued. Processing happens via background jobs."
+msgstr ""
+"Aufträge zur Neuindizierung wurden eingereiht. Die Verarbeitung erfolgt über "
+"Hintergrundaufträge."
+
+#: lib/Controller/SettingsController.php:923
+msgid "Failed to queue reindex jobs"
+msgstr "Aufträge zur Neuindizierung konnten nicht eingereiht werden"
+
+#: lib/Controller/TalkBotController.php:74
+#: lib/Controller/TalkBotController.php:128
+#: lib/Controller/TalkBotController.php:217
+#: lib/Controller/TalkBotController.php:252
+#: lib/Controller/TraceController.php:33
+#: lib/Controller/TraceController.php:63
+#: lib/Controller/TraceController.php:85
+#: lib/Controller/TraceController.php:108
+msgid "Not authenticated"
+msgstr "Nicht authentifiziert"
+
+#: lib/Controller/TalkBotController.php:112
+msgid "Failed to get Talk bot status"
+msgstr "Status des Talk-Bots konnte nicht abgerufen werden"
+
+#: lib/Controller/TalkBotController.php:144
+#: lib/Controller/TalkBotController.php:609
+#, php-format
+msgid ""
+"%s bot is not registered in Talk. Please ask an administrator to register it."
+msgstr ""
+"Der %s-Bot ist nicht in Talk registriert. Bitte wende dich an die "
+"Administration, damit er registriert wird."
+
+#: lib/Controller/TalkBotController.php:155
+msgid "Bot already enabled"
+msgstr "Bot ist bereits aktiviert"
+
+#: lib/Controller/TalkBotController.php:167
+#: lib/Controller/TalkBotController.php:194
+#: lib/Controller/TalkBotController.php:612
+msgid ""
+"You do not have permission to enable bots in this conversation. Only "
+"moderators can enable bots."
+msgstr ""
+"Du hast keine Berechtigung, Bots in dieser Unterhaltung zu aktivieren. Nur "
+"Moderatoren können Bots aktivieren."
+
+#: lib/Controller/TalkBotController.php:183
+msgid "Bot enabled successfully"
+msgstr "Bot wurde erfolgreich aktiviert"
+
+#: lib/Controller/TalkBotController.php:199
+#: lib/Controller/TalkBotController.php:205
+msgid "Failed to enable the Talk bot"
+msgstr "Talk-Bot konnte nicht aktiviert werden"
+
+#: lib/Controller/TalkBotController.php:239
+#: lib/Controller/TalkBotController.php:603
+#: specialVueFakeDummyForL10nScript.js:3829
+msgid "Failed to load Talk conversations"
+msgstr "Talk-Unterhaltungen konnten nicht geladen werden"
+
+#: lib/Controller/TalkBotController.php:257
+msgid "Missing bot ID"
+msgstr "Bot-ID fehlt"
+
+#: lib/Controller/TalkBotController.php:267
+msgid "You do not have access to this bot"
+msgstr "Du hast keinen Zugriff auf diesen Bot"
+
+#: lib/Controller/TalkBotController.php:282
+#, php-format
+msgid "Chat with %s"
+msgstr "Chat mit %s"
+
+#: lib/Controller/TalkBotController.php:293
+msgid "Please select a Talk conversation"
+msgstr "Bitte wähle eine Talk-Unterhaltung aus"
+
+#: lib/Controller/TalkBotController.php:297
+msgid "Unsupported Talk start mode"
+msgstr "Nicht unterstützter Talk-Startmodus"
+
+#: lib/Controller/TalkBotController.php:343
+msgid "Failed to start the Talk conversation"
+msgstr "Talk-Unterhaltung konnte nicht gestartet werden"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:47
+#: lib/Controller/TalkBotController.php:384
+#: specialVueFakeDummyForL10nScript.js:3896
+msgid "Talk conversation"
+msgstr "Talk-Unterhaltung"
+
+#: lib/Controller/TalkBotController.php:600
+msgid ""
+"Nextcloud Talk is not available. Please ask an administrator to enable the "
+"Talk app."
+msgstr ""
+"Nextcloud Talk ist nicht verfügbar. Bitte wende dich an die Administration, "
+"damit sie die Talk-App aktiviert."
+
+#: lib/Controller/TalkBotController.php:615
+msgid ""
+"Nextcloud Talk is not available or the selected conversation could not be "
+"found."
+msgstr ""
+"Nextcloud Talk ist nicht verfügbar oder die ausgewählte Unterhaltung wurde "
+"nicht gefunden."
+
+#: lib/Controller/TalkBotController.php:618
+msgid "Talk could not complete this action right now."
+msgstr "Talk konnte diese Aktion derzeit nicht abschließen."
+
+#: lib/Controller/TalkBotController.php:621
+msgid "Talk could not complete this action."
+msgstr "Talk konnte diese Aktion nicht abschließen."
+
+#: lib/Controller/ToolsController.php:118
+msgid "Failed to load available tools"
+msgstr "Verfügbare Tools konnten nicht geladen werden"
+
+#: lib/Controller/ToolsController.php:137
+msgid "Failed to load wiki locations"
+msgstr "Wiki-Speicherorte konnten nicht geladen werden"
+
+#: lib/Controller/ToolsController.php:154
+msgid "Failed to load configured tools"
+msgstr "Konfigurierte Tools konnten nicht geladen werden"
+
+#: lib/Controller/ToolsController.php:170
+msgid "Tool not found"
+msgstr "Werkzeug nicht gefunden"
+
+#: lib/Controller/ToolsController.php:217
+msgid "Failed to create the tool"
+msgstr "Tool konnte nicht erstellt werden"
+
+#: lib/Controller/ToolsController.php:270
+msgid "Failed to update the tool"
+msgstr "Tool konnte nicht aktualisiert werden"
+
+#: lib/Controller/ToolsController.php:288
+msgid "Failed to delete the tool"
+msgstr "Tool konnte nicht gelöscht werden"
+
+#: lib/Controller/ToolsController.php:307
+msgid "MCP endpoint URL is required"
+msgstr "Die URL des MCP-Endpunkts ist erforderlich"
+
+#: lib/Controller/ToolsController.php:331
+msgid "Tool connection test failed"
+msgstr "Verbindungstest für das Werkzeug fehlgeschlagen"
+
+#: lib/Controller/ToolsController.php:348
+msgid "Docling connection test failed"
+msgstr "Docling-Verbindungstest fehlgeschlagen"
+
+#: lib/Controller/ToolsController.php:365
+#: specialVueFakeDummyForL10nScript.js:1044
+msgid "Vision connection test failed"
+msgstr "Verbindungstest für die Bildanalyse fehlgeschlagen"
+
+#: lib/Controller/ToolsController.php:382
+#: specialVueFakeDummyForL10nScript.js:1074
+msgid "Speech connection test failed"
+msgstr "Verbindungstest für die Spracherkennung fehlgeschlagen"
+
+#: lib/Controller/TraceController.php:54
+msgid "Failed to load traces"
+msgstr "Aktivitätsprotokolle konnten nicht geladen werden"
+
+#: lib/Controller/TraceController.php:69
+#: lib/Controller/TraceController.php:92
+msgid "Trace not found"
+msgstr "Aktivitätslauf nicht gefunden"
+
+#: lib/Controller/TraceController.php:76
+msgid "Trace details unavailable"
+msgstr "Details des Aktivitätslaufs sind nicht verfügbar"
+
+#: lib/Controller/TraceController.php:99
+#: lib/Controller/TraceController.php:119
+#: specialVueFakeDummyForL10nScript.js:4258
+#: specialVueFakeDummyForL10nScript.js:4273
+msgid "Deletion failed"
+msgstr "Löschen fehlgeschlagen"
+
+#: lib/Reference/BotReferenceProvider.php:118
+msgid "AI Bot"
+msgstr "KI-Bot"
+
+#: lib/Service/BuiltInToolUiService.php:23
+msgid "Room Document Search"
+msgstr "Dokumentsuche im Raum"
+
+#: lib/Service/BuiltInToolUiService.php:24
+msgid "Room Image Search"
+msgstr "Bildsuche im Raum"
+
+#: lib/Service/BuiltInToolUiService.php:25
+msgid "Image Attachment Analysis"
+msgstr "Analyse von Bildanhängen"
+
+#: lib/Service/BuiltInToolUiService.php:26
+msgid "Audio Attachment Transcription"
+msgstr "Transkription von Audioanhängen"
+
+#: lib/Service/BuiltInToolUiService.php:27
+msgid "Document Search (RAG)"
+msgstr "Dokumentsuche (RAG)"
+
+#: lib/Service/BuiltInToolUiService.php:28
+msgid "Wiki Search"
+msgstr "Wiki-Suche"
+
+#: lib/Service/BuiltInToolUiService.php:29
+msgid "Wiki Read Page"
+msgstr "Wiki-Seite lesen"
+
+#: lib/Service/BuiltInToolUiService.php:30
+msgid "Wiki Write Page"
+msgstr "Wiki-Seite schreiben"
+
+#: lib/Service/BuiltInToolUiService.php:31
+msgid "Wiki Log Event"
+msgstr "Wiki-Ereignis protokollieren"
+
+#: lib/Service/BuiltInToolUiService.php:38
+msgid "Search through indexed documents attached to this bot."
+msgstr "An diesen Bot angehängte indizierte Dokumente durchsuchen."
+
+#: lib/Service/BuiltInToolUiService.php:39
+msgid ""
+"Search documents uploaded in the current Nextcloud Talk room. Can be used "
+"together with the bot's global document search."
+msgstr ""
+"Im aktuellen Nextcloud-Talk-Raum hochgeladene Dokumente durchsuchen. Kann "
+"zusammen mit der globalen Dokumentsuche des Bots verwendet werden."
+
+#: lib/Service/BuiltInToolUiService.php:40
+msgid ""
+"Search image analyses from screenshots and photos uploaded in the current "
+"Nextcloud Talk room."
+msgstr ""
+"Bildanalysen von Screenshots und Fotos durchsuchen, die im aktuellen "
+"Nextcloud-Talk-Raum hochgeladen wurden."
+
+#: lib/Service/BuiltInToolUiService.php:41
+msgid "Analyze image attachments from the current Talk message."
+msgstr "Bildanhänge aus der aktuellen Talk-Nachricht analysieren."
+
+#: lib/Service/BuiltInToolUiService.php:42
+msgid ""
+"Transcribe audio or voice-message attachments from the current Talk message."
+msgstr ""
+"Audio- oder Sprachnachrichten-Anhänge aus der aktuellen Talk-Nachricht "
+"transkribieren."
+
+#: lib/Service/BuiltInToolUiService.php:43
+msgid "Search the bot's persistent Markdown wiki."
+msgstr "Das dauerhafte Markdown-Wiki des Bots durchsuchen."
+
+#: lib/Service/BuiltInToolUiService.php:44
+msgid "Read one page from the bot's persistent Markdown wiki."
+msgstr "Eine Seite aus dem dauerhaften Markdown-Wiki des Bots lesen."
+
+#: lib/Service/BuiltInToolUiService.php:45
+msgid "Create, update, or append pages in the bot's persistent Markdown wiki."
+msgstr ""
+"Seiten im dauerhaften Markdown-Wiki des Bots erstellen, aktualisieren oder "
+"ergänzen."
+
+#: lib/Service/BuiltInToolUiService.php:46
+msgid "Append a maintenance event to the bot wiki log."
+msgstr "Ein Wartungsereignis an das Wiki-Protokoll des Bots anhängen."
+
+#. TRANSLATORS src/components/BotForm.vue:89
+#: lib/Service/PermissionService.php:321
+#: specialVueFakeDummyForL10nScript.js:3165
+msgid "Just for me (personal)"
+msgstr "Nur für mich (persönlich)"
+
+#: lib/Service/PermissionService.php:329
+#: specialVueFakeDummyForL10nScript.js:1793
+msgid "Global (available to all users)"
+msgstr "Global (für alle Benutzer verfügbar)"
+
+#. TRANSLATORS src/components/BotForm.vue:97
+#: lib/Service/PermissionService.php:337
+#: specialVueFakeDummyForL10nScript.js:3171
+msgid "Specific groups"
+msgstr "Bestimmte Gruppen"
+
+#. TRANSLATORS src/components/BotForm.vue:102
+#: lib/Service/PermissionService.php:344
+#: specialVueFakeDummyForL10nScript.js:3175
+msgid "Specific teams"
+msgstr "Bestimmte Teams"
+
+#: specialAppInfoFakeDummyForL10nScript.php:2
+msgid "Talk AI"
+msgstr "Talk AI"
+
+#: specialAppInfoFakeDummyForL10nScript.php:3
+msgid ""
+"Run many purpose-built AI assistants in Nextcloud Talk, with access "
+"governance"
+msgstr ""
+"Zahlreiche spezialisierte KI-Assistenten in Nextcloud Talk mit geregeltem "
+"Zugriff betreiben"
+
+#: specialAppInfoFakeDummyForL10nScript.php:4
+msgid ""
+"Talk AI turns Nextcloud Talk into a home for **multiple** AI bots instead of "
+"one generic assistant. Each bot has its own system prompt, model, knowledge "
+"and tools — and a visibility scope: **personal**, **group**, **team**, or "
+"**global** (with an approval workflow for shared bots), so users only see "
+"and use the bots they are entitled to.\n"
+"\n"
+"- **Multi-bot by design** — unlimited bots, each with a stable @mention, own "
+"prompt, temperature and model selection.\n"
+"- **Bring your own model** — any OpenAI-compatible chat / model-list / "
+"embedding / vision / speech endpoint, with a primary + optional secondary "
+"endpoint and an automatic fallback model.\n"
+"- **Knowledge (RAG)** — index Nextcloud files and folders, with optional "
+"Docling conversion for PDF, Office and image formats.\n"
+"- **Agentic tools** — built-in document search, room-document search, image "
+"analysis, audio transcription and persistent Markdown wikis, plus an "
+"extension point for companion apps and support for external MCP tool "
+"servers.\n"
+"- **Native Talk integration** — shared Talk bot, Smart Picker support, "
+"signature-verified webhooks, admin control over providers, credentials, rate "
+"limits and tool access.\n"
+"\n"
+"Developed by EDUC — the European Digital UniverCity (its package id is "
+"educai). Works with any OpenAI-compatible endpoint on any supported "
+"Nextcloud install.\n"
+"\n"
+"### EU funding\n"
+"\n"
+"![Co-funded by the European Union](https://raw.githubusercontent.com/"
+"EDUCAlliance/talk-ai/v2.39.5/img/eu-co-funded-appstore.png)\n"
+"\n"
+"Funded by the European Union. Views and opinions expressed are however those "
+"of the author(s) only and do not necessarily reflect those of the European "
+"Union or the European Education and Culture Executive Agency (EACEA). "
+"Neither the European Union nor EACEA can be held responsible for them."
+msgstr ""
+"Talk AI macht Nextcloud Talk zu einem Zuhause für **mehrere** KI-Bots statt "
+"für nur einen allgemeinen Assistenten. Jeder Bot hat einen eigenen System-"
+"Prompt, ein eigenes Modell, eigenes Wissen und eigene Tools sowie einen "
+"Sichtbarkeitsbereich: **persönlich**, **Gruppe**, **Team** oder **global** "
+"(mit einem Freigabeprozess für geteilte Bots). So sehen und verwenden "
+"Benutzer nur die Bots, zu deren Nutzung sie berechtigt sind.\n"
+"\n"
+"- **Für mehrere Bots konzipiert** — unbegrenzt viele Bots, jeweils mit einer "
+"stabilen @Erwähnung, einem eigenen Prompt, einer eigenen Temperatur und "
+"Modellauswahl.\n"
+"- **Eigenes Modell verwenden** — beliebige OpenAI-kompatible Endpunkte für "
+"Chat, Modelllisten, Embeddings, Bildverarbeitung und Spracherkennung, mit "
+"einem primären und einem optionalen sekundären Endpunkt sowie einem "
+"automatischen Fallback-Modell.\n"
+"- **Wissen (RAG)** — Nextcloud-Dateien und -Ordner indizieren, optional mit "
+"Docling-Konvertierung für PDF-, Office- und Bildformate.\n"
+"- **Agentische Tools** — integrierte Dokument- und Raumdokumentsuche, "
+"Bildanalyse, Audiotranskription und dauerhafte Markdown-Wikis sowie eine "
+"Erweiterungsschnittstelle für ergänzende Apps und Unterstützung für externe "
+"MCP-Toolserver.\n"
+"- **Native Talk-Integration** — geteilter Talk-Bot, Unterstützung für Smart "
+"Picker, signaturgeprüfte Webhooks und administrative Kontrolle über "
+"Anbieter, Zugangsdaten, Anfragelimits und Tool-Zugriff.\n"
+"\n"
+"Entwickelt von EDUC — der European Digital UniverCity (die Paket-ID lautet "
+"educai). Funktioniert mit jedem OpenAI-kompatiblen Endpunkt auf jeder "
+"unterstützten Nextcloud-Installation.\n"
+"\n"
+"### EU-Förderung\n"
+"\n"
+"![Kofinanziert von der Europäischen Union](https://raw.githubusercontent.com/"
+"EDUCAlliance/talk-ai/v2.39.5/img/eu-co-funded-appstore.png)\n"
+"\n"
+"Von der Europäischen Union finanziert. Die geäußerten Ansichten und "
+"Meinungen entsprechen jedoch ausschließlich denen der Autorinnen und Autoren "
+"und spiegeln nicht zwingend die der Europäischen Union oder der Europäischen "
+"Exekutivagentur für Bildung und Kultur (EACEA) wider. Weder die Europäische "
+"Union noch die EACEA können dafür verantwortlich gemacht werden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:42
+#: specialVueFakeDummyForL10nScript.js:143
+#: specialVueFakeDummyForL10nScript.js:1221
+#: specialVueFakeDummyForL10nScript.js:1367
+msgid "Custom"
+msgstr "Benutzerdefiniert"
+
+#. TRANSLATORS src/components/AdminSettings.vue:35
+#: specialVueFakeDummyForL10nScript.js:145
+#: specialVueFakeDummyForL10nScript.js:1219
+msgid "Default"
+msgstr "Standard"
+
+#: specialVueFakeDummyForL10nScript.js:193
+msgid ""
+"Using the configured custom embedding limits until the provider returns "
+"dedicated headers."
+msgstr ""
+"Die konfigurierten benutzerdefinierten Embedding-Limits werden verwendet, "
+"bis der Anbieter eigene Header zurückgibt."
+
+#: specialVueFakeDummyForL10nScript.js:195
+msgid ""
+"Using inherited chat limits until the embedding endpoint returns its own "
+"rate-limit headers."
+msgstr ""
+"Die übernommenen Chat-Limits werden verwendet, bis der Embedding-Endpunkt "
+"eigene Rate-Limit-Header zurückgibt."
+
+#: specialVueFakeDummyForL10nScript.js:205
+msgid ""
+"A stored Docling key is configured and kept unless you enter a new value."
+msgstr ""
+"Ein gespeicherter Docling-Schlüssel ist eingerichtet und bleibt erhalten, "
+"sofern du keinen neuen Wert eingibst."
+
+#: specialVueFakeDummyForL10nScript.js:207
+msgid "Leave blank to reuse the main API key."
+msgstr "Lass das Feld leer, um den primären API-Schlüssel wiederzuverwenden."
+
+#: specialVueFakeDummyForL10nScript.js:210
+msgid "Temp {temperature}"
+msgstr "Temp. {temperature}"
+
+#: specialVueFakeDummyForL10nScript.js:215
+msgid "{count} allowed model"
+msgid_plural "{count} allowed models"
+msgstr[0] "{count} zugelassenes Modell"
+msgstr[1] "{count} zugelassene Modelle"
+
+#: specialVueFakeDummyForL10nScript.js:218
+msgid "Primary + Secondary"
+msgstr "Primär + Sekundär"
+
+#: specialVueFakeDummyForL10nScript.js:220
+msgid "Primary only"
+msgstr "Nur primärer Endpunkt"
+
+#: specialVueFakeDummyForL10nScript.js:224
+msgid "{chat} / {stream} / {models} seconds"
+msgstr "{chat} / {stream} / {models} Sekunden"
+
+#: specialVueFakeDummyForL10nScript.js:238
+msgid "Changed - reindex needed"
+msgstr "Geändert – Neuindizierung erforderlich"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1166
+#: specialVueFakeDummyForL10nScript.js:240
+#: specialVueFakeDummyForL10nScript.js:243
+#: specialVueFakeDummyForL10nScript.js:1579
+msgid "Enabled"
+msgstr "Aktiviert"
+
+#. TRANSLATORS src/components/AdminSettings.vue:543
+#: specialVueFakeDummyForL10nScript.js:240
+#: specialVueFakeDummyForL10nScript.js:243
+#: specialVueFakeDummyForL10nScript.js:257
+#: specialVueFakeDummyForL10nScript.js:1365
+#: specialVueFakeDummyForL10nScript.js:1579
+msgid "Disabled"
+msgstr "Deaktiviert"
+
+#: specialVueFakeDummyForL10nScript.js:248
+msgid "Vision"
+msgstr "Bildanalyse"
+
+#: specialVueFakeDummyForL10nScript.js:251
+msgid "Speech"
+msgstr "Spracherkennung"
+
+#: specialVueFakeDummyForL10nScript.js:253
+msgid "No models"
+msgstr "Keine Modelle"
+
+#: specialVueFakeDummyForL10nScript.js:260
+msgid "{count} queued request"
+msgid_plural "{count} queued requests"
+msgstr[0] "{count} Anfrage in der Warteschlange"
+msgstr[1] "{count} Anfragen in der Warteschlange"
+
+#: specialVueFakeDummyForL10nScript.js:264
+#: specialVueFakeDummyForL10nScript.js:4345
+msgid "{count} token"
+msgid_plural "{count} tokens"
+msgstr[0] "{count} Token"
+msgstr[1] "{count} Token"
+
+#: specialVueFakeDummyForL10nScript.js:268
+#: specialVueFakeDummyForL10nScript.js:275
+msgid "Loading"
+msgstr "Wird geladen"
+
+#: specialVueFakeDummyForL10nScript.js:271
+msgid "{count} registered tool"
+msgid_plural "{count} registered tools"
+msgstr[0] "{count} registriertes Tool"
+msgstr[1] "{count} registrierte Tools"
+
+#: specialVueFakeDummyForL10nScript.js:278
+msgid "{count} bot"
+msgid_plural "{count} bots"
+msgstr[0] "{count} Bot"
+msgstr[1] "{count} Bots"
+
+#: specialVueFakeDummyForL10nScript.js:366
+msgid "Please upload an SVG file up to 1 MB"
+msgstr "Bitte lade eine SVG-Datei mit höchstens 1 MB hoch"
+
+#: specialVueFakeDummyForL10nScript.js:386
+msgid "App icon SVG uploaded"
+msgstr "SVG für das App-Symbol wurde hochgeladen"
+
+#: specialVueFakeDummyForL10nScript.js:389
+msgid "Failed to upload app icon SVG"
+msgstr "SVG für das App-Symbol konnte nicht hochgeladen werden"
+
+#: specialVueFakeDummyForL10nScript.js:456
+msgid ""
+"Black app icon must be an http(s) URL, an absolute Nextcloud path, or an "
+"uploaded SVG"
+msgstr ""
+"Das schwarze App-Symbol muss eine http(s)-URL, ein absoluter Nextcloud-Pfad "
+"oder eine hochgeladene SVG-Datei sein"
+
+#: specialVueFakeDummyForL10nScript.js:461
+msgid ""
+"White app icon must be an http(s) URL, an absolute Nextcloud path, or an "
+"uploaded SVG"
+msgstr ""
+"Das weiße App-Symbol muss eine http(s)-URL, ein absoluter Nextcloud-Pfad "
+"oder eine hochgeladene SVG-Datei sein"
+
+#: specialVueFakeDummyForL10nScript.js:466
+msgid "Custom app icon mode requires both black and white icons"
+msgstr ""
+"Für benutzerdefinierte App-Symbole sind sowohl ein schwarzes als auch ein "
+"weißes Symbol erforderlich"
+
+#: specialVueFakeDummyForL10nScript.js:503
+#: specialVueFakeDummyForL10nScript.js:2398
+msgid "Primary · {model}"
+msgstr "Primär · {model}"
+
+#: specialVueFakeDummyForL10nScript.js:506
+#: specialVueFakeDummyForL10nScript.js:2396
+msgid "Secondary · {model}"
+msgstr "Sekundär · {model}"
+
+#: specialVueFakeDummyForL10nScript.js:660
+msgid "Failed to load models from provider. Check API key and endpoint."
+msgstr ""
+"Modelle konnten nicht vom Anbieter geladen werden. Prüfe API-Schlüssel und "
+"Endpunkt."
+
+#: specialVueFakeDummyForL10nScript.js:670
+msgid "Default temperature must be between 0.0 and 1.0"
+msgstr "Die Standardtemperatur muss zwischen 0,0 und 1,0 liegen"
+
+#: specialVueFakeDummyForL10nScript.js:733
+msgid ""
+"Embedding configuration changes were detected (model/endpoint/key). You must "
+"run \"Reindex All Embeddings\" after saving, otherwise retrieval quality "
+"will be degraded. Continue saving settings?"
+msgstr ""
+"Es wurden Änderungen an der Embedding-Konfiguration erkannt (Modell/Endpunkt/"
+"Schlüssel). Nach dem Speichern musst du „Alle Embeddings neu indizieren“ "
+"ausführen, da sich sonst die Abrufqualität verschlechtert. Einstellungen "
+"trotzdem speichern?"
+
+#: specialVueFakeDummyForL10nScript.js:747
+msgid ""
+"Settings saved. Run \"Reindex All Embeddings\" now to rebuild vectors for "
+"the new embedding configuration."
+msgstr ""
+"Einstellungen gespeichert. Führe jetzt \"Alle Embeddings neu indizieren\" "
+"aus, um die Vektoren für die neue Embedding-Konfiguration neu zu erstellen."
+
+#: specialVueFakeDummyForL10nScript.js:749
+msgid "Settings saved successfully"
+msgstr "Einstellungen erfolgreich gespeichert"
+
+#: specialVueFakeDummyForL10nScript.js:771
+msgid "Failed to save settings"
+msgstr "Einstellungen konnten nicht gespeichert werden"
+
+#: specialVueFakeDummyForL10nScript.js:812
+msgid "Failed to load tools"
+msgstr "Tools konnten nicht geladen werden"
+
+#: specialVueFakeDummyForL10nScript.js:832
+msgid "Tool name and endpoint are required"
+msgstr "Werkzeugname und Endpunkt sind erforderlich"
+
+#: specialVueFakeDummyForL10nScript.js:841
+#: specialVueFakeDummyForL10nScript.js:911
+msgid "Authentication must be valid JSON"
+msgstr "Die Authentifizierung muss gültiges JSON sein"
+
+#: specialVueFakeDummyForL10nScript.js:863
+msgid "Tool saved"
+msgstr "Werkzeug gespeichert"
+
+#: specialVueFakeDummyForL10nScript.js:868
+msgid "Failed to save tool"
+msgstr "Tool konnte nicht gespeichert werden"
+
+#: specialVueFakeDummyForL10nScript.js:877
+msgid "Tool deleted"
+msgstr "Werkzeug gelöscht"
+
+#: specialVueFakeDummyForL10nScript.js:881
+msgid "Failed to delete tool"
+msgstr "Tool konnte nicht gelöscht werden"
+
+#: specialVueFakeDummyForL10nScript.js:895
+msgid "Failed to update tool state"
+msgstr "Tool-Status konnte nicht aktualisiert werden"
+
+#: specialVueFakeDummyForL10nScript.js:902
+msgid "Endpoint URL required to test"
+msgstr "Für den Test ist eine Endpunkt-URL erforderlich"
+
+#: specialVueFakeDummyForL10nScript.js:923
+msgid "Tool connection succeeded"
+msgstr "Werkzeugverbindung erfolgreich hergestellt"
+
+#: specialVueFakeDummyForL10nScript.js:926
+msgid "Failed to test tool connection"
+msgstr "Tool-Verbindung konnte nicht getestet werden"
+
+#: specialVueFakeDummyForL10nScript.js:970
+msgid "Queued reindex jobs: catalogue={catalogue}, bot sources={sources}"
+msgstr ""
+"Eingereihte Neuindizierungsaufträge: Katalog={catalogue}, Bot-"
+"Quellen={sources}"
+
+#: specialVueFakeDummyForL10nScript.js:976
+#: specialVueFakeDummyForL10nScript.js:980
+msgid "Failed to queue global embedding reindex"
+msgstr "Globale Neuindizierung der Embeddings konnte nicht eingereiht werden"
+
+#: specialVueFakeDummyForL10nScript.js:986
+msgid "Never"
+msgstr "Nie"
+
+#: specialVueFakeDummyForL10nScript.js:1014
+msgid "Connection test failed"
+msgstr "Verbindungstest fehlgeschlagen"
+
+#: specialVueFakeDummyForL10nScript.js:1017
+msgid "Docling connection successful"
+msgstr "Docling-Verbindung erfolgreich"
+
+#: specialVueFakeDummyForL10nScript.js:1023
+msgid "Failed to test Docling connection"
+msgstr "Docling-Verbindung konnte nicht getestet werden"
+
+#: specialVueFakeDummyForL10nScript.js:1047
+msgid "Vision connection successful"
+msgstr "Verbindung für die Bildanalyse erfolgreich hergestellt"
+
+#: specialVueFakeDummyForL10nScript.js:1053
+msgid "Failed to test vision connection"
+msgstr "Verbindung zur Bildverarbeitung konnte nicht getestet werden"
+
+#: specialVueFakeDummyForL10nScript.js:1077
+msgid "Speech connection successful"
+msgstr "Verbindung für die Spracherkennung erfolgreich hergestellt"
+
+#: specialVueFakeDummyForL10nScript.js:1083
+msgid "Failed to test speech connection"
+msgstr "Verbindung zur Spracherkennung konnte nicht getestet werden"
+
+#: specialVueFakeDummyForL10nScript.js:1114
+msgid "Processed {processed} request. {remaining} remaining."
+msgid_plural "Processed {processed} requests. {remaining} remaining."
+msgstr[0] "{processed} Anfrage verarbeitet. Noch {remaining} übrig."
+msgstr[1] "{processed} Anfragen verarbeitet. Noch {remaining} übrig."
+
+#: specialVueFakeDummyForL10nScript.js:1125
+#: specialVueFakeDummyForL10nScript.js:1129
+msgid "Failed to process queue"
+msgstr "Warteschlange konnte nicht verarbeitet werden"
+
+#: specialVueFakeDummyForL10nScript.js:1154
+msgid "Bot id is required"
+msgstr "Bot-ID ist erforderlich"
+
+#: specialVueFakeDummyForL10nScript.js:1159
+msgid "Bot updated"
+msgstr "Bot aktualisiert"
+
+#: specialVueFakeDummyForL10nScript.js:1171
+msgid "Delete bot \"{name}\"? This cannot be undone."
+msgstr "Bot „{name}“ löschen? Dies kann nicht rückgängig gemacht werden."
+
+#: specialVueFakeDummyForL10nScript.js:1176
+msgid "Bot deleted"
+msgstr "Bot gelöscht"
+
+#: specialVueFakeDummyForL10nScript.js:1185
+#: specialVueFakeDummyForL10nScript.js:1689
+#: specialVueFakeDummyForL10nScript.js:3531
+#: specialVueFakeDummyForL10nScript.js:3627
+#: specialVueFakeDummyForL10nScript.js:3943
+#: specialVueFakeDummyForL10nScript.js:4822
+msgid "Global"
+msgstr "Global"
+
+#: specialVueFakeDummyForL10nScript.js:1188
+#: specialVueFakeDummyForL10nScript.js:1203
+#: specialVueFakeDummyForL10nScript.js:1682
+#: specialVueFakeDummyForL10nScript.js:1692
+#: specialVueFakeDummyForL10nScript.js:1792
+#: specialVueFakeDummyForL10nScript.js:3533
+#: specialVueFakeDummyForL10nScript.js:3629
+#: specialVueFakeDummyForL10nScript.js:3942
+#: specialVueFakeDummyForL10nScript.js:4825
+msgid "Personal"
+msgstr "Persönlich"
+
+#: specialVueFakeDummyForL10nScript.js:1191
+msgid "Teams"
+msgstr "Teams"
+
+#: specialVueFakeDummyForL10nScript.js:1193
+msgid "Groups"
+msgstr "Gruppen"
+
+#: specialVueFakeDummyForL10nScript.js:1197
+#: specialVueFakeDummyForL10nScript.js:1676
+msgid "Draft"
+msgstr "Entwurf"
+
+#: specialVueFakeDummyForL10nScript.js:1200
+#: specialVueFakeDummyForL10nScript.js:1679
+msgid "Pending approval"
+msgstr "Freigabe ausstehend"
+
+#: specialVueFakeDummyForL10nScript.js:1205
+msgid "Approved"
+msgstr "Freigegeben"
+
+#. TRANSLATORS src/components/AdminSettings.vue:6
+#: specialVueFakeDummyForL10nScript.js:1211
+msgid "Administrator Settings"
+msgstr "Administrationseinstellungen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:18
+#: specialVueFakeDummyForL10nScript.js:1213
+msgid "Appearance"
+msgstr "Erscheinungsbild"
+
+#. TRANSLATORS src/components/AdminSettings.vue:19
+#: specialVueFakeDummyForL10nScript.js:1215
+msgid "App icon variants for settings and navigation surfaces."
+msgstr "Varianten des App-Symbols für Einstellungen und Navigation."
+
+#. TRANSLATORS src/components/AdminSettings.vue:29
+#: specialVueFakeDummyForL10nScript.js:1217
+msgid "App icon mode"
+msgstr "Modus des App-Symbols"
+
+#. TRANSLATORS src/components/AdminSettings.vue:48
+#: specialVueFakeDummyForL10nScript.js:1223
+msgid "Black on light"
+msgstr "Schwarz auf hellem Hintergrund"
+
+#. TRANSLATORS src/components/AdminSettings.vue:53
+#: specialVueFakeDummyForL10nScript.js:1225
+msgid "{name} black app icon preview"
+msgstr "Vorschau des schwarzen App-Symbols für {name}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:54
+#: specialVueFakeDummyForL10nScript.js:1227
+#: specialVueFakeDummyForL10nScript.js:1233
+msgid "Missing"
+msgstr "Fehlt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:58
+#: specialVueFakeDummyForL10nScript.js:1229
+msgid "White on dark"
+msgstr "Weiß auf dunkel"
+
+#. TRANSLATORS src/components/AdminSettings.vue:63
+#: specialVueFakeDummyForL10nScript.js:1231
+msgid "{name} white app icon preview"
+msgstr "Vorschau des weißen App-Symbols für {name}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:71
+#: specialVueFakeDummyForL10nScript.js:1235
+msgid ""
+"Uses the bundled {name} icon pair: dark icon for light settings surfaces, "
+"white icon for app navigation."
+msgstr ""
+"Verwendet das mitgelieferte {name}-Symbolpaar: dunkles Symbol für helle "
+"Einstellungsoberflächen, weißes Symbol für die App-Navigation."
+
+#. TRANSLATORS src/components/AdminSettings.vue:78
+#: specialVueFakeDummyForL10nScript.js:1237
+msgid "Black icon"
+msgstr "Schwarzes Symbol"
+
+#. TRANSLATORS src/components/AdminSettings.vue:92
+#: specialVueFakeDummyForL10nScript.js:1239
+#: specialVueFakeDummyForL10nScript.js:1245
+msgid "Uploading..."
+msgstr "Wird hochgeladen..."
+
+#: specialVueFakeDummyForL10nScript.js:1239
+#: specialVueFakeDummyForL10nScript.js:1245
+msgid "Upload SVG"
+msgstr "SVG hochladen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:102
+#: specialVueFakeDummyForL10nScript.js:1241
+msgid ""
+"Used on light settings surfaces. Enter a URL/path or upload an SVG from your "
+"computer."
+msgstr ""
+"Wird auf hellen Einstellungsoberflächen verwendet. Gib eine URL/einen Pfad "
+"ein oder lade eine SVG-Datei von deinem Computer hoch."
+
+#. TRANSLATORS src/components/AdminSettings.vue:106
+#: specialVueFakeDummyForL10nScript.js:1243
+msgid "White icon"
+msgstr "Weißes Symbol"
+
+#. TRANSLATORS src/components/AdminSettings.vue:130
+#: specialVueFakeDummyForL10nScript.js:1247
+msgid ""
+"Used in the dark app navigation/header context. Enter a URL/path or upload "
+"an SVG from your computer."
+msgstr ""
+"Wird in der dunklen App-Navigation beziehungsweise im dunklen Kopfbereich "
+"verwendet. Gib eine URL/einen Pfad ein oder lade eine SVG-Datei von deinem "
+"Computer hoch."
+
+#. TRANSLATORS src/components/AdminSettings.vue:138
+#: specialVueFakeDummyForL10nScript.js:1249
+msgid "Reset to default icon"
+msgstr "Auf Standardsymbol zurücksetzen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:153
+#: specialVueFakeDummyForL10nScript.js:1251
+msgid "Essentials"
+msgstr "Grundlagen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:154
+#: specialVueFakeDummyForL10nScript.js:1253
+msgid "Default creativity and Talk webhook secret."
+msgstr "Standardmäßige Kreativität und Talk-Webhook-Geheimnis."
+
+#. TRANSLATORS src/components/AdminSettings.vue:164
+#: specialVueFakeDummyForL10nScript.js:1255
+msgid "Default Temperature"
+msgstr "Standardtemperatur"
+
+#. TRANSLATORS src/components/AdminSettings.vue:174
+#: specialVueFakeDummyForL10nScript.js:1257
+msgid ""
+"Controls how deterministic or creative bots are by default. Lower values are "
+"better for agentic, tool-using, RAG, and workflow bots. Higher values can be "
+"useful for creative writing or brainstorming bots."
+msgstr ""
+"Legt fest, wie deterministisch oder kreativ Bots standardmäßig arbeiten. "
+"Niedrigere Werte eignen sich besser für agentische Bots, die Tools, RAG oder "
+"Workflows verwenden. Höhere Werte können für kreatives Schreiben oder "
+"Brainstorming-Bots nützlich sein."
+
+#. TRANSLATORS src/components/AdminSettings.vue:178
+#: specialVueFakeDummyForL10nScript.js:1259
+msgid "Precise {temperature}"
+msgstr "Präzise {temperature}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:181
+#: specialVueFakeDummyForL10nScript.js:1261
+msgid "Balanced {temperature}"
+msgstr "Ausgewogen {temperature}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:184
+#: specialVueFakeDummyForL10nScript.js:1263
+msgid "Creative {temperature}"
+msgstr "Kreativ {temperature}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:190
+#: specialVueFakeDummyForL10nScript.js:1265
+msgid "Webhook Secret"
+msgstr "Webhook-Secret"
+
+#. TRANSLATORS src/components/AdminSettings.vue:199
+#: specialVueFakeDummyForL10nScript.js:1267
+msgid "Secret used to verify webhook requests from Nextcloud Talk."
+msgstr "Secret zum Verifizieren von Webhook-Anfragen aus Nextcloud Talk."
+
+#. TRANSLATORS src/components/AdminSettings.vue:213
+#: specialVueFakeDummyForL10nScript.js:1269
+msgid "Model Endpoints"
+msgstr "Modell-Endpunkte"
+
+#. TRANSLATORS src/components/AdminSettings.vue:214
+#: specialVueFakeDummyForL10nScript.js:1271
+msgid "Primary and optional secondary OpenAI-compatible providers."
+msgstr "Primärer und optionaler sekundärer OpenAI-kompatibler Anbieter."
+
+#. TRANSLATORS src/components/AdminSettings.vue:224
+#: specialVueFakeDummyForL10nScript.js:1273
+msgid "Primary Endpoint"
+msgstr "Primärer Endpunkt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:226
+#: specialVueFakeDummyForL10nScript.js:1275
+msgid "Used for existing raw model names and as the default provider."
+msgstr ""
+"Wird für vorhandene unveränderte Modellnamen und als Standardanbieter "
+"verwendet."
+
+#. TRANSLATORS src/components/AdminSettings.vue:231
+#: specialVueFakeDummyForL10nScript.js:1277
+msgid "Primary API Endpoint"
+msgstr "Primärer API-Endpunkt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:241
+#: specialVueFakeDummyForL10nScript.js:1279
+msgid "AcademicCloud (GWDG) or OpenAI-compatible API endpoint URL."
+msgstr ""
+"API-Endpunkt-URL von AcademicCloud (GWDG) oder eines OpenAI-kompatiblen "
+"Dienstes."
+
+#. TRANSLATORS src/components/AdminSettings.vue:246
+#: specialVueFakeDummyForL10nScript.js:1281
+msgid "Primary API Key"
+msgstr "Primärer API-Schlüssel"
+
+#. TRANSLATORS src/components/AdminSettings.vue:255
+#: specialVueFakeDummyForL10nScript.js:1283
+msgid ""
+"Used for primary endpoint requests. Stored securely and never displayed back."
+msgstr ""
+"Wird für Anfragen an den primären Endpunkt verwendet. Wird sicher "
+"gespeichert und nie wieder angezeigt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:260
+#: specialVueFakeDummyForL10nScript.js:1285
+msgid "Secondary Endpoint"
+msgstr "Sekundärer Endpunkt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:262
+#: specialVueFakeDummyForL10nScript.js:1287
+msgid "Optional. When configured, bots can choose models from both endpoints."
+msgstr ""
+"Optional. Wenn konfiguriert, können Bots Modelle von beiden Endpunkten "
+"verwenden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:267
+#: specialVueFakeDummyForL10nScript.js:1289
+msgid "Secondary API Endpoint"
+msgstr "Sekundärer API-Endpunkt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:278
+#: specialVueFakeDummyForL10nScript.js:1291
+msgid "Secondary API Key"
+msgstr "Sekundärer API-Schlüssel"
+
+#. TRANSLATORS src/components/AdminSettings.vue:287
+#: specialVueFakeDummyForL10nScript.js:1293
+msgid "Leave blank to keep an already stored secondary key."
+msgstr ""
+"Lass das Feld leer, um einen bereits gespeicherten sekundären Schlüssel "
+"beizubehalten."
+
+#. TRANSLATORS src/components/AdminSettings.vue:292
+#: specialVueFakeDummyForL10nScript.js:1295
+msgid "Model Selection"
+msgstr "Modellauswahl"
+
+#. TRANSLATORS src/components/AdminSettings.vue:296
+#: specialVueFakeDummyForL10nScript.js:1297
+msgid "Default Model"
+msgstr "Standardmodell"
+
+#. TRANSLATORS src/components/AdminSettings.vue:317
+#: specialVueFakeDummyForL10nScript.js:1299
+msgid "Disabled because Multiple Models mode is enabled."
+msgstr "Deaktiviert, da der Modus „Mehrere Modelle“ aktiviert ist."
+
+#. TRANSLATORS src/components/AdminSettings.vue:320
+#: specialVueFakeDummyForL10nScript.js:1301
+msgid "Legacy unprefixed model names continue to use the primary endpoint."
+msgstr ""
+"Ältere Modellnamen ohne Präfix verwenden weiterhin den primären Endpunkt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:330
+#: specialVueFakeDummyForL10nScript.js:1303
+msgid "Allow Multiple Models (per-bot selection)"
+msgstr "Mehrere Modelle zulassen (Auswahl pro Bot)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:333
+#: specialVueFakeDummyForL10nScript.js:1305
+msgid ""
+"If enabled, choose which models are available for bots. Users will select "
+"one when creating a bot."
+msgstr ""
+"Wenn diese Option aktiviert ist, wähle aus, welche Modelle für Bots "
+"verfügbar sind. Beim Erstellen eines Bots wählen Benutzer eines davon aus."
+
+#. TRANSLATORS src/components/AdminSettings.vue:338
+#: specialVueFakeDummyForL10nScript.js:1307
+msgid "Allowed Models"
+msgstr "Zugelassene Modelle"
+
+#. TRANSLATORS src/components/AdminSettings.vue:340
+#: specialVueFakeDummyForL10nScript.js:1309
+msgid "Loading models…"
+msgstr "Modelle werden geladen…"
+
+#. TRANSLATORS src/components/AdminSettings.vue:347
+#: specialVueFakeDummyForL10nScript.js:1311
+msgid "No models loaded."
+msgstr "Keine Modelle geladen."
+
+#. TRANSLATORS src/components/AdminSettings.vue:352
+#: specialVueFakeDummyForL10nScript.js:1313
+msgid "Load models"
+msgstr "Modelle laden"
+
+#. TRANSLATORS src/components/AdminSettings.vue:367
+#: specialVueFakeDummyForL10nScript.js:1315
+msgid "Hold Cmd/Ctrl to select multiple. Save after selection."
+msgstr ""
+"Halte Cmd/Ctrl gedrückt, um mehrere Einträge auszuwählen. Speichere "
+"anschließend deine Auswahl."
+
+#. TRANSLATORS src/components/AdminSettings.vue:382
+#: specialVueFakeDummyForL10nScript.js:1317
+msgid "Fallback & Timeouts"
+msgstr "Fallback und Zeitüberschreitungen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:383
+#: specialVueFakeDummyForL10nScript.js:1319
+msgid "One retry model and LLM request time limits."
+msgstr ""
+"Ein Modell für einen Wiederholungsversuch sowie Zeitlimits für LLM-Anfragen."
+
+#. TRANSLATORS src/components/AdminSettings.vue:393
+#: specialVueFakeDummyForL10nScript.js:1321
+msgid "Fallback Model"
+msgstr "Fallback-Modell"
+
+#. TRANSLATORS src/components/AdminSettings.vue:398
+#: specialVueFakeDummyForL10nScript.js:1323
+msgid "No fallback"
+msgstr "Kein Fallback"
+
+#. TRANSLATORS src/components/AdminSettings.vue:413
+#: specialVueFakeDummyForL10nScript.js:1325
+msgid ""
+"Used once after timeout or connection failures before the request fails "
+"finally."
+msgstr ""
+"Wird nach einer Zeitüberschreitung oder einem Verbindungsfehler einmal "
+"verwendet, bevor die Anfrage endgültig fehlschlägt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:419
+#: specialVueFakeDummyForL10nScript.js:1327
+msgid "Chat Timeout (seconds)"
+msgstr "Chat-Zeitüberschreitung (Sekunden)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:427
+#: specialVueFakeDummyForL10nScript.js:1329
+msgid "Maximum time to wait for a regular, non-streaming LLM response."
+msgstr "Maximale Wartezeit auf eine reguläre, nicht gestreamte LLM-Antwort."
+
+#. TRANSLATORS src/components/AdminSettings.vue:431
+#: specialVueFakeDummyForL10nScript.js:1331
+msgid "Streaming Timeout (seconds)"
+msgstr "Streaming-Zeitüberschreitung (Sekunden)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:439
+#: specialVueFakeDummyForL10nScript.js:1333
+msgid ""
+"Maximum time to keep a streaming response open while the model is generating."
+msgstr ""
+"Maximale Dauer, für die eine gestreamte Antwort während der Generierung "
+"durch das Modell offen bleibt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:443
+#: specialVueFakeDummyForL10nScript.js:1335
+msgid "Model-List Timeout (seconds)"
+msgstr "Zeitlimit für die Modellliste (Sekunden)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:463
+#: specialVueFakeDummyForL10nScript.js:1337
+msgid "RAG & Embeddings"
+msgstr "RAG und Embeddings"
+
+#. TRANSLATORS src/components/AdminSettings.vue:464
+#: specialVueFakeDummyForL10nScript.js:1339
+msgid "Knowledge retrieval, embedding provider, limits, and chunking."
+msgstr "Wissensabruf, Embedding-Anbieter, Limits und Chunking."
+
+#. TRANSLATORS src/components/AdminSettings.vue:476
+#: specialVueFakeDummyForL10nScript.js:1341
+msgid "Retrieval-Augmented Generation"
+msgstr "Retrieval-Augmented Generation"
+
+#. TRANSLATORS src/components/AdminSettings.vue:478
+#: specialVueFakeDummyForL10nScript.js:1343
+msgid ""
+"Configure embeddings and chunking parameters used when bots index Nextcloud "
+"files."
+msgstr ""
+"Konfiguriere Embeddings und Chunking-Parameter, die Bots beim Indizieren von "
+"Nextcloud-Dateien verwenden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:487
+#: specialVueFakeDummyForL10nScript.js:1345
+msgid "Enable Retrieval-Augmented Generation"
+msgstr "RAG aktivieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:490
+#: specialVueFakeDummyForL10nScript.js:1347
+msgid ""
+"When enabled, bots can index approved files and surface relevant snippets in "
+"conversations."
+msgstr ""
+"Wenn aktiviert, können Bots freigegebene Dateien indizieren und relevante "
+"Ausschnitte in Unterhaltungen bereitstellen."
+
+#. TRANSLATORS src/components/AdminSettings.vue:495
+#: specialVueFakeDummyForL10nScript.js:1349
+msgid "Embedding API Endpoint"
+msgstr "Embedding-API-Endpunkt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:504
+#: specialVueFakeDummyForL10nScript.js:1351
+msgid "Optional. Leave blank to reuse the chat completion endpoint."
+msgstr ""
+"Optional. Lass das Feld leer, um den Chat-Completion-Endpunkt "
+"wiederzuverwenden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:509
+#: specialVueFakeDummyForL10nScript.js:1353
+msgid "Embedding API Key"
+msgstr "Embedding-API-Schlüssel"
+
+#. TRANSLATORS src/components/AdminSettings.vue:518
+#: specialVueFakeDummyForL10nScript.js:1355
+msgid ""
+"Optional. Provide only if embeddings require a different credential. Stored "
+"securely and never displayed back."
+msgstr ""
+"Optional. Gib nur dann Zugangsdaten an, wenn Embeddings andere benötigen. "
+"Sie werden sicher gespeichert und nie wieder angezeigt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:523
+#: specialVueFakeDummyForL10nScript.js:1357
+msgid "Embedding Model"
+msgstr "Embedding-Modell"
+
+#. TRANSLATORS src/components/AdminSettings.vue:530
+#: specialVueFakeDummyForL10nScript.js:1359
+msgid ""
+"Set the provider-specific embedding model identifier (e.g., multilingual-e5-"
+"large-instruct, e5-mistral-7b-instruct)."
+msgstr ""
+"Lege die anbieterspezifische Kennung des Embedding-Modells fest (z. B. "
+"multilingual-e5-large-instruct, e5-mistral-7b-instruct)."
+
+#. TRANSLATORS src/components/AdminSettings.vue:535
+#: specialVueFakeDummyForL10nScript.js:1361
+msgid "Embedding Rate Limit Mode"
+msgstr "Modus des Embedding-Anfragelimits"
+
+#. TRANSLATORS src/components/AdminSettings.vue:540
+#: specialVueFakeDummyForL10nScript.js:1363
+msgid "Inherit Chat Limits"
+msgstr "Chat-Limits übernehmen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:550
+#: specialVueFakeDummyForL10nScript.js:1369
+msgid ""
+"Use \"inherit\" to follow chat queue limits, \"disabled\" for self-hosted "
+"embedding endpoints without throttling, or \"custom\" for dedicated "
+"embedding quotas."
+msgstr ""
+"Verwende \"inherit\", um die Limits der Chat-Warteschlange zu übernehmen, "
+"\"disabled\" für selbst gehostete Embedding-Endpunkte ohne Drosselung oder "
+"\"custom\" für eigene Embedding-Kontingente."
+
+#. TRANSLATORS src/components/AdminSettings.vue:556
+#: specialVueFakeDummyForL10nScript.js:1371
+msgid "Embedding Requests per Second"
+msgstr "Embedding-Anfragen pro Sekunde"
+
+#. TRANSLATORS src/components/AdminSettings.vue:562
+#: specialVueFakeDummyForL10nScript.js:1373
+#: specialVueFakeDummyForL10nScript.js:1485
+msgid "Optional"
+msgstr "Optional"
+
+#. TRANSLATORS src/components/AdminSettings.vue:564
+#: specialVueFakeDummyForL10nScript.js:1375
+msgid ""
+"Optional. Leave blank if the embedding provider does not expose second-level "
+"headers."
+msgstr ""
+"Optional. Lass das Feld leer, wenn der Embedding-Anbieter keine Header für "
+"Limits pro Sekunde bereitstellt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:568
+#: specialVueFakeDummyForL10nScript.js:1377
+msgid "Embedding Requests per Minute"
+msgstr "Embedding-Anfragen pro Minute"
+
+#. TRANSLATORS src/components/AdminSettings.vue:576
+#: specialVueFakeDummyForL10nScript.js:1379
+msgid "Default for GWDG embeddings: 100/minute."
+msgstr "Standard für GWDG-Embeddings: 100/Minute."
+
+#. TRANSLATORS src/components/AdminSettings.vue:580
+#: specialVueFakeDummyForL10nScript.js:1381
+msgid "Embedding Requests per Hour"
+msgstr "Embedding-Anfragen pro Stunde"
+
+#. TRANSLATORS src/components/AdminSettings.vue:588
+#: specialVueFakeDummyForL10nScript.js:1383
+msgid "Default for GWDG embeddings: 2000/hour."
+msgstr "Standard für GWDG-Embeddings: 2000/Stunde."
+
+#. TRANSLATORS src/components/AdminSettings.vue:592
+#: specialVueFakeDummyForL10nScript.js:1385
+msgid "Embedding Requests per Day"
+msgstr "Embedding-Anfragen pro Tag"
+
+#. TRANSLATORS src/components/AdminSettings.vue:600
+#: specialVueFakeDummyForL10nScript.js:1387
+msgid "Default for GWDG embeddings: 4000/day."
+msgstr "Standard für GWDG-Embeddings: 4000/Tag."
+
+#. TRANSLATORS src/components/AdminSettings.vue:605
+#: specialVueFakeDummyForL10nScript.js:1389
+msgid "Embedding settings changed."
+msgstr "Embedding-Einstellungen wurden geändert."
+
+#. TRANSLATORS src/components/AdminSettings.vue:607
+#: specialVueFakeDummyForL10nScript.js:1391
+msgid ""
+"Save first, then run \"Reindex All Embeddings\" to rebuild bot vectors for "
+"the active embedding model."
+msgstr ""
+"Speichere zuerst und führe dann \"Alle Embeddings neu indizieren\" aus, um "
+"die Bot-Vektoren für das aktive Embedding-Modell neu zu erstellen."
+
+#. TRANSLATORS src/components/AdminSettings.vue:613
+#: specialVueFakeDummyForL10nScript.js:1393
+msgid "Chunk Size (tokens)"
+msgstr "Chunk-Größe (Token)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:622
+#: specialVueFakeDummyForL10nScript.js:1395
+msgid ""
+"Controls how much text each embedding covers. Larger chunks reduce recall "
+"but speed ingestion."
+msgstr ""
+"Legt fest, wie viel Text jedes Embedding abdeckt. Größere Chunks verringern "
+"die Trefferquote, beschleunigen aber die Indexierung."
+
+#. TRANSLATORS src/components/AdminSettings.vue:626
+#: specialVueFakeDummyForL10nScript.js:1397
+msgid "Chunk Overlap (tokens)"
+msgstr "Chunk-Überlappung (Token)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:635
+#: specialVueFakeDummyForL10nScript.js:1399
+msgid ""
+"Overlap provides continuity between adjacent chunks. Increase for long-form "
+"documents."
+msgstr ""
+"Eine Überlappung sorgt für Zusammenhang zwischen benachbarten Chunks. Erhöhe "
+"den Wert für längere Dokumente."
+
+#. TRANSLATORS src/components/AdminSettings.vue:650
+#: specialVueFakeDummyForL10nScript.js:1401
+msgid "Document Conversion"
+msgstr "Dokumentkonvertierung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:651
+#: specialVueFakeDummyForL10nScript.js:1403
+msgid "Docling conversion for PDF and Office ingestion."
+msgstr "Docling-Konvertierung für die Aufnahme von PDF- und Office-Dateien."
+
+#. TRANSLATORS src/components/AdminSettings.vue:661
+#: specialVueFakeDummyForL10nScript.js:1405
+msgid "Document Conversion (Docling)"
+msgstr "Dokumentkonvertierung (Docling)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:663
+#: specialVueFakeDummyForL10nScript.js:1407
+msgid ""
+"Enable conversion of PDF, DOCX, PPTX and other binary documents to text for "
+"RAG ingestion. This uses the Docling API to extract content from documents "
+"that cannot be read as plain text."
+msgstr ""
+"Aktiviere die Konvertierung von PDF-, DOCX-, PPTX- und anderen "
+"Binärdokumenten in Text für die RAG-Indexierung. Dabei extrahiert die "
+"Docling-API Inhalte aus Dokumenten, die nicht als Klartext gelesen werden "
+"können."
+
+#. TRANSLATORS src/components/AdminSettings.vue:672
+#: specialVueFakeDummyForL10nScript.js:1409
+msgid "Enable Document Conversion"
+msgstr "Dokumentkonvertierung aktivieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:675
+#: specialVueFakeDummyForL10nScript.js:1411
+msgid ""
+"When enabled, PDF and Office documents attached to bots will be "
+"automatically converted to text for indexing. Uses the dedicated Docling API "
+"key when configured, otherwise falls back to the main API key."
+msgstr ""
+"Wenn aktiviert, werden an Bots angehängte PDF- und Office-Dokumente "
+"automatisch zur Indizierung in Text umgewandelt. Verwendet den eigenen "
+"Docling-API-Schlüssel, falls konfiguriert, andernfalls den primären API-"
+"Schlüssel."
+
+#. TRANSLATORS src/components/AdminSettings.vue:680
+#: specialVueFakeDummyForL10nScript.js:1413
+msgid "Docling API Endpoint"
+msgstr "Docling-API-Endpunkt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:689
+#: specialVueFakeDummyForL10nScript.js:1415
+msgid "Optional. Leave blank to use the default Academic Cloud endpoint."
+msgstr ""
+"Optional. Lass das Feld leer, um den standardmäßigen Academic Cloud-Endpunkt "
+"zu verwenden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:694
+#: specialVueFakeDummyForL10nScript.js:1417
+msgid "Docling API Key"
+msgstr "Docling-API-Schlüssel"
+
+#. TRANSLATORS src/components/AdminSettings.vue:703
+#: specialVueFakeDummyForL10nScript.js:1419
+msgid "Optional. Provide only if Docling requires a different credential."
+msgstr "Optional. Gib nur dann Zugangsdaten an, wenn Docling andere benötigt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:714
+#. TRANSLATORS src/components/AdminSettings.vue:800
+#. TRANSLATORS src/components/AdminSettings.vue:862
+#. TRANSLATORS src/components/AdminSettings.vue:714
+#: specialVueFakeDummyForL10nScript.js:1421
+#: specialVueFakeDummyForL10nScript.js:1447
+#: specialVueFakeDummyForL10nScript.js:1467
+#: specialVueFakeDummyForL10nScript.js:1613
+msgid "Testing…"
+msgstr "Wird getestet…"
+
+#: specialVueFakeDummyForL10nScript.js:1421
+#: specialVueFakeDummyForL10nScript.js:1613
+msgid "Test Connection"
+msgstr "Verbindung testen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:717
+#: specialVueFakeDummyForL10nScript.js:1423
+msgid "✓ Connection successful"
+msgstr "✓ Verbindung erfolgreich"
+
+#: specialVueFakeDummyForL10nScript.js:1423
+#: specialVueFakeDummyForL10nScript.js:1449
+#: specialVueFakeDummyForL10nScript.js:1469
+msgid "✗ {error}"
+msgstr "✗ {error}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:723
+#: specialVueFakeDummyForL10nScript.js:1425
+msgid "Supported formats:"
+msgstr "Unterstützte Formate:"
+
+#. TRANSLATORS src/components/AdminSettings.vue:737
+#: specialVueFakeDummyForL10nScript.js:1427
+msgid "Media Tools"
+msgstr "Medien-Tools"
+
+#. TRANSLATORS src/components/AdminSettings.vue:738
+#: specialVueFakeDummyForL10nScript.js:1429
+msgid "Image understanding and speech-to-text models."
+msgstr "Modelle für Bildverständnis und Speech-to-Text."
+
+#. TRANSLATORS src/components/AdminSettings.vue:748
+#: specialVueFakeDummyForL10nScript.js:1431
+msgid "Image Understanding"
+msgstr "Bildverständnis"
+
+#. TRANSLATORS src/components/AdminSettings.vue:750
+#: specialVueFakeDummyForL10nScript.js:1433
+msgid ""
+"Configure a multimodal model for image attachments uploaded in Nextcloud "
+"Talk. Bots only get image understanding when the built-in image tool is "
+"enabled for that bot."
+msgstr ""
+"Konfiguriere ein multimodales Modell für Bildanhänge, die in Nextcloud Talk "
+"hochgeladen werden. Bots können Bilder nur verstehen, wenn das integrierte "
+"Bild-Tool für den jeweiligen Bot aktiviert ist."
+
+#. TRANSLATORS src/components/AdminSettings.vue:755
+#: specialVueFakeDummyForL10nScript.js:1435
+msgid "Vision API Endpoint"
+msgstr "API-Endpunkt für Bildanalyse"
+
+#. TRANSLATORS src/components/AdminSettings.vue:764
+#: specialVueFakeDummyForL10nScript.js:1437
+msgid "Optional. Leave blank to reuse the main chat completion endpoint."
+msgstr ""
+"Optional. Lass das Feld leer, um den primären Chat-Completion-Endpunkt "
+"wiederzuverwenden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:769
+#: specialVueFakeDummyForL10nScript.js:1439
+msgid "Vision API Key"
+msgstr "API-Schlüssel für Bildanalyse"
+
+#. TRANSLATORS src/components/AdminSettings.vue:778
+#: specialVueFakeDummyForL10nScript.js:1441
+#: specialVueFakeDummyForL10nScript.js:1461
+msgid "Optional. Leave blank to reuse the main API key."
+msgstr ""
+"Optional. Lass das Feld leer, um den primären API-Schlüssel "
+"wiederzuverwenden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:783
+#: specialVueFakeDummyForL10nScript.js:1443
+msgid "Vision Model"
+msgstr "Modell für Bildanalyse"
+
+#. TRANSLATORS src/components/AdminSettings.vue:790
+#: specialVueFakeDummyForL10nScript.js:1445
+msgid "Set a model identifier that supports image inputs."
+msgstr "Lege eine Modellkennung fest, die Bildeingaben unterstützt."
+
+#: specialVueFakeDummyForL10nScript.js:1447
+msgid "Test Vision"
+msgstr "Bildanalyse testen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:803
+#: specialVueFakeDummyForL10nScript.js:1449
+msgid "✓ Vision connection successful"
+msgstr "✓ Verbindung zur Bildverarbeitung erfolgreich"
+
+#. TRANSLATORS src/components/AdminSettings.vue:810
+#: specialVueFakeDummyForL10nScript.js:1451
+msgid "Speech To Text"
+msgstr "Spracherkennung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:812
+#: specialVueFakeDummyForL10nScript.js:1453
+msgid ""
+"Configure a transcription model for audio and voice-message attachments "
+"uploaded in Nextcloud Talk. Bots only get this ability when the built-in "
+"audio tool is enabled for that bot."
+msgstr ""
+"Konfiguriere ein Transkriptionsmodell für Audioanhänge und "
+"Sprachnachrichten, die in Nextcloud Talk hochgeladen werden. Bots erhalten "
+"diese Funktion nur, wenn das integrierte Audio-Tool für den jeweiligen Bot "
+"aktiviert ist."
+
+#. TRANSLATORS src/components/AdminSettings.vue:817
+#: specialVueFakeDummyForL10nScript.js:1455
+msgid "Speech API Endpoint"
+msgstr "API-Endpunkt für Spracherkennung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:826
+#: specialVueFakeDummyForL10nScript.js:1457
+msgid ""
+"Optional. Leave blank to derive an OpenAI-compatible transcription endpoint "
+"from the main chat endpoint."
+msgstr ""
+"Optional. Lass das Feld leer, um aus dem primären Chat-Endpunkt einen OpenAI-"
+"kompatiblen Transkriptionsendpunkt abzuleiten."
+
+#. TRANSLATORS src/components/AdminSettings.vue:831
+#: specialVueFakeDummyForL10nScript.js:1459
+msgid "Speech API Key"
+msgstr "API-Schlüssel für Spracherkennung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:845
+#: specialVueFakeDummyForL10nScript.js:1463
+msgid "Speech Model"
+msgstr "Modell für Spracherkennung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:852
+#: specialVueFakeDummyForL10nScript.js:1465
+msgid ""
+"Set the transcription model identifier, for example a Whisper-compatible "
+"model."
+msgstr ""
+"Lege die Kennung des Transkriptionsmodells fest, beispielsweise die eines "
+"Whisper-kompatiblen Modells."
+
+#: specialVueFakeDummyForL10nScript.js:1467
+msgid "Test Speech"
+msgstr "Spracherkennung testen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:865
+#: specialVueFakeDummyForL10nScript.js:1469
+msgid "✓ Speech connection successful"
+msgstr "✓ Verbindung zur Spracherkennung erfolgreich"
+
+#. TRANSLATORS src/components/AdminSettings.vue:879
+#: specialVueFakeDummyForL10nScript.js:1471
+msgid "Rate Limits"
+msgstr "Anfragelimits"
+
+#. TRANSLATORS src/components/AdminSettings.vue:880
+#: specialVueFakeDummyForL10nScript.js:1473
+msgid "LLM queue limits, live counters, and queue processing."
+msgstr ""
+"Limits der LLM-Warteschlange, Live-Zähler und Verarbeitung der Warteschlange."
+
+#. TRANSLATORS src/components/AdminSettings.vue:890
+#: specialVueFakeDummyForL10nScript.js:1475
+msgid "LLM Rate Limiting Queue"
+msgstr "LLM-Warteschlange für Anfragelimits"
+
+#. TRANSLATORS src/components/AdminSettings.vue:892
+#: specialVueFakeDummyForL10nScript.js:1477
+msgid ""
+"When enabled, requests that exceed the LLM provider's rate limit will be "
+"queued and processed automatically via background jobs. Configure limits "
+"based on your provider's quota. For GWDG, use 30/minute, 200/hour, and 1000/"
+"day. Leave per-second empty if your provider does not expose a second-level "
+"window."
+msgstr ""
+"Wenn aktiviert, werden Anfragen, die das Ratenlimit des LLM-Anbieters "
+"überschreiten, in die Warteschlange gestellt und automatisch über "
+"Hintergrundaufträge verarbeitet. Konfiguriere die Limits entsprechend dem "
+"Kontingent deines Anbieters. Verwende für GWDG 30/Minute, 200/Stunde und "
+"1000/Tag. Lasse das Limit pro Sekunde leer, wenn dein Anbieter kein "
+"Zeitfenster auf Sekundenebene bereitstellt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:901
+#: specialVueFakeDummyForL10nScript.js:1479
+msgid "Enable Rate Limit Queue"
+msgstr "Warteschlange für Anfragelimits aktivieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:904
+#: specialVueFakeDummyForL10nScript.js:1481
+msgid ""
+"When enabled, requests exceeding rate limits will be queued instead of "
+"failing. A background job will process queued requests as capacity becomes "
+"available."
+msgstr ""
+"Wenn aktiviert, werden Anfragen bei Überschreitung von Ratenlimits in die "
+"Warteschlange gestellt, statt fehlzuschlagen. Ein Hintergrundauftrag "
+"verarbeitet die eingereihten Anfragen, sobald Kapazität verfügbar ist."
+
+#. TRANSLATORS src/components/AdminSettings.vue:910
+#: specialVueFakeDummyForL10nScript.js:1483
+msgid "Requests per Second"
+msgstr "Anfragen pro Sekunde"
+
+#. TRANSLATORS src/components/AdminSettings.vue:918
+#: specialVueFakeDummyForL10nScript.js:1487
+msgid ""
+"Optional. Leave blank for providers like GWDG that only expose minute/hour/"
+"day headers."
+msgstr ""
+"Optional. Für Anbieter wie GWDG leer lassen, wenn diese nur Header für "
+"Minuten-, Stunden- oder Tageslimits bereitstellen."
+
+#. TRANSLATORS src/components/AdminSettings.vue:922
+#: specialVueFakeDummyForL10nScript.js:1489
+msgid "Requests per Minute"
+msgstr "Anfragen pro Minute"
+
+#. TRANSLATORS src/components/AdminSettings.vue:930
+#: specialVueFakeDummyForL10nScript.js:1491
+msgid "Maximum requests per minute (GWDG default: 30)"
+msgstr "Maximale Anfragen pro Minute (GWDG-Standard: 30)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:934
+#: specialVueFakeDummyForL10nScript.js:1493
+msgid "Requests per Hour"
+msgstr "Anfragen pro Stunde"
+
+#. TRANSLATORS src/components/AdminSettings.vue:942
+#: specialVueFakeDummyForL10nScript.js:1495
+msgid "Maximum requests per hour (GWDG default: 200)"
+msgstr "Maximale Anfragen pro Stunde (GWDG-Standard: 200)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:946
+#: specialVueFakeDummyForL10nScript.js:1497
+msgid "Requests per Day"
+msgstr "Anfragen pro Tag"
+
+#. TRANSLATORS src/components/AdminSettings.vue:954
+#: specialVueFakeDummyForL10nScript.js:1499
+msgid "Maximum requests per day (GWDG default: 1000)"
+msgstr "Maximale Anfragen pro Tag (GWDG-Standard: 1000)"
+
+#. TRANSLATORS src/components/AdminSettings.vue:960
+#: specialVueFakeDummyForL10nScript.js:1501
+msgid "Queue Message"
+msgstr "Warteschlangennachricht"
+
+#. TRANSLATORS src/components/AdminSettings.vue:978
+#. TRANSLATORS src/components/AdminSettings.vue:1312
+#: specialVueFakeDummyForL10nScript.js:1507
+#: specialVueFakeDummyForL10nScript.js:1621
+msgid "Loading…"
+msgstr "Wird geladen…"
+
+#: specialVueFakeDummyForL10nScript.js:1507
+msgid "Refresh Status"
+msgstr "Status aktualisieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:985
+#: specialVueFakeDummyForL10nScript.js:1509
+#: specialVueFakeDummyForL10nScript.js:2894
+msgid "Processing…"
+msgstr "Wird verarbeitet…"
+
+#: specialVueFakeDummyForL10nScript.js:1509
+msgid "Process Queue Now"
+msgstr "Warteschlange jetzt verarbeiten"
+
+#. TRANSLATORS src/components/AdminSettings.vue:991
+#: specialVueFakeDummyForL10nScript.js:1511
+msgid "Queued"
+msgstr "Eingereiht"
+
+#. TRANSLATORS src/components/AdminSettings.vue:995
+#: specialVueFakeDummyForL10nScript.js:1513
+msgid "Processing"
+msgstr "Wird verarbeitet"
+
+#. TRANSLATORS src/components/AdminSettings.vue:999
+#: specialVueFakeDummyForL10nScript.js:1515
+msgid ""
+"Chat requests and embeddings are tracked separately. The cards below show "
+"the last observed provider headers per endpoint."
+msgstr ""
+"Chat-Anfragen und Embeddings werden getrennt erfasst. Die folgenden Karten "
+"zeigen für jeden Endpunkt die zuletzt beobachteten Anbieter-Header."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1003
+#: specialVueFakeDummyForL10nScript.js:1517
+msgid "Chat / Queue"
+msgstr "Chat/Warteschlange"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1004
+#: specialVueFakeDummyForL10nScript.js:1519
+msgid "Used for bot replies and queued requests."
+msgstr "Wird für Bot-Antworten und eingereihte Anfragen verwendet."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1009
+#: specialVueFakeDummyForL10nScript.js:1521
+#: specialVueFakeDummyForL10nScript.js:1539
+msgid "Available"
+msgstr "Verfügbar"
+
+#: specialVueFakeDummyForL10nScript.js:1521
+#: specialVueFakeDummyForL10nScript.js:1539
+msgid "Rate Limited"
+msgstr "Durch Anfragelimit begrenzt"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1013
+#: specialVueFakeDummyForL10nScript.js:1523
+#: specialVueFakeDummyForL10nScript.js:1541
+msgid "Per Minute"
+msgstr "Pro Minute"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1017
+#: specialVueFakeDummyForL10nScript.js:1525
+#: specialVueFakeDummyForL10nScript.js:1543
+msgid "Per Second"
+msgstr "Pro Sekunde"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1021
+#: specialVueFakeDummyForL10nScript.js:1527
+#: specialVueFakeDummyForL10nScript.js:1545
+msgid "Per Hour"
+msgstr "Pro Stunde"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1025
+#: specialVueFakeDummyForL10nScript.js:1529
+#: specialVueFakeDummyForL10nScript.js:1547
+msgid "Per Day"
+msgstr "Pro Tag"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1031
+#: specialVueFakeDummyForL10nScript.js:1531
+msgid "Embeddings"
+msgstr "Embeddings"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1032
+#: specialVueFakeDummyForL10nScript.js:1533
+msgid "Embeddings are tracked independently from the chat queue."
+msgstr "Embeddings werden unabhängig von der Chat-Warteschlange erfasst."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1035
+#: specialVueFakeDummyForL10nScript.js:1535
+msgid ""
+"Embedding rate limiting is disabled. Requests go straight to the configured "
+"embedding endpoint."
+msgstr ""
+"Das Embedding-Anfragelimit ist deaktiviert. Anfragen werden direkt an den "
+"konfigurierten Embedding-Endpunkt gesendet."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1041
+#: specialVueFakeDummyForL10nScript.js:1537
+msgid "Showing the last observed embedding endpoint headers."
+msgstr "Die zuletzt erkannten Header des Embedding-Endpunkts werden angezeigt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1066
+#: specialVueFakeDummyForL10nScript.js:1549
+msgid "No embedding rate-limit headers observed yet."
+msgstr "Bisher wurden keine Anfragelimit-Header für Embeddings erkannt."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1081
+#: specialVueFakeDummyForL10nScript.js:1551
+#: specialVueFakeDummyForL10nScript.js:1555
+msgid "Conversation Memory"
+msgstr "Unterhaltungsspeicher"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1082
+#: specialVueFakeDummyForL10nScript.js:1553
+msgid "Context history budget for bot replies."
+msgstr "Kontextbudget aus dem Verlauf für Bot-Antworten."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1094
+#: specialVueFakeDummyForL10nScript.js:1557
+msgid ""
+"Configure how much conversation history is sent to the LLM for context. "
+"Using token-based limits prevents context window overflow with large "
+"messages."
+msgstr ""
+"Lege fest, wie viel Unterhaltungsverlauf als Kontext an das LLM gesendet "
+"wird. Tokenbasierte Limits verhindern bei großen Nachrichten, dass das "
+"Kontextfenster überschritten wird."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1099
+#: specialVueFakeDummyForL10nScript.js:1559
+msgid "Context Token Limit"
+msgstr "Kontext-Token-Limit"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1108
+#: specialVueFakeDummyForL10nScript.js:1561
+msgid ""
+"Maximum tokens of conversation history to include. Default: 8000 (safe for "
+"most models). Higher values provide more context but may exceed model "
+"limits. Common limits: Llama 3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: "
+"32K-128K."
+msgstr ""
+"Maximale Anzahl an Token aus dem Unterhaltungsverlauf, die einbezogen wird. "
+"Standard: 8000 (für die meisten Modelle geeignet). Höhere Werte liefern mehr "
+"Kontext, können aber Modelllimits überschreiten. Übliche Limits: Llama "
+"3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: 32K-128K."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1115
+#: specialVueFakeDummyForL10nScript.js:1563
+msgid "Saving..."
+msgstr "Wird gespeichert..."
+
+#: specialVueFakeDummyForL10nScript.js:1563
+msgid "Save Settings"
+msgstr "Einstellungen speichern"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1127
+#: specialVueFakeDummyForL10nScript.js:1565
+msgid "Agent Tools"
+msgstr "Agenten-Tools"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1128
+#: specialVueFakeDummyForL10nScript.js:1567
+msgid "Model Context Protocol tool registry."
+msgstr "Tool-Registrierung für das Model Context Protocol."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1138
+#: specialVueFakeDummyForL10nScript.js:1569
+msgid "Agent Tool Registry"
+msgstr "Agenten-Tool-Registrierung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1143
+#: specialVueFakeDummyForL10nScript.js:1571
+#: specialVueFakeDummyForL10nScript.js:1589
+msgid "Register Tool"
+msgstr "Tool registrieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1147
+#: specialVueFakeDummyForL10nScript.js:1573
+msgid ""
+"Register Model Context Protocol endpoints. Enabled tools become available "
+"for bot creators to attach to their assistants."
+msgstr ""
+"Registriere Endpunkte des Model Context Protocol. Aktivierte Tools können "
+"Bot-Ersteller ihren Assistenten hinzufügen."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1150
+#. TRANSLATORS src/components/BotForm.vue:455
+#: specialVueFakeDummyForL10nScript.js:1575
+#: specialVueFakeDummyForL10nScript.js:3271
+msgid "Loading tools…"
+msgstr "Tools werden geladen…"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1154
+#: specialVueFakeDummyForL10nScript.js:1577
+msgid "No tools registered yet."
+msgstr "Noch keine Tools registriert."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1173
+#: specialVueFakeDummyForL10nScript.js:1581
+msgid "Endpoint:"
+msgstr "Endpunkt:"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1182
+#: specialVueFakeDummyForL10nScript.js:1583
+msgid "Disable"
+msgstr "Deaktivieren"
+
+#: specialVueFakeDummyForL10nScript.js:1583
+msgid "Enable"
+msgstr "Aktivieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1189
+#. TRANSLATORS src/components/BotCard.vue:31
+#: specialVueFakeDummyForL10nScript.js:1585
+#: specialVueFakeDummyForL10nScript.js:1639
+#: specialVueFakeDummyForL10nScript.js:1750
+msgid "Edit"
+msgstr "Bearbeiten"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1196
+#. TRANSLATORS src/components/BotCard.vue:47
+#. TRANSLATORS src/views/PersonalActivity.vue:176
+#: specialVueFakeDummyForL10nScript.js:1587
+#: specialVueFakeDummyForL10nScript.js:1641
+#: specialVueFakeDummyForL10nScript.js:1756
+#: specialVueFakeDummyForL10nScript.js:4492
+msgid "Delete"
+msgstr "Löschen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1204
+#: specialVueFakeDummyForL10nScript.js:1589
+msgid "Edit Tool"
+msgstr "Tool bearbeiten"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1207
+#: specialVueFakeDummyForL10nScript.js:1591
+msgid "Tool Name"
+msgstr "Werkzeugname"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1215
+#: specialVueFakeDummyForL10nScript.js:1593
+msgid "MCP Endpoint URL"
+msgstr "URL des MCP-Endpunkts"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1224
+#: specialVueFakeDummyForL10nScript.js:1595
+msgid "HTTP or WebSocket URL exposing the MCP server."
+msgstr "HTTP- oder WebSocket-URL, über die der MCP-Server erreichbar ist."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1228
+#. TRANSLATORS src/components/BotDetailModal.vue:22
+#. TRANSLATORS src/views/PersonalBots.vue:182
+#: specialVueFakeDummyForL10nScript.js:1597
+#: specialVueFakeDummyForL10nScript.js:1852
+#: specialVueFakeDummyForL10nScript.js:4927
+msgid "Description"
+msgstr "Beschreibung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1233
+#: specialVueFakeDummyForL10nScript.js:1599
+msgid "Short human-readable summary"
+msgstr "Kurze, verständliche Zusammenfassung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1236
+#: specialVueFakeDummyForL10nScript.js:1601
+msgid "Authentication JSON"
+msgstr "Authentifizierungs-JSON"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1244
+#: specialVueFakeDummyForL10nScript.js:1603
+msgid ""
+"Provide JSON describing auth headers or tokens. Stored credentials are kept "
+"unless you enter new values (re-enter to test or rotate)."
+msgstr ""
+"Gib JSON mit Authentifizierungs-Headern oder Tokens an. Gespeicherte "
+"Zugangsdaten bleiben erhalten, sofern du keine neuen Werte eingibst (zum "
+"Testen oder Ändern erneut eingeben)."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1245
+#: specialVueFakeDummyForL10nScript.js:1605
+msgid ""
+"Provide JSON describing auth headers or tokens. Leave blank when no "
+"authentication is required."
+msgstr ""
+"Gib JSON mit Authentifizierungs-Headern oder Tokens an. Lass das Feld leer, "
+"wenn keine Authentifizierung erforderlich ist."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1253
+#: specialVueFakeDummyForL10nScript.js:1607
+msgid "Enabled by default"
+msgstr "Standardmäßig aktiviert"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1261
+#: specialVueFakeDummyForL10nScript.js:1609
+msgid "Save Changes"
+msgstr "Änderungen speichern"
+
+#: specialVueFakeDummyForL10nScript.js:1609
+msgid "Create Tool"
+msgstr "Tool erstellen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1268
+#. TRANSLATORS src/components/BotForm.vue:271
+#. TRANSLATORS src/components/BotPickerModal.vue:84
+#. TRANSLATORS src/components/BotTalkStartModal.vue:121
+#. TRANSLATORS src/views/PersonalBots.vue:157
+#: specialVueFakeDummyForL10nScript.js:1611
+#: specialVueFakeDummyForL10nScript.js:3223
+#: specialVueFakeDummyForL10nScript.js:3309
+#: specialVueFakeDummyForL10nScript.js:3739
+#: specialVueFakeDummyForL10nScript.js:3918
+#: specialVueFakeDummyForL10nScript.js:4919
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1294
+#: specialVueFakeDummyForL10nScript.js:1615
+#: specialVueFakeDummyForL10nScript.js:1619
+msgid "All Bots"
+msgstr "Alle Bots"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1295
+#: specialVueFakeDummyForL10nScript.js:1617
+msgid "Admin overview and direct bot maintenance."
+msgstr "Administrationsübersicht und direkte Bot-Verwaltung."
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:53
+#. TRANSLATORS src/views/PersonalActivity.vue:15
+#: specialVueFakeDummyForL10nScript.js:1621
+#: specialVueFakeDummyForL10nScript.js:3898
+#: specialVueFakeDummyForL10nScript.js:4438
+msgid "Refresh"
+msgstr "Aktualisieren"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1316
+#. TRANSLATORS src/views/PersonalBots.vue:34
+#: specialVueFakeDummyForL10nScript.js:1623
+#: specialVueFakeDummyForL10nScript.js:4873
+msgid "Loading bots…"
+msgstr "Bots werden geladen…"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1317
+#: specialVueFakeDummyForL10nScript.js:1625
+msgid "No bots found."
+msgstr "Keine Bots gefunden."
+
+#. TRANSLATORS src/components/AdminSettings.vue:1320
+#: specialVueFakeDummyForL10nScript.js:1627
+msgid "Name"
+msgstr "Name"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1321
+#: specialVueFakeDummyForL10nScript.js:1629
+msgid "Mention"
+msgstr "Erwähnung"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1322
+#: specialVueFakeDummyForL10nScript.js:1631
+msgid "Owner"
+msgstr "Eigentümer"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1323
+#. TRANSLATORS src/components/BotDetailModal.vue:33
+#. TRANSLATORS src/components/BotPickerModal.vue:32
+#. TRANSLATORS src/views/PersonalBots.vue:188
+#: specialVueFakeDummyForL10nScript.js:1633
+#: specialVueFakeDummyForL10nScript.js:1856
+#: specialVueFakeDummyForL10nScript.js:3731
+#: specialVueFakeDummyForL10nScript.js:4931
+msgid "Visibility"
+msgstr "Sichtbarkeit"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1324
+#. TRANSLATORS src/views/PersonalActivity.vue:42
+#: specialVueFakeDummyForL10nScript.js:1635
+#: specialVueFakeDummyForL10nScript.js:4448
+#: specialVueFakeDummyForL10nScript.js:4494
+msgid "Status"
+msgstr "Status"
+
+#. TRANSLATORS src/components/AdminSettings.vue:1325
+#: specialVueFakeDummyForL10nScript.js:1637
+msgid "Actions"
+msgstr "Aktionen"
+
+#: specialVueFakeDummyForL10nScript.js:1695
+#: specialVueFakeDummyForL10nScript.js:1794
+#: specialVueFakeDummyForL10nScript.js:3944
+#: specialVueFakeDummyForL10nScript.js:4828
+msgid "Team access"
+msgstr "Teamzugriff"
+
+#: specialVueFakeDummyForL10nScript.js:1697
+#: specialVueFakeDummyForL10nScript.js:1795
+#: specialVueFakeDummyForL10nScript.js:3945
+#: specialVueFakeDummyForL10nScript.js:4830
+msgid "Group access"
+msgstr "Gruppenzugriff"
+
+#. TRANSLATORS src/components/BotCard.vue:23
+#: specialVueFakeDummyForL10nScript.js:1748
+msgid "Created on {date}"
+msgstr "Erstellt am {date}"
+
+#. TRANSLATORS src/components/BotCard.vue:38
+#: specialVueFakeDummyForL10nScript.js:1752
+msgid "View only"
+msgstr "Nur anzeigen"
+
+#. TRANSLATORS src/components/BotCard.vue:44
+#. TRANSLATORS src/views/PersonalBots.vue:129
+#: specialVueFakeDummyForL10nScript.js:1754
+#: specialVueFakeDummyForL10nScript.js:4907
+msgid "Submit for approval"
+msgstr "Zur Freigabe einreichen"
+
+#. TRANSLATORS src/components/BotCard.vue:52
+#. TRANSLATORS src/components/PublicBotCard.vue:59
+#: specialVueFakeDummyForL10nScript.js:1758
+#: specialVueFakeDummyForL10nScript.js:4024
+msgid "Inactive"
+msgstr "Inaktiv"
+
+#: specialVueFakeDummyForL10nScript.js:1784
+msgid "This bot has access to {count} knowledge source"
+msgid_plural "This bot has access to {count} knowledge sources"
+msgstr[0] "Dieser Bot hat Zugriff auf {count} Wissensquelle"
+msgstr[1] "Dieser Bot hat Zugriff auf {count} Wissensquellen"
+
+#: specialVueFakeDummyForL10nScript.js:1808
+#: specialVueFakeDummyForL10nScript.js:3644
+#: specialVueFakeDummyForL10nScript.js:3958
+msgid "You are the owner of this bot"
+msgstr "Du bist Eigentümer dieses Bots"
+
+#: specialVueFakeDummyForL10nScript.js:1810
+#: specialVueFakeDummyForL10nScript.js:3646
+#: specialVueFakeDummyForL10nScript.js:3960
+msgid "Access via group: {groups}"
+msgstr "Zugriff über Gruppe: {groups}"
+
+#: specialVueFakeDummyForL10nScript.js:1813
+#: specialVueFakeDummyForL10nScript.js:3649
+#: specialVueFakeDummyForL10nScript.js:3963
+msgid "Access via team: {teams}"
+msgstr "Zugriff über Team: {teams}"
+
+#: specialVueFakeDummyForL10nScript.js:1829
+msgid "Failed to load bot details"
+msgstr "Bot-Details konnten nicht geladen werden"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:44
+#. TRANSLATORS src/components/PublicBotCard.vue:41
+#: specialVueFakeDummyForL10nScript.js:1836
+#: specialVueFakeDummyForL10nScript.js:1860
+#: specialVueFakeDummyForL10nScript.js:2882
+#: specialVueFakeDummyForL10nScript.js:3996
+#: specialVueFakeDummyForL10nScript.js:4016
+#: specialVueFakeDummyForL10nScript.js:4371
+#: specialVueFakeDummyForL10nScript.js:4788
+msgid "Unknown"
+msgstr "Unbekannt"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:16
+#: specialVueFakeDummyForL10nScript.js:1850
+msgid "Loading bot details…"
+msgstr "Bot-Details werden geladen…"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:27
+#. TRANSLATORS src/components/PublicBotCard.vue:28
+#. TRANSLATORS src/views/PersonalBots.vue:184
+#: specialVueFakeDummyForL10nScript.js:1854
+#: specialVueFakeDummyForL10nScript.js:4012
+#: specialVueFakeDummyForL10nScript.js:4929
+msgid "No description provided"
+msgstr "Keine Beschreibung angegeben"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:42
+#. TRANSLATORS src/components/BotPickerModal.vue:39
+#: specialVueFakeDummyForL10nScript.js:1858
+#: specialVueFakeDummyForL10nScript.js:3733
+msgid "Created by"
+msgstr "Erstellt von"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:51
+#. TRANSLATORS src/components/BotForm.vue:70
+#. TRANSLATORS src/views/PersonalBots.vue:241
+#: specialVueFakeDummyForL10nScript.js:1862
+#: specialVueFakeDummyForL10nScript.js:3159
+#: specialVueFakeDummyForL10nScript.js:4951
+msgid "System prompt"
+msgstr "System-Prompt"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:59
+#. TRANSLATORS src/views/PersonalBots.vue:245
+#: specialVueFakeDummyForL10nScript.js:1864
+#: specialVueFakeDummyForL10nScript.js:4953
+msgid "Enabled tools"
+msgstr "Aktivierte Tools"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:64
+#. TRANSLATORS src/components/BotForm.vue:474
+#. TRANSLATORS src/components/BotPickerModal.vue:60
+#: specialVueFakeDummyForL10nScript.js:1866
+#: specialVueFakeDummyForL10nScript.js:3275
+#: specialVueFakeDummyForL10nScript.js:3737
+msgid "Built-in"
+msgstr "Integriert"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:75
+#: specialVueFakeDummyForL10nScript.js:1868
+msgid "Knowledge base"
+msgstr "Wissensdatenbank"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:80
+#: specialVueFakeDummyForL10nScript.js:1870
+msgid "Knowledge base enabled but no sources attached yet"
+msgstr "Wissensdatenbank aktiviert, aber noch keine Quellen verknüpft"
+
+#. TRANSLATORS src/components/BotDetailModal.vue:88
+#. TRANSLATORS src/views/PersonalBots.vue:259
+#: specialVueFakeDummyForL10nScript.js:1872
+#: specialVueFakeDummyForL10nScript.js:4957
+msgid "Close"
+msgstr "Schließen"
+
+#: specialVueFakeDummyForL10nScript.js:2006
+msgid "Question {question} has no text"
+msgstr "Frage {question} enthält keinen Text"
+
+#: specialVueFakeDummyForL10nScript.js:2013
+msgid "Question {question}, answer {answer} has no text"
+msgstr "Frage {question}, Antwort {answer} enthält keinen Text"
+
+#: specialVueFakeDummyForL10nScript.js:2041
+msgid "Question {question} is unreachable from the start"
+msgstr "Frage {question} ist vom Start aus nicht erreichbar"
+
+#: specialVueFakeDummyForL10nScript.js:2054
+msgid "Enter a temperature between 0.0 and 1.0."
+msgstr "Gib eine Temperatur zwischen 0,0 und 1,0 ein."
+
+#: specialVueFakeDummyForL10nScript.js:2057
+msgid "Temperature must be between 0.0 and 1.0."
+msgstr "Die Temperatur muss zwischen 0,0 und 1,0 liegen."
+
+#: specialVueFakeDummyForL10nScript.js:2172
+msgid "Update bot"
+msgstr "Bot aktualisieren"
+
+#: specialVueFakeDummyForL10nScript.js:2175
+msgid "Save as draft"
+msgstr "Als Entwurf speichern"
+
+#: specialVueFakeDummyForL10nScript.js:2177
+msgid "Create bot"
+msgstr "Bot erstellen"
+
+#: specialVueFakeDummyForL10nScript.js:2645
+msgid "Failed to load attached sources"
+msgstr "Verknüpfte Quellen konnten nicht geladen werden"
+
+#: specialVueFakeDummyForL10nScript.js:2679
+msgid "Sources queued for indexing"
+msgstr "Quellen zur Indizierung eingereiht"
+
+#: specialVueFakeDummyForL10nScript.js:2683
+msgid "Failed to attach sources"
+msgstr "Quellen konnten nicht verknüpft werden"
+
+#: specialVueFakeDummyForL10nScript.js:2695
+msgid "Source removed"
+msgstr "Quelle entfernt"
+
+#: specialVueFakeDummyForL10nScript.js:2699
+msgid "Failed to remove source"
+msgstr "Quelle konnte nicht entfernt werden"
+
+#: specialVueFakeDummyForL10nScript.js:2711
+msgid "Reindex queued"
+msgstr "Neuindizierung wurde eingereiht"
+
+#: specialVueFakeDummyForL10nScript.js:2715
+msgid "Failed to reindex source"
+msgstr "Quelle konnte nicht neu indiziert werden"
+
+#: specialVueFakeDummyForL10nScript.js:2732
+msgid "URL source queued for indexing"
+msgstr "URL-Quelle zur Indizierung eingereiht"
+
+#: specialVueFakeDummyForL10nScript.js:2737
+msgid "Failed to add URL source"
+msgstr "URL-Quelle konnte nicht hinzugefügt werden"
+
+#: specialVueFakeDummyForL10nScript.js:2744
+msgid "Select files or folders"
+msgstr "Dateien oder Ordner auswählen"
+
+#: specialVueFakeDummyForL10nScript.js:2794
+#: specialVueFakeDummyForL10nScript.js:2798
+msgid "Failed to get file info for {path}"
+msgstr "Dateiinformationen für {path} konnten nicht abgerufen werden"
+
+#: specialVueFakeDummyForL10nScript.js:2809
+msgid "Failed to open file picker"
+msgstr "Dateiauswahl konnte nicht geöffnet werden"
+
+#: specialVueFakeDummyForL10nScript.js:2859
+msgid "Node #{id}"
+msgstr "Knoten #{id}"
+
+#: specialVueFakeDummyForL10nScript.js:2876
+#: specialVueFakeDummyForL10nScript.js:4780
+msgid "Ready"
+msgstr "Bereit"
+
+#: specialVueFakeDummyForL10nScript.js:2878
+#: specialVueFakeDummyForL10nScript.js:4786
+msgid "Pending"
+msgstr "Ausstehend"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:47
+#: specialVueFakeDummyForL10nScript.js:2880
+#: specialVueFakeDummyForL10nScript.js:4376
+#: specialVueFakeDummyForL10nScript.js:4394
+#: specialVueFakeDummyForL10nScript.js:4456
+#: specialVueFakeDummyForL10nScript.js:4783
+msgid "Error"
+msgstr "Fehler"
+
+#: specialVueFakeDummyForL10nScript.js:2887
+msgid "Collecting files…"
+msgstr "Dateien werden gesammelt…"
+
+#: specialVueFakeDummyForL10nScript.js:2888
+msgid "Extracting text…"
+msgstr "Text wird extrahiert…"
+
+#: specialVueFakeDummyForL10nScript.js:2889
+msgid "Processing content…"
+msgstr "Inhalte werden verarbeitet…"
+
+#: specialVueFakeDummyForL10nScript.js:2890
+msgid "Generating embeddings…"
+msgstr "Embeddings werden erstellt…"
+
+#: specialVueFakeDummyForL10nScript.js:2891
+msgid "Saving results…"
+msgstr "Ergebnisse werden gespeichert…"
+
+#: specialVueFakeDummyForL10nScript.js:2892
+msgid "Complete"
+msgstr "Abgeschlossen"
+
+#: specialVueFakeDummyForL10nScript.js:3022
+msgid "Select at least one team before enabling the LLM Wiki."
+msgstr "Wähle mindestens ein Team aus, bevor du das LLM-Wiki aktivierst."
+
+#: specialVueFakeDummyForL10nScript.js:3026
+msgid "Select a collective for the LLM Wiki location."
+msgstr "Wähle ein Collective als Speicherort für das LLM-Wiki aus."
+
+#: specialVueFakeDummyForL10nScript.js:3033
+msgid "Select a collective from one of the selected teams."
+msgstr "Wähle ein Collective aus einem der ausgewählten Teams aus."
+
+#: specialVueFakeDummyForL10nScript.js:3038
+msgid "Team bots can use LLM Wiki only with a Collective."
+msgstr "Team-Bots können das LLM-Wiki nur mit einem Collective verwenden."
+
+#. TRANSLATORS src/components/BotForm.vue:5
+#: specialVueFakeDummyForL10nScript.js:3137
+msgid "Edit bot"
+msgstr "Bot bearbeiten"
+
+#. TRANSLATORS src/views/PersonalBots.vue:7
+#: specialVueFakeDummyForL10nScript.js:3137
+#: specialVueFakeDummyForL10nScript.js:4865
+msgid "Create new bot"
+msgstr "Neuen Bot erstellen"
+
+#. TRANSLATORS src/components/BotForm.vue:16
+#: specialVueFakeDummyForL10nScript.js:3139
+msgid "Pending changes"
+msgstr "Ausstehende Änderungen"
+
+#. TRANSLATORS src/components/BotForm.vue:18
+#: specialVueFakeDummyForL10nScript.js:3141
+msgid ""
+"This bot has changes awaiting approval. You are viewing or editing the "
+"pending version. The currently approved version remains live until these "
+"changes are approved."
+msgstr ""
+"Dieser Bot enthält Änderungen, deren Freigabe aussteht. Du siehst oder "
+"bearbeitest die ausstehende Version. Die aktuell freigegebene Version bleibt "
+"aktiv, bis diese Änderungen freigegeben wurden."
+
+#. TRANSLATORS src/components/BotForm.vue:26
+#: specialVueFakeDummyForL10nScript.js:3143
+msgid "Bot name"
+msgstr "Bot-Name"
+
+#. TRANSLATORS src/components/BotForm.vue:31
+#: specialVueFakeDummyForL10nScript.js:3145
+msgid "Support Helper"
+msgstr "Support-Assistent"
+
+#. TRANSLATORS src/components/BotForm.vue:37
+#: specialVueFakeDummyForL10nScript.js:3147
+msgid "Mention name"
+msgstr "Erwähnungsname"
+
+#. TRANSLATORS src/components/BotForm.vue:50
+#: specialVueFakeDummyForL10nScript.js:3149
+msgid "Lowercase letters, numbers, hyphens, and underscores only."
+msgstr "Nur Kleinbuchstaben, Ziffern, Bindestriche und Unterstriche."
+
+#. TRANSLATORS src/components/BotForm.vue:51
+#: specialVueFakeDummyForL10nScript.js:3151
+msgid "Cannot be changed after creation."
+msgstr "Kann nach der Erstellung nicht mehr geändert werden."
+
+#. TRANSLATORS src/components/BotForm.vue:57
+#: specialVueFakeDummyForL10nScript.js:3153
+msgid "Bot description"
+msgstr "Bot-Beschreibung"
+
+#. TRANSLATORS src/components/BotForm.vue:62
+#: specialVueFakeDummyForL10nScript.js:3155
+msgid "A helpful assistant that answers questions about..."
+msgstr "Ein hilfreicher Assistent, der Fragen beantwortet zu ..."
+
+#. TRANSLATORS src/components/BotForm.vue:64
+#: specialVueFakeDummyForL10nScript.js:3157
+msgid ""
+"This description is shown in the public bot listing to help users understand "
+"what this bot does."
+msgstr ""
+"Diese Beschreibung wird in der öffentlichen Bot-Liste angezeigt, damit "
+"Benutzer verstehen, was dieser Bot macht."
+
+#. TRANSLATORS src/components/BotForm.vue:75
+#: specialVueFakeDummyForL10nScript.js:3161
+msgid "You are a helpful support assistant. Your role is to..."
+msgstr "Du bist ein hilfreicher Support-Assistent. Deine Aufgabe ist es, ..."
+
+#. TRANSLATORS src/components/BotForm.vue:84
+#: specialVueFakeDummyForL10nScript.js:3163
+msgid "Availability"
+msgstr "Verfügbarkeit"
+
+#. TRANSLATORS src/components/BotForm.vue:92
+#: specialVueFakeDummyForL10nScript.js:3167
+msgid "Global (requires approval for non-admins)"
+msgstr "Global (erfordert für Nicht-Administratoren eine Freigabe)"
+
+#. TRANSLATORS src/components/BotForm.vue:96
+#: specialVueFakeDummyForL10nScript.js:3169
+msgid "Specific groups (requires approval)"
+msgstr "Bestimmte Gruppen (Freigabe erforderlich)"
+
+#. TRANSLATORS src/components/BotForm.vue:101
+#: specialVueFakeDummyForL10nScript.js:3173
+msgid "Specific teams (requires approval)"
+msgstr "Bestimmte Teams (Freigabe erforderlich)"
+
+#. TRANSLATORS src/components/BotForm.vue:106
+#: specialVueFakeDummyForL10nScript.js:3177
+msgid "Choose who can use this bot. Personal bots are only visible to you."
+msgstr ""
+"Wähle aus, wer diesen Bot verwenden kann. Persönliche Bots sind nur für dich "
+"sichtbar."
+
+#. TRANSLATORS src/components/BotForm.vue:108
+#: specialVueFakeDummyForL10nScript.js:3179
+msgid "Global makes it available to everyone."
+msgstr "Mit „Global“ ist der Bot für alle verfügbar."
+
+#. TRANSLATORS src/components/BotForm.vue:110
+#: specialVueFakeDummyForL10nScript.js:3181
+msgid "Groups or teams restrict usage to selected audiences."
+msgstr ""
+"Gruppen oder Teams beschränken die Nutzung auf ausgewählte Personenkreise."
+
+#. TRANSLATORS src/components/BotForm.vue:119
+#: specialVueFakeDummyForL10nScript.js:3183
+msgid "Allowed groups"
+msgstr "Zugelassene Gruppen"
+
+#. TRANSLATORS src/components/BotForm.vue:132
+#: specialVueFakeDummyForL10nScript.js:3185
+msgid ""
+"Only members of the selected groups (and the bot owner) can mention and use "
+"this bot."
+msgstr ""
+"Nur Mitglieder der ausgewählten Gruppen (und der Eigentümer des Bots) können "
+"diesen Bot erwähnen und verwenden."
+
+#. TRANSLATORS src/components/BotForm.vue:137
+#: specialVueFakeDummyForL10nScript.js:3187
+msgid "Allowed teams"
+msgstr "Zugelassene Teams"
+
+#. TRANSLATORS src/components/BotForm.vue:150
+#: specialVueFakeDummyForL10nScript.js:3189
+msgid ""
+"Only members of the selected teams (and the bot owner) can mention and use "
+"this bot."
+msgstr ""
+"Nur Mitglieder der ausgewählten Teams (und der Eigentümer des Bots) können "
+"diesen Bot erwähnen und verwenden."
+
+#. TRANSLATORS src/components/BotForm.vue:155
+#: specialVueFakeDummyForL10nScript.js:3191
+msgid "Model"
+msgstr "Modell"
+
+#. TRANSLATORS src/components/BotForm.vue:168
+#: specialVueFakeDummyForL10nScript.js:3193
+msgid "No models are allowed by the administrator yet."
+msgstr "Die Administration hat noch keine Modelle freigegeben."
+
+#. TRANSLATORS src/components/BotForm.vue:178
+#: specialVueFakeDummyForL10nScript.js:3195
+msgid "Use custom temperature"
+msgstr "Benutzerdefinierte Temperatur verwenden"
+
+#. TRANSLATORS src/components/BotForm.vue:181
+#. TRANSLATORS src/views/PersonalBots.vue:194
+#: specialVueFakeDummyForL10nScript.js:3197
+#: specialVueFakeDummyForL10nScript.js:4933
+msgid "Temperature"
+msgstr "Temperatur"
+
+#. TRANSLATORS src/components/BotForm.vue:191
+#: specialVueFakeDummyForL10nScript.js:3199
+msgid ""
+"Lower temperature is usually better for agentic, tool-enabled, RAG, and "
+"workflow bots. Use higher temperature only when you want more variation or "
+"creativity."
+msgstr ""
+"Eine niedrigere Temperatur eignet sich in der Regel besser für agentische, "
+"Tool-gestützte, RAG- und Workflow-Bots. Verwende eine höhere Temperatur nur, "
+"wenn du mehr Variation oder Kreativität möchtest."
+
+#. TRANSLATORS src/components/BotForm.vue:194
+#: specialVueFakeDummyForL10nScript.js:3201
+msgid "{precise} precise and stable, {balanced} balanced, {creative} creative."
+msgstr ""
+"{precise} präzise und stabil, {balanced} ausgewogen, {creative} kreativ."
+
+#. TRANSLATORS src/components/BotForm.vue:205
+#: specialVueFakeDummyForL10nScript.js:3203
+msgid "Using the global default temperature: {temperature}"
+msgstr "Globale Standardtemperatur wird verwendet: {temperature}"
+
+#. TRANSLATORS src/components/BotForm.vue:216
+#: specialVueFakeDummyForL10nScript.js:3205
+msgid "Enable retrieval-augmented responses"
+msgstr "RAG-Antworten aktivieren"
+
+#. TRANSLATORS src/components/BotForm.vue:219
+#: specialVueFakeDummyForL10nScript.js:3207
+msgid ""
+"When enabled, attach files so the bot can reference your documents during "
+"conversations."
+msgstr ""
+"Wenn aktiviert, kannst du Dateien anhängen, damit der Bot während "
+"Unterhaltungen auf deine Dokumente zugreifen kann."
+
+#. TRANSLATORS src/components/BotForm.vue:222
+#: specialVueFakeDummyForL10nScript.js:3209
+msgid "Save the bot before attaching files or folders."
+msgstr "Speichere den Bot, bevor du Dateien oder Ordner anhängst."
+
+#. TRANSLATORS src/components/BotForm.vue:226
+#: specialVueFakeDummyForL10nScript.js:3211
+msgid "Attachments remain stored but are ignored until retrieval is enabled."
+msgstr ""
+"Anhänge bleiben gespeichert, werden aber ignoriert, bis RAG aktiviert ist."
+
+#. TRANSLATORS src/components/BotForm.vue:234
+#. TRANSLATORS src/components/BotForm.vue:241
+#. TRANSLATORS src/components/BotForm.vue:278
+#: specialVueFakeDummyForL10nScript.js:3213
+#: specialVueFakeDummyForL10nScript.js:3215
+#: specialVueFakeDummyForL10nScript.js:3225
+msgid "Adding…"
+msgstr "Wird hinzugefügt…"
+
+#: specialVueFakeDummyForL10nScript.js:3213
+msgid "Attach files or folders"
+msgstr "Dateien oder Ordner verknüpfen"
+
+#: specialVueFakeDummyForL10nScript.js:3215
+msgid "Add link"
+msgstr "Link hinzufügen"
+
+#. TRANSLATORS src/components/BotForm.vue:249
+#: specialVueFakeDummyForL10nScript.js:3217
+msgid "Add URL source"
+msgstr "URL-Quelle hinzufügen"
+
+#. TRANSLATORS src/components/BotForm.vue:256
+#: specialVueFakeDummyForL10nScript.js:3219
+msgid "URL"
+msgstr "URL"
+
+#. TRANSLATORS src/components/BotForm.vue:265
+#: specialVueFakeDummyForL10nScript.js:3221
+msgid ""
+"Enter a URL to fetch and index. Supports HTML pages, PDF documents, JSON, "
+"and plain text."
+msgstr ""
+"Gib eine URL ein, deren Inhalt abgerufen und indiziert werden soll. "
+"Unterstützt werden HTML-Seiten, PDF-Dokumente, JSON und Klartext."
+
+#: specialVueFakeDummyForL10nScript.js:3225
+msgid "Add URL"
+msgstr "URL hinzufügen"
+
+#. TRANSLATORS src/components/BotForm.vue:284
+#. TRANSLATORS src/views/PersonalBots.vue:215
+#: specialVueFakeDummyForL10nScript.js:3227
+#: specialVueFakeDummyForL10nScript.js:4945
+msgid "Loading sources…"
+msgstr "Quellen werden geladen…"
+
+#. TRANSLATORS src/components/BotForm.vue:287
+#: specialVueFakeDummyForL10nScript.js:3229
+msgid "No knowledge sources attached yet."
+msgstr "Noch keine Wissensquellen verknüpft."
+
+#. TRANSLATORS src/components/BotForm.vue:329
+#: specialVueFakeDummyForL10nScript.js:3231
+msgid "Last indexed {date}"
+msgstr "Zuletzt indiziert: {date}"
+
+#. TRANSLATORS src/components/BotForm.vue:340
+#: specialVueFakeDummyForL10nScript.js:3233
+msgid "Reindexing…"
+msgstr "Wird neu indiziert…"
+
+#: specialVueFakeDummyForL10nScript.js:3233
+msgid "Reindex"
+msgstr "Neu indizieren"
+
+#. TRANSLATORS src/components/BotForm.vue:347
+#: specialVueFakeDummyForL10nScript.js:3235
+msgid "Removing…"
+msgstr "Wird entfernt…"
+
+#. TRANSLATORS src/components/BotForm.vue:347
+#: specialVueFakeDummyForL10nScript.js:3235
+#: specialVueFakeDummyForL10nScript.js:3291
+msgid "Remove"
+msgstr "Entfernen"
+
+#. TRANSLATORS src/components/BotForm.vue:363
+#: specialVueFakeDummyForL10nScript.js:3237
+msgid "Enable LLM Wiki"
+msgstr "LLM-Wiki aktivieren"
+
+#. TRANSLATORS src/components/BotForm.vue:367
+#: specialVueFakeDummyForL10nScript.js:3239
+msgid ""
+"Let this team bot use a Markdown wiki in a Collective from one of the "
+"selected teams."
+msgstr ""
+"Diesem Team-Bot erlauben, ein Markdown-Wiki in einem Collective eines der "
+"ausgewählten Teams zu verwenden."
+
+#. TRANSLATORS src/components/BotForm.vue:370
+#: specialVueFakeDummyForL10nScript.js:3241
+msgid ""
+"Let this personal bot maintain a visible Markdown wiki in your Nextcloud "
+"files for durable personal or bot knowledge. The wiki can be read, edited, "
+"or deleted from Files."
+msgstr ""
+"Diesem persönlichen Bot erlauben, ein sichtbares Markdown-Wiki in deinen "
+"Nextcloud-Dateien zu verwalten, um persönliches Wissen oder Bot-Wissen "
+"dauerhaft zu speichern. Das Wiki kann unter „Dateien“ gelesen, bearbeitet "
+"oder gelöscht werden."
+
+#. TRANSLATORS src/components/BotForm.vue:375
+#: specialVueFakeDummyForL10nScript.js:3243
+msgid "Wiki location"
+msgstr "Wiki-Speicherort"
+
+#. TRANSLATORS src/components/BotForm.vue:384
+#: specialVueFakeDummyForL10nScript.js:3245
+msgid "Personal Files: {path}"
+msgstr "Persönliche Dateien: {path}"
+
+#. TRANSLATORS src/components/BotForm.vue:387
+#: specialVueFakeDummyForL10nScript.js:3247
+msgid "Existing Collective"
+msgstr "Vorhandenes Collective"
+
+#. TRANSLATORS src/components/BotForm.vue:393
+#: specialVueFakeDummyForL10nScript.js:3249
+msgid "Default path:"
+msgstr "Standardpfad:"
+
+#. TRANSLATORS src/components/BotForm.vue:399
+#: specialVueFakeDummyForL10nScript.js:3251
+msgid "Use a custom wiki path"
+msgstr "Benutzerdefinierten Wiki-Pfad verwenden"
+
+#. TRANSLATORS src/components/BotForm.vue:401
+#: specialVueFakeDummyForL10nScript.js:3253
+msgid "Custom path"
+msgstr "Benutzerdefinierter Pfad"
+
+#. TRANSLATORS src/components/BotForm.vue:409
+#: specialVueFakeDummyForL10nScript.js:3255
+msgid ""
+"Optional. Leave blank to use the default path. Custom paths must be relative "
+"and start with {prefix}."
+msgstr ""
+"Optional. Lass das Feld leer, um den Standardpfad zu verwenden. "
+"Benutzerdefinierte Pfade müssen relativ sein und mit {prefix} beginnen."
+
+#. TRANSLATORS src/components/BotForm.vue:415
+#: specialVueFakeDummyForL10nScript.js:3257
+msgid "Collective"
+msgstr "Collective"
+
+#. TRANSLATORS src/components/BotForm.vue:422
+#: specialVueFakeDummyForL10nScript.js:3259
+msgid "Select a collective"
+msgstr "Collective auswählen"
+
+#. TRANSLATORS src/components/BotForm.vue:432
+#: specialVueFakeDummyForL10nScript.js:3261
+msgid "Loading collectives…"
+msgstr "Collectives werden geladen…"
+
+#. TRANSLATORS src/components/BotForm.vue:435
+#: specialVueFakeDummyForL10nScript.js:3263
+msgid "No admin-owned collectives available for this account."
+msgstr ""
+"Für dein Konto sind keine Collectives verfügbar, die der Administration "
+"gehören."
+
+#. TRANSLATORS src/components/BotForm.vue:438
+#: specialVueFakeDummyForL10nScript.js:3265
+msgid "Select a team that matches one of your admin-owned collectives."
+msgstr ""
+"Wähle ein Team aus, das zu einem deiner von Administratoren verwalteten "
+"Collectives gehört."
+
+#. TRANSLATORS src/components/BotForm.vue:441
+#: specialVueFakeDummyForL10nScript.js:3267
+msgid ""
+"Wiki pages will be written to the selected collective and visible to its "
+"members."
+msgstr ""
+"Wiki-Seiten werden in das ausgewählte Collective geschrieben und sind für "
+"dessen Mitglieder sichtbar."
+
+#. TRANSLATORS src/components/BotForm.vue:453
+#: specialVueFakeDummyForL10nScript.js:3269
+msgid "Agent tools"
+msgstr "Agenten-Tools"
+
+#. TRANSLATORS src/components/BotForm.vue:458
+#: specialVueFakeDummyForL10nScript.js:3273
+msgid "No tools are currently enabled by the administrator."
+msgstr "Die Administration hat derzeit keine Tools aktiviert."
+
+#. TRANSLATORS src/components/BotForm.vue:478
+#: specialVueFakeDummyForL10nScript.js:3277
+msgid "Only available for personal bots."
+msgstr "Nur für persönliche Bots verfügbar."
+
+#. TRANSLATORS src/components/BotForm.vue:485
+#: specialVueFakeDummyForL10nScript.js:3279
+msgid ""
+"Selected tools allow the bot to call external capabilities during "
+"conversations."
+msgstr ""
+"Ausgewählte Werkzeuge erlauben dem Bot, während Unterhaltungen externe "
+"Funktionen aufzurufen."
+
+#. TRANSLATORS src/components/BotForm.vue:493
+#: specialVueFakeDummyForL10nScript.js:3281
+msgid "Onboarding questions"
+msgstr "Einführungsfragen"
+
+#. TRANSLATORS src/components/BotForm.vue:495
+#: specialVueFakeDummyForL10nScript.js:3283
+msgid ""
+"Optional: Add questions that users will be asked when they first activate "
+"this bot in a chat room. Answers are stored and provided as context to the "
+"bot."
+msgstr ""
+"Optional: Fragen hinzufügen, die Benutzern gestellt werden, wenn sie diesen "
+"Bot erstmals in einem Chatraum aktivieren. Die Antworten werden gespeichert "
+"und dem Bot als Kontext bereitgestellt."
+
+#. TRANSLATORS src/components/BotForm.vue:499
+#: specialVueFakeDummyForL10nScript.js:3285
+msgid "No onboarding questions configured."
+msgstr "Keine Einführungsfragen konfiguriert."
+
+#. TRANSLATORS src/components/BotForm.vue:505
+#: specialVueFakeDummyForL10nScript.js:3287
+msgid "Add question"
+msgstr "Frage hinzufügen"
+
+#. TRANSLATORS src/components/BotForm.vue:515
+#: specialVueFakeDummyForL10nScript.js:3289
+msgid "Q{number}"
+msgstr "F{number}"
+
+#. TRANSLATORS src/components/BotForm.vue:527
+#: specialVueFakeDummyForL10nScript.js:3293
+msgid "Question text"
+msgstr "Fragetext"
+
+#. TRANSLATORS src/components/BotForm.vue:532
+#: specialVueFakeDummyForL10nScript.js:3295
+msgid "What is your main use case?"
+msgstr "Was ist dein wichtigster Anwendungsfall?"
+
+#. TRANSLATORS src/components/BotForm.vue:541
+#: specialVueFakeDummyForL10nScript.js:3297
+msgid "Free text answer (user reply will be stored)"
+msgstr "Freitextantwort (deine Antwort wird gespeichert)"
+
+#. TRANSLATORS src/components/BotForm.vue:557
+#: specialVueFakeDummyForL10nScript.js:3299
+msgid "Answer text"
+msgstr "Antworttext"
+
+#. TRANSLATORS src/components/BotForm.vue:561
+#: specialVueFakeDummyForL10nScript.js:3301
+msgid "Free text (user types the answer)"
+msgstr "Freitext (du gibst die Antwort ein)"
+
+#. TRANSLATORS src/components/BotForm.vue:567
+#: specialVueFakeDummyForL10nScript.js:3303
+msgid "End"
+msgstr "Ende"
+
+#. TRANSLATORS src/components/BotForm.vue:591
+#: specialVueFakeDummyForL10nScript.js:3305
+msgid "+ Add answer"
+msgstr "+ Antwort hinzufügen"
+
+#. TRANSLATORS src/components/BotForm.vue:601
+#: specialVueFakeDummyForL10nScript.js:3307
+msgid "Add another question"
+msgstr "Weitere Frage hinzufügen"
+
+#: specialVueFakeDummyForL10nScript.js:3428
+msgid "Failed to load bots. Please try again."
+msgstr "Bots konnten nicht geladen werden. Bitte versuche es erneut."
+
+#: specialVueFakeDummyForL10nScript.js:3438
+msgid ""
+"Unable to determine the current chat room. Please refresh the page. In this "
+"chat room, only moderators can activate an {name} bot."
+msgstr ""
+"Der aktuelle Chatraum konnte nicht ermittelt werden. Bitte aktualisiere die "
+"Seite. In diesem Chatraum können nur Moderatoren einen {name}-Bot aktivieren."
+
+#: specialVueFakeDummyForL10nScript.js:3460
+msgid ""
+"Unable to verify whether the {name} bot is active in this conversation. "
+"Please try again or ask a moderator to activate it."
+msgstr ""
+"Es konnte nicht geprüft werden, ob der {name}-Bot in dieser Unterhaltung "
+"aktiv ist. Versuche es erneut oder bitte einen Moderator, ihn zu aktivieren."
+
+#: specialVueFakeDummyForL10nScript.js:3532
+#: specialVueFakeDummyForL10nScript.js:3628
+msgid "Team"
+msgstr "Team"
+
+#: specialVueFakeDummyForL10nScript.js:3534
+#: specialVueFakeDummyForL10nScript.js:3630
+msgid "Group"
+msgstr "Gruppe"
+
+#. TRANSLATORS src/components/BotPickerElement.vue:7
+#: specialVueFakeDummyForL10nScript.js:3547
+msgid "Search bots..."
+msgstr "Bots suchen..."
+
+#. TRANSLATORS src/components/BotPickerElement.vue:8
+#: specialVueFakeDummyForL10nScript.js:3549
+msgid "Type to search"
+msgstr "Suchbegriff eingeben"
+
+#. TRANSLATORS src/components/BotPickerElement.vue:20
+#: specialVueFakeDummyForL10nScript.js:3551
+msgid "Loading bots..."
+msgstr "Bots werden geladen..."
+
+#. TRANSLATORS src/components/BotPickerElement.vue:31
+#: specialVueFakeDummyForL10nScript.js:3553
+msgid "No bots found"
+msgstr "Keine Bots gefunden"
+
+#. TRANSLATORS src/components/PublicBotList.vue:29
+#: specialVueFakeDummyForL10nScript.js:3553
+#: specialVueFakeDummyForL10nScript.js:4105
+msgid "No bots available"
+msgstr "Keine Bots verfügbar"
+
+#. TRANSLATORS src/components/BotPickerElement.vue:32
+#: specialVueFakeDummyForL10nScript.js:3555
+msgid "Try a different search term"
+msgstr "Versuche es mit einem anderen Suchbegriff"
+
+#: specialVueFakeDummyForL10nScript.js:3555
+msgid "Create a bot in the EducAI settings"
+msgstr "Erstelle einen Bot in den EducAI-Einstellungen"
+
+#. TRANSLATORS src/components/BotPickerElement.vue:66
+#: specialVueFakeDummyForL10nScript.js:3557
+msgid "by {name}"
+msgstr "von {name}"
+
+#. TRANSLATORS src/components/BotPickerElement.vue:76
+#: specialVueFakeDummyForL10nScript.js:3559
+msgid "Select a bot to see details and use it"
+msgstr "Wähle einen Bot aus, um Details anzuzeigen und ihn zu verwenden"
+
+#: specialVueFakeDummyForL10nScript.js:3668
+msgid "Enabling..."
+msgstr "Wird aktiviert…"
+
+#: specialVueFakeDummyForL10nScript.js:3671
+msgid "Enable & Use Bot"
+msgstr "Bot aktivieren und verwenden"
+
+#: specialVueFakeDummyForL10nScript.js:3673
+msgid "Use Bot"
+msgstr "Bot verwenden"
+
+#: specialVueFakeDummyForL10nScript.js:3678
+msgid ""
+"In this chat room, only moderators can activate an {name} bot. Please ask a "
+"moderator to activate it first."
+msgstr ""
+"In diesem Chatraum können nur Moderatoren einen {name}-Bot aktivieren. Bitte "
+"einen Moderator darum, ihn zuerst zu aktivieren."
+
+#: specialVueFakeDummyForL10nScript.js:3685
+msgid ""
+"The {name} bot is not activated in this conversation. Please ask a moderator "
+"to activate it first."
+msgstr ""
+"Der {name}-Bot ist in dieser Unterhaltung nicht aktiviert. Bitte einen "
+"Moderator, ihn zuerst zu aktivieren."
+
+#: specialVueFakeDummyForL10nScript.js:3706
+msgid "{name} bot has been enabled in this conversation"
+msgstr "Der {name}-Bot wurde in dieser Unterhaltung aktiviert"
+
+#: specialVueFakeDummyForL10nScript.js:3712
+msgid "Failed to enable {name} bot"
+msgstr "Bot „{name}“ konnte nicht aktiviert werden"
+
+#. TRANSLATORS src/components/BotPickerModal.vue:53
+#: specialVueFakeDummyForL10nScript.js:3735
+msgid "Capabilities"
+msgstr "Funktionen"
+
+#. TRANSLATORS src/components/BotPickerModal.vue:70
+#: specialVueFakeDummyForL10nScript.js:3741
+msgid "Has access to %n knowledge source"
+msgid_plural "Has access to %n knowledge sources"
+msgstr[0] "Hat Zugriff auf %n Wissensquelle"
+msgstr[1] "Hat Zugriff auf %n Wissensquellen"
+
+#: specialVueFakeDummyForL10nScript.js:3764
+msgid "Chat with {bot}"
+msgstr "Chat mit {bot}"
+
+#: specialVueFakeDummyForL10nScript.js:3765
+msgid "{mention} What can you help me with?"
+msgstr "{mention} Wobei kannst du mir helfen?"
+
+#: specialVueFakeDummyForL10nScript.js:3792
+msgid "Opening Talk…"
+msgstr "Talk wird geöffnet…"
+
+#: specialVueFakeDummyForL10nScript.js:3796
+msgid "Create chat, send message and open Talk"
+msgstr "Chat erstellen, Nachricht senden und Talk öffnen"
+
+#: specialVueFakeDummyForL10nScript.js:3797
+msgid "Create chat and open Talk"
+msgstr "Chat erstellen und Talk öffnen"
+
+#: specialVueFakeDummyForL10nScript.js:3800
+msgid "Activate, send message and open Talk"
+msgstr "Aktivieren, Nachricht senden und Talk öffnen"
+
+#: specialVueFakeDummyForL10nScript.js:3801
+msgid "Activate and open Talk"
+msgstr "Aktivieren und Talk öffnen"
+
+#: specialVueFakeDummyForL10nScript.js:3839
+msgid "Please select a Talk conversation."
+msgstr "Bitte wähle eine Talk-Unterhaltung aus."
+
+#: specialVueFakeDummyForL10nScript.js:3860
+msgid "Message sent. Opening Talk…"
+msgstr "Nachricht gesendet. Talk wird geöffnet…"
+
+#: specialVueFakeDummyForL10nScript.js:3862
+msgid "{appName} is ready in Talk. Mention {mention} to start."
+msgstr "{appName} ist in Talk bereit. Erwähne {mention}, um zu beginnen."
+
+#: specialVueFakeDummyForL10nScript.js:3871
+msgid "Failed to start Talk chat"
+msgstr "Talk-Chat konnte nicht gestartet werden"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:6
+#: specialVueFakeDummyForL10nScript.js:3884
+msgid "Start using {bot} in Talk"
+msgstr "Mit {bot} in Talk loslegen"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:15
+#: specialVueFakeDummyForL10nScript.js:3886
+msgid "Talk start mode"
+msgstr "Talk-Startmodus"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:22
+#: specialVueFakeDummyForL10nScript.js:3888
+msgid "New chat"
+msgstr "Neuer Chat"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:30
+#: specialVueFakeDummyForL10nScript.js:3890
+msgid "Existing chat"
+msgstr "Vorhandener Chat"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:37
+#: specialVueFakeDummyForL10nScript.js:3892
+msgid "Chat name"
+msgstr "Chat-Name"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:42
+#: specialVueFakeDummyForL10nScript.js:3894
+msgid "Chat with bot"
+msgstr "Chat mit Bot"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:59
+#: specialVueFakeDummyForL10nScript.js:3900
+msgid "Loading Talk conversations…"
+msgstr "Talk-Unterhaltungen werden geladen…"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:67
+#: specialVueFakeDummyForL10nScript.js:3902
+msgid "No Talk conversations available."
+msgstr "Keine Talk-Unterhaltungen verfügbar."
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:85
+#: specialVueFakeDummyForL10nScript.js:3904
+msgid "You can activate {appName} here"
+msgstr "Du kannst {appName} hier aktivieren"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:86
+#: specialVueFakeDummyForL10nScript.js:3906
+msgid "Only moderators can activate {appName} here"
+msgstr "Nur Moderatoren können {appName} hier aktivieren"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:93
+#: specialVueFakeDummyForL10nScript.js:3908
+msgid ""
+"If {appName} is not active in this room yet, a moderator needs to activate "
+"it before you can use this bot there."
+msgstr ""
+"Falls {appName} in diesem Raum noch nicht aktiv ist, muss ein Moderator die "
+"App aktivieren, bevor du diesen Bot dort verwenden kannst."
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:98
+#: specialVueFakeDummyForL10nScript.js:3910
+msgid "First message"
+msgstr "Erste Nachricht"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:103
+#: specialVueFakeDummyForL10nScript.js:3912
+msgid "@bot What can you help me with?"
+msgstr "@bot Wobei kannst du mir helfen?"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:109
+#: specialVueFakeDummyForL10nScript.js:3914
+msgid "Send this message immediately as me"
+msgstr "Diese Nachricht sofort in meinem Namen senden"
+
+#. TRANSLATORS src/components/BotTalkStartModal.vue:110
+#: specialVueFakeDummyForL10nScript.js:3916
+msgid "Recommended only when the selected room expects this message."
+msgstr ""
+"Nur empfohlen, wenn diese Nachricht im ausgewählten Raum erwartet wird."
+
+#: specialVueFakeDummyForL10nScript.js:3989
+msgid "Copied {mention}"
+msgstr "{mention} kopiert"
+
+#: specialVueFakeDummyForL10nScript.js:3992
+msgid "Failed to copy bot handle"
+msgstr "Bot-Kennung konnte nicht kopiert werden"
+
+#. TRANSLATORS src/components/PublicBotCard.vue:13
+#: specialVueFakeDummyForL10nScript.js:4008
+#: specialVueFakeDummyForL10nScript.js:4010
+msgid "Copy {mention} handle"
+msgstr "Kennung {mention} kopieren"
+
+#. TRANSLATORS src/components/PublicBotCard.vue:40
+#: specialVueFakeDummyForL10nScript.js:4014
+msgid "Created by:"
+msgstr "Erstellt von:"
+
+#. TRANSLATORS src/components/PublicBotCard.vue:44
+#: specialVueFakeDummyForL10nScript.js:4018
+msgid "Created:"
+msgstr "Erstellt:"
+
+#. TRANSLATORS src/components/PublicBotCard.vue:51
+#: specialVueFakeDummyForL10nScript.js:4020
+msgid "Use bot"
+msgstr "Bot verwenden"
+
+#. TRANSLATORS src/components/PublicBotCard.vue:54
+#: specialVueFakeDummyForL10nScript.js:4022
+msgid "Details"
+msgstr "Details"
+
+#. TRANSLATORS src/components/PublicBotList.vue:5
+#: specialVueFakeDummyForL10nScript.js:4099
+msgid "All available bots"
+msgstr "Alle verfügbaren Bots"
+
+#. TRANSLATORS src/components/PublicBotList.vue:7
+#: specialVueFakeDummyForL10nScript.js:4101
+msgid "Browse bots you have access to and learn more about their capabilities"
+msgstr ""
+"Durchsuche die Bots, auf die du zugreifen kannst, und erfahre mehr über ihre "
+"Funktionen"
+
+#. TRANSLATORS src/components/PublicBotList.vue:12
+#: specialVueFakeDummyForL10nScript.js:4103
+msgid "Create and edit bots"
+msgstr "Bots erstellen und bearbeiten"
+
+#. TRANSLATORS src/components/PublicBotList.vue:30
+#: specialVueFakeDummyForL10nScript.js:4107
+msgid "When bots are published and you have access, they will appear here."
+msgstr ""
+"Sobald Bots veröffentlicht sind, auf die du Zugriff hast, werden sie hier "
+"angezeigt."
+
+#. TRANSLATORS src/components/PublicBotList.vue:35
+#: specialVueFakeDummyForL10nScript.js:4109
+msgid "Loading available bots…"
+msgstr "Verfügbare Bots werden geladen…"
+
+#: specialVueFakeDummyForL10nScript.js:4165
+msgid "{start}–{end} of {total}"
+msgstr "{start}–{end} von {total}"
+
+#: specialVueFakeDummyForL10nScript.js:4219
+msgid "Failed to load activity"
+msgstr "Aktivität konnte nicht geladen werden"
+
+#: specialVueFakeDummyForL10nScript.js:4241
+msgid "Activity details unavailable"
+msgstr "Aktivitätsdetails sind nicht verfügbar"
+
+#: specialVueFakeDummyForL10nScript.js:4249
+msgid "Delete this activity trace?"
+msgstr "Dieses Aktivitätsprotokoll löschen?"
+
+#: specialVueFakeDummyForL10nScript.js:4254
+msgid "Activity trace deleted"
+msgstr "Aktivitätsprotokoll gelöscht"
+
+#: specialVueFakeDummyForL10nScript.js:4263
+msgid "Clear all of your {appName} activity traces?"
+msgstr "Alle deine Aktivitätsprotokolle in {appName} löschen?"
+
+#: specialVueFakeDummyForL10nScript.js:4269
+msgid "Activity cleared"
+msgstr "Aktivitätsverlauf gelöscht"
+
+#: specialVueFakeDummyForL10nScript.js:4327
+msgid "{duration} ms"
+msgstr "{duration} ms"
+
+#: specialVueFakeDummyForL10nScript.js:4329
+msgid "{duration} s"
+msgstr "{duration} s"
+
+#: specialVueFakeDummyForL10nScript.js:4352
+msgid "{count} tool"
+msgid_plural "{count} tools"
+msgstr[0] "{count} Tool"
+msgstr[1] "{count} Tools"
+
+#: specialVueFakeDummyForL10nScript.js:4359
+msgid "{count} event"
+msgid_plural "{count} events"
+msgstr[0] "{count} Ereignis"
+msgstr[1] "{count} Ereignisse"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:45
+#: specialVueFakeDummyForL10nScript.js:4374
+#: specialVueFakeDummyForL10nScript.js:4452
+msgid "Running"
+msgstr "Läuft"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:46
+#: specialVueFakeDummyForL10nScript.js:4375
+#: specialVueFakeDummyForL10nScript.js:4454
+msgid "Success"
+msgstr "Erfolgreich"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:48
+#: specialVueFakeDummyForL10nScript.js:4377
+#: specialVueFakeDummyForL10nScript.js:4458
+msgid "Partial"
+msgstr "Teilweise"
+
+#: specialVueFakeDummyForL10nScript.js:4378
+msgid "OK"
+msgstr "OK"
+
+#: specialVueFakeDummyForL10nScript.js:4379
+msgid "Started"
+msgstr "Gestartet"
+
+#: specialVueFakeDummyForL10nScript.js:4380
+msgid "Used"
+msgstr "Verwendet"
+
+#: specialVueFakeDummyForL10nScript.js:4381
+msgid "Reconciliation deferred"
+msgstr "Abgleich aufgeschoben"
+
+#: specialVueFakeDummyForL10nScript.js:4382
+msgid "Completed"
+msgstr "Abgeschlossen"
+
+#: specialVueFakeDummyForL10nScript.js:4383
+msgid "Skipped"
+msgstr "Übersprungen"
+
+#: specialVueFakeDummyForL10nScript.js:4384
+msgid "Registered"
+msgstr "Registriert"
+
+#: specialVueFakeDummyForL10nScript.js:4385
+msgid "Unregistered"
+msgstr "Nicht registriert"
+
+#: specialVueFakeDummyForL10nScript.js:4387
+msgid "Unknown status"
+msgstr "Unbekannter Status"
+
+#: specialVueFakeDummyForL10nScript.js:4392
+msgid "Assistant response"
+msgstr "Antwort des Assistenten"
+
+#: specialVueFakeDummyForL10nScript.js:4393
+msgid "Conversation history"
+msgstr "Unterhaltungsverlauf"
+
+#: specialVueFakeDummyForL10nScript.js:4395
+msgid "LLM request"
+msgstr "LLM-Anfrage"
+
+#: specialVueFakeDummyForL10nScript.js:4396
+msgid "LLM response"
+msgstr "LLM-Antwort"
+
+#: specialVueFakeDummyForL10nScript.js:4397
+msgid "Provider attempt"
+msgstr "Anfrageversuch beim Anbieter"
+
+#: specialVueFakeDummyForL10nScript.js:4398
+msgid "Provider attempt budget exhausted"
+msgstr "Limit der Anbieterversuche ausgeschöpft"
+
+#: specialVueFakeDummyForL10nScript.js:4399
+msgid "Provider compatibility"
+msgstr "Anbieterkompatibilität"
+
+#: specialVueFakeDummyForL10nScript.js:4400
+msgid "Queue delivery"
+msgstr "Zustellung aus der Warteschlange"
+
+#: specialVueFakeDummyForL10nScript.js:4401
+msgid "Queue persistence"
+msgstr "Speicherung in der Warteschlange"
+
+#: specialVueFakeDummyForL10nScript.js:4402
+msgid "Tool call"
+msgstr "Tool-Aufruf"
+
+#: specialVueFakeDummyForL10nScript.js:4403
+msgid "Tool rejected"
+msgstr "Tool-Aufruf abgelehnt"
+
+#: specialVueFakeDummyForL10nScript.js:4404
+msgid "Tool result"
+msgstr "Tool-Ergebnis"
+
+#: specialVueFakeDummyForL10nScript.js:4405
+msgid "User message"
+msgstr "Benutzernachricht"
+
+#: specialVueFakeDummyForL10nScript.js:4407
+msgid "Unknown event"
+msgstr "Unbekanntes Ereignis"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:5
+#. TRANSLATORS src/views/PersonalSettings.vue:23
+#: specialVueFakeDummyForL10nScript.js:4434
+#: specialVueFakeDummyForL10nScript.js:5004
+msgid "Activity"
+msgstr "Aktivität"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:6
+#: specialVueFakeDummyForL10nScript.js:4436
+msgid ""
+"This page shows {appName} interactions you started. Detailed tool inputs and "
+"results are visible only to you."
+msgstr ""
+"Diese Seite zeigt von dir gestartete {appName}-Interaktionen. Detaillierte "
+"Werkzeugeingaben und Ergebnisse sind nur für dich sichtbar."
+
+#. TRANSLATORS src/views/PersonalActivity.vue:23
+#: specialVueFakeDummyForL10nScript.js:4440
+msgid "Clear my activity"
+msgstr "Meine Aktivität löschen"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:29
+#: specialVueFakeDummyForL10nScript.js:4442
+msgid ""
+"Only interactions started by your account are shown here. We take privacy "
+"seriously: your trace history is private to your account and cannot be "
+"viewed by anyone else."
+msgstr ""
+"Hier werden nur Interaktionen angezeigt, die von deinem Konto gestartet "
+"wurden. Datenschutz ist uns wichtig: Dein Aktivitätsverlauf ist nur für dein "
+"Konto sichtbar und kann von niemand anderem eingesehen werden."
+
+#. TRANSLATORS src/views/PersonalActivity.vue:34
+#: specialVueFakeDummyForL10nScript.js:4444
+msgid "Search"
+msgstr "Suchen"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:38
+#: specialVueFakeDummyForL10nScript.js:4446
+msgid "Message, bot, or error"
+msgstr "Nachricht, Bot oder Fehler"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:44
+#: specialVueFakeDummyForL10nScript.js:4450
+msgid "Any status"
+msgstr "Beliebiger Status"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:52
+#: specialVueFakeDummyForL10nScript.js:4460
+msgid "Bot mention name"
+msgstr "Erwähnungsname des Bots"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:59
+#: specialVueFakeDummyForL10nScript.js:4462
+msgid "From"
+msgstr "Von"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:66
+#: specialVueFakeDummyForL10nScript.js:4464
+msgid "To"
+msgstr "Bis"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:74
+#: specialVueFakeDummyForL10nScript.js:4466
+msgid "Only errors"
+msgstr "Nur Fehler"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:78
+#: specialVueFakeDummyForL10nScript.js:4468
+msgid "Only with tools"
+msgstr "Nur mit Tools"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:82
+#: specialVueFakeDummyForL10nScript.js:4470
+msgid "Apply"
+msgstr "Anwenden"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:92
+#: specialVueFakeDummyForL10nScript.js:4472
+msgid "Loading activity…"
+msgstr "Aktivität wird geladen…"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:97
+#: specialVueFakeDummyForL10nScript.js:4474
+msgid "No activity yet"
+msgstr "Noch keine Aktivität"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:98
+#: specialVueFakeDummyForL10nScript.js:4476
+msgid ""
+"Use a bot in Nextcloud Talk and your own trace history will appear here."
+msgstr ""
+"Verwende einen Bot in Nextcloud Talk. Danach wird hier dein eigener "
+"Aktivitätsverlauf angezeigt."
+
+#. TRANSLATORS src/views/PersonalActivity.vue:116
+#: specialVueFakeDummyForL10nScript.js:4478
+msgid "No message preview"
+msgstr "Keine Nachrichtenvorschau"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:130
+#: specialVueFakeDummyForL10nScript.js:4480
+msgid "Previous"
+msgstr "Zurück"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:138
+#: specialVueFakeDummyForL10nScript.js:4482
+msgid "Next"
+msgstr "Weiter"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:146
+#: specialVueFakeDummyForL10nScript.js:4484
+msgid "Loading trace details…"
+msgstr "Details des Aktivitätsprotokolls werden geladen…"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:154
+#: specialVueFakeDummyForL10nScript.js:4486
+msgid "{appName} run"
+msgstr "{appName}-Ausführung"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:156
+#: specialVueFakeDummyForL10nScript.js:4488
+msgid "{date} - {status} - {events}"
+msgstr "{date} - {status} - {events}"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:169
+#: specialVueFakeDummyForL10nScript.js:4490
+msgid "Export JSON"
+msgstr "JSON exportieren"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:183
+#: specialVueFakeDummyForL10nScript.js:4496
+msgid "Duration"
+msgstr "Dauer"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:184
+#: specialVueFakeDummyForL10nScript.js:4498
+msgid "Tools"
+msgstr "Werkzeuge"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:185
+#: specialVueFakeDummyForL10nScript.js:4500
+msgid "Tokens"
+msgstr "Tokens"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:200
+#: specialVueFakeDummyForL10nScript.js:4502
+msgid "Raw LLM payload"
+msgstr "LLM-Rohdaten"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:204
+#: specialVueFakeDummyForL10nScript.js:4504
+msgid "Payload"
+msgstr "Nutzdaten"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:207
+#: specialVueFakeDummyForL10nScript.js:4506
+#: specialVueFakeDummyForL10nScript.js:4510
+msgid "Show JSON"
+msgstr "JSON anzeigen"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:212
+#: specialVueFakeDummyForL10nScript.js:4508
+msgid "Result"
+msgstr "Ergebnis"
+
+#. TRANSLATORS src/views/PersonalActivity.vue:226
+#: specialVueFakeDummyForL10nScript.js:4512
+msgid "Select an activity run to inspect its timeline."
+msgstr "Wähle einen Aktivitätslauf aus, um dessen Zeitleiste anzuzeigen."
+
+#: specialVueFakeDummyForL10nScript.js:4616
+msgid "Bot updated and saved as draft. Submit for approval when ready."
+msgstr ""
+"Bot aktualisiert und als Entwurf gespeichert. Reiche ihn zur Freigabe ein, "
+"sobald er fertig ist."
+
+#: specialVueFakeDummyForL10nScript.js:4618
+msgid ""
+"Bot updated. Approval is required before the new shared version goes live."
+msgstr ""
+"Bot aktualisiert. Die neue geteilte Version muss freigegeben werden, bevor "
+"sie veröffentlicht wird."
+
+#: specialVueFakeDummyForL10nScript.js:4620
+msgid "Personal bot updated successfully"
+msgstr "Persönlicher Bot wurde erfolgreich aktualisiert"
+
+#: specialVueFakeDummyForL10nScript.js:4622
+msgid "Bot updated successfully"
+msgstr "Bot wurde erfolgreich aktualisiert"
+
+#: specialVueFakeDummyForL10nScript.js:4632
+msgid "Bot saved as draft. Submit for approval when ready."
+msgstr ""
+"Bot als Entwurf gespeichert. Reiche ihn zur Freigabe ein, sobald er fertig "
+"ist."
+
+#: specialVueFakeDummyForL10nScript.js:4634
+msgid "Personal bot created successfully"
+msgstr "Persönlicher Bot wurde erfolgreich erstellt"
+
+#: specialVueFakeDummyForL10nScript.js:4636
+msgid "Bot created successfully"
+msgstr "Bot wurde erfolgreich erstellt"
+
+#: specialVueFakeDummyForL10nScript.js:4643
+msgid "Failed to save bot"
+msgstr "Bot konnte nicht gespeichert werden"
+
+#: specialVueFakeDummyForL10nScript.js:4671
+msgid "Bot submitted for approval"
+msgstr "Bot wurde zur Freigabe eingereicht"
+
+#: specialVueFakeDummyForL10nScript.js:4676
+msgid "Failed to submit for approval"
+msgstr "Einreichung zur Freigabe fehlgeschlagen"
+
+#: specialVueFakeDummyForL10nScript.js:4686
+msgid "Bot approved successfully"
+msgstr "Bot wurde erfolgreich freigegeben"
+
+#: specialVueFakeDummyForL10nScript.js:4694
+msgid "Optional: Enter a reason for rejection"
+msgstr "Optional: Gib einen Grund für die Ablehnung ein"
+
+#: specialVueFakeDummyForL10nScript.js:4697
+msgid "Bot rejected and returned to draft"
+msgstr "Bot wurde abgelehnt und in den Entwurfsstatus zurückversetzt"
+
+#: specialVueFakeDummyForL10nScript.js:4743
+msgid "Failed to load RAG sources"
+msgstr "RAG-Quellen konnten nicht geladen werden"
+
+#: specialVueFakeDummyForL10nScript.js:4764
+msgid "Source #{id}"
+msgstr "Quelle #{id}"
+
+#: specialVueFakeDummyForL10nScript.js:4793
+msgid ""
+"Testing enabled. Mention {mention} in Nextcloud Talk to try the pending "
+"version."
+msgstr ""
+"Tests aktiviert. Erwähne {mention} in Nextcloud Talk, um die ausstehende "
+"Version auszuprobieren."
+
+#: specialVueFakeDummyForL10nScript.js:4796
+msgid "Failed to enable testing"
+msgstr "Testmodus konnte nicht aktiviert werden"
+
+#: specialVueFakeDummyForL10nScript.js:4800
+msgid "Delete this bot? All conversation history will be lost."
+msgstr "Diesen Bot löschen? Der gesamte Unterhaltungsverlauf geht verloren."
+
+#: specialVueFakeDummyForL10nScript.js:4806
+msgid "Bot deleted successfully"
+msgstr "Bot wurde erfolgreich gelöscht"
+
+#. TRANSLATORS src/views/PersonalBots.vue:197
+#: specialVueFakeDummyForL10nScript.js:4848
+#: specialVueFakeDummyForL10nScript.js:4935
+msgid "Uses global default"
+msgstr "Verwendet den globalen Standard"
+
+#. TRANSLATORS src/views/PersonalBots.vue:4
+#: specialVueFakeDummyForL10nScript.js:4863
+msgid "{appName} - Multi-bot manager"
+msgstr "{appName} - Multi-Bot-Verwaltung"
+
+#. TRANSLATORS src/views/PersonalBots.vue:25
+#: specialVueFakeDummyForL10nScript.js:4867
+msgid "No bots created yet"
+msgstr "Noch keine Bots erstellt"
+
+#. TRANSLATORS src/views/PersonalBots.vue:26
+#: specialVueFakeDummyForL10nScript.js:4869
+msgid "Create your first AI bot to get started with Nextcloud Talk integration"
+msgstr ""
+"Erstelle deinen ersten KI-Bot, um mit der Nextcloud Talk-Integration zu "
+"beginnen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:28
+#: specialVueFakeDummyForL10nScript.js:4871
+msgid "Create your first bot"
+msgstr "Ersten Bot erstellen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:40
+#: specialVueFakeDummyForL10nScript.js:4875
+msgid "Pending approvals"
+msgstr "Ausstehende Freigaben"
+
+#. TRANSLATORS src/views/PersonalBots.vue:46
+#: specialVueFakeDummyForL10nScript.js:4877
+msgid "Loading pending approvals…"
+msgstr "Ausstehende Freigaben werden geladen…"
+
+#. TRANSLATORS src/views/PersonalBots.vue:50
+#: specialVueFakeDummyForL10nScript.js:4879
+msgid "No bots are pending approval."
+msgstr "Keine Bots warten auf Freigabe."
+
+#. TRANSLATORS src/views/PersonalBots.vue:62
+#: specialVueFakeDummyForL10nScript.js:4881
+msgid "Submitted by {owner}"
+msgstr "Eingereicht von {owner}"
+
+#. TRANSLATORS src/views/PersonalBots.vue:69
+#: specialVueFakeDummyForL10nScript.js:4883
+msgid "Update to existing bot"
+msgstr "Aktualisierung eines bestehenden Bots"
+
+#. TRANSLATORS src/views/PersonalBots.vue:72
+#: specialVueFakeDummyForL10nScript.js:4885
+msgid "New bot"
+msgstr "Neuer Bot"
+
+#. TRANSLATORS src/views/PersonalBots.vue:76
+#: specialVueFakeDummyForL10nScript.js:4887
+msgid ""
+"Reviewing the submitted pending version. The currently approved version "
+"stays live until approval."
+msgstr ""
+"Die eingereichte Version wird geprüft. Die derzeit freigegebene Version "
+"bleibt aktiv, bis die neue Version freigegeben wird."
+
+#. TRANSLATORS src/views/PersonalBots.vue:80
+#: specialVueFakeDummyForL10nScript.js:4889
+msgid "Why share:"
+msgstr "Grund für die Freigabe:"
+
+#. TRANSLATORS src/views/PersonalBots.vue:84
+#: specialVueFakeDummyForL10nScript.js:4891
+msgid "What it does well:"
+msgstr "Stärken:"
+
+#. TRANSLATORS src/views/PersonalBots.vue:88
+#: specialVueFakeDummyForL10nScript.js:4893
+msgid "RAG sources:"
+msgstr "RAG-Quellen:"
+
+#. TRANSLATORS src/views/PersonalBots.vue:92
+#: specialVueFakeDummyForL10nScript.js:4895
+msgid "Testing done:"
+msgstr "Durchgeführte Tests:"
+
+#. TRANSLATORS src/views/PersonalBots.vue:97
+#: specialVueFakeDummyForL10nScript.js:4897
+msgid "Submitted {date}"
+msgstr "Eingereicht am {date}"
+
+#. TRANSLATORS src/views/PersonalBots.vue:102
+#: specialVueFakeDummyForL10nScript.js:4899
+msgid "Test bot"
+msgstr "Bot testen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:105
+#: specialVueFakeDummyForL10nScript.js:4901
+msgid "Preview"
+msgstr "Vorschau"
+
+#. TRANSLATORS src/views/PersonalBots.vue:108
+#: specialVueFakeDummyForL10nScript.js:4903
+msgid "Approve"
+msgstr "Freigeben"
+
+#. TRANSLATORS src/views/PersonalBots.vue:111
+#: specialVueFakeDummyForL10nScript.js:4905
+msgid "Reject"
+msgstr "Ablehnen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:136
+#: specialVueFakeDummyForL10nScript.js:4909
+msgid ""
+"You can test the bot yourself in Nextcloud Talk before submitting. Mention "
+"{mention} in any conversation."
+msgstr ""
+"Du kannst den Bot vor dem Einreichen selbst in Nextcloud Talk testen. "
+"Erwähne {mention} in einer beliebigen Unterhaltung."
+
+#. TRANSLATORS src/views/PersonalBots.vue:139
+#: specialVueFakeDummyForL10nScript.js:4911
+msgid ""
+"Why do you want to share your bot with this specific group (or globally)?"
+msgstr ""
+"Warum möchtest du deinen Bot mit dieser bestimmten Gruppe (oder global) "
+"teilen?"
+
+#. TRANSLATORS src/views/PersonalBots.vue:143
+#: specialVueFakeDummyForL10nScript.js:4913
+msgid "What is your bot good at?"
+msgstr "Worin ist dein Bot besonders gut?"
+
+#. TRANSLATORS src/views/PersonalBots.vue:147
+#: specialVueFakeDummyForL10nScript.js:4915
+msgid "What are the sources of the information you provided to RAG?"
+msgstr ""
+"Aus welchen Quellen stammen die Informationen, die du für RAG bereitgestellt "
+"hast?"
+
+#. TRANSLATORS src/views/PersonalBots.vue:151
+#: specialVueFakeDummyForL10nScript.js:4917
+msgid ""
+"Describe fully how you tested your bot so we can reproduce its behavior."
+msgstr ""
+"Beschreibe vollständig, wie du deinen Bot getestet hast, damit wir sein "
+"Verhalten reproduzieren können."
+
+#. TRANSLATORS src/views/PersonalBots.vue:160
+#: specialVueFakeDummyForL10nScript.js:4921
+msgid "Submit"
+msgstr "Einreichen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:176
+#: specialVueFakeDummyForL10nScript.js:4923
+msgid ""
+"Review target for {mention}. This is the pending version that the owner and "
+"enabled reviewer can test in Talk."
+msgstr ""
+"Prüfversion für {mention}. Dies ist die ausstehende Version, die der "
+"Eigentümer und die berechtigte Prüfperson in Talk testen können."
+
+#. TRANSLATORS src/views/PersonalBots.vue:179
+#: specialVueFakeDummyForL10nScript.js:4925
+msgid "Review target for {mention}"
+msgstr "Prüfversion für {mention}"
+
+#. TRANSLATORS src/views/PersonalBots.vue:204
+#: specialVueFakeDummyForL10nScript.js:4937
+msgid "Target audience"
+msgstr "Zielgruppe"
+
+#. TRANSLATORS src/views/PersonalBots.vue:213
+#: specialVueFakeDummyForL10nScript.js:4943
+msgid "RAG sources"
+msgstr "RAG-Quellen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:221
+#: specialVueFakeDummyForL10nScript.js:4947
+msgid "No knowledge sources attached"
+msgstr "Keine Wissensquellen verknüpft"
+
+#. TRANSLATORS src/views/PersonalBots.vue:235
+#: specialVueFakeDummyForL10nScript.js:4949
+msgid "Open"
+msgstr "Öffnen"
+
+#. TRANSLATORS src/views/PersonalBots.vue:253
+#: specialVueFakeDummyForL10nScript.js:4955
+msgid "No tools configured"
+msgstr "Keine Tools konfiguriert"
+
+#. TRANSLATORS src/views/PersonalSettings.vue:6
+#: specialVueFakeDummyForL10nScript.js:4998
+msgid "Manage your bots and review your own AI activity."
+msgstr "Verwalte deine Bots und prüfe deine eigenen KI-Aktivitäten."
+
+#. TRANSLATORS src/views/PersonalSettings.vue:8
+#: specialVueFakeDummyForL10nScript.js:5000
+msgid "{appName} personal settings"
+msgstr "Persönliche Einstellungen für {appName}"
+
+#. TRANSLATORS src/views/PersonalSettings.vue:15
+#: specialVueFakeDummyForL10nScript.js:5002
+msgid "My bots"
+msgstr "Meine Bots"
+
+#. TRANSLATORS src/views/PersonalBots.vue:209
+#: specialVueFakeDummyForL10nScript.js:4941
+msgid "Teams: {teams}"
+msgstr "Teams: {teams}"
+
+#. TRANSLATORS src/views/PersonalBots.vue:206
+#: specialVueFakeDummyForL10nScript.js:4939
+msgid "Groups: {groups}"
+msgstr "Gruppen: {groups}"
+
+#. TRANSLATORS src/components/AdminSettings.vue:967
+#: specialVueFakeDummyForL10nScript.js:1505
+msgid ""
+"Message shown to users when their request is queued. Use {position} for "
+"queue position and {wait} for estimated wait time in seconds. Leave empty "
+"for the default message."
+msgstr ""
+"Nachricht, die Benutzern angezeigt wird, wenn ihre Anfrage in die "
+"Warteschlange eingereiht wird. Verwende {position} für die Position in der "
+"Warteschlange und {wait} für die geschätzte Wartezeit in Sekunden. Lass das "
+"Feld für die Standardnachricht leer."
+
+#. TRANSLATORS src/components/AdminSettings.vue:965
+#: specialVueFakeDummyForL10nScript.js:1503
+msgid ""
+"⏳ Your request has been queued. Position: {position}, estimated wait: "
+"~{wait} seconds."
+msgstr ""
+"⏳ Deine Anfrage wurde in die Warteschlange gestellt. Position: {position}, "
+"geschätzte Wartezeit: ~{wait} Sekunden."

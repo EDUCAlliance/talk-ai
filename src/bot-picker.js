@@ -11,8 +11,9 @@
 import { registerCustomPickerElement, NcCustomPickerRenderResult } from '@nextcloud/vue/dist/Components/NcRichText.js'
 import Vue from 'vue'
 import BotPickerElement from './components/BotPickerElement.vue'
+import { installL10n } from './l10n.js'
 
-Vue.mixin({ methods: { t, n } })
+installL10n(Vue)
 
 /**
  * Detect if we're currently in Nextcloud Talk context.

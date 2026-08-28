@@ -16,6 +16,7 @@ use OCA\EducAI\Db\ConversationMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
@@ -138,18 +139,18 @@ class BotService {
 	 */
 	public function getBotTools(int $botId, ?string $userId): array {
 		if ($userId === null) {
-			throw new Exception('You do not have permission to view this bot');
+			throw new AuthorizationException('You do not have permission to view this bot');
 		}
 
 		$bot = $this->botMapper->findById($botId);
 		// Allow owner or admin to view bot tools
 		if ($bot->getUserId() !== $userId && !$this->permissionService->isAdmin($userId)) {
-			throw new Exception('You do not have permission to view this bot');
+			throw new AuthorizationException('You do not have permission to view this bot');
 		}
 		$visibility = $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic());
 
 		$result = [];
-		
+
 		// Get MCP tool assignments
 		$mcpAssignments = $this->toolRegistry->getToolsForBot($botId);
 		foreach ($mcpAssignments as $entry) {
@@ -163,7 +164,7 @@ class BotService {
 				'config' => $config,
 			];
 		}
-		
+
 		// Get built-in tool assignments
 		$builtInAssignments = $this->toolRegistry->getBuiltInToolsForBot($botId);
 		foreach ($builtInAssignments as $entry) {
@@ -312,7 +313,7 @@ class BotService {
 
 		// Check edit permission using PermissionService
 		if (!$this->permissionService->canEditBot($userId, $bot)) {
-			throw new Exception('You do not have permission to edit this bot');
+			throw new AuthorizationException('You do not have permission to edit this bot');
 		}
 
 		$editableState = $this->getEditableBotState($bot);
@@ -466,9 +467,9 @@ class BotService {
 		if (!$this->permissionService->canDeleteBot($userId, $bot)) {
 			$status = $bot->getApprovalStatus() ?? 'approved';
 			if (in_array($status, ['pending', 'approved'], true)) {
-				throw new Exception('This bot can only be deleted by users with approval rights');
+				throw new AuthorizationException('This bot can only be deleted by users with approval rights');
 			}
-			throw new Exception('You do not have permission to delete this bot');
+			throw new AuthorizationException('You do not have permission to delete this bot');
 		}
 
 		// Delete all related data for this bot
@@ -512,7 +513,7 @@ class BotService {
 
 		// Only owner can submit their bot
 		if ($bot->getUserId() !== $userId) {
-			throw new Exception('You do not have permission to submit this bot for approval');
+			throw new AuthorizationException('You do not have permission to submit this bot for approval');
 		}
 
 		$status = $bot->getApprovalStatus() ?? 'draft';
@@ -559,7 +560,7 @@ class BotService {
 	public function approveBot(int $botId, string $approverId): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($approverId, $bot)) {
-			throw new Exception('You do not have permission to approve this bot');
+			throw new AuthorizationException('You do not have permission to approve this bot');
 		}
 		$status = $bot->getApprovalStatus() ?? 'draft';
 
@@ -611,7 +612,7 @@ class BotService {
 	public function rejectBot(int $botId, string $rejecterId, ?string $reason = null): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($rejecterId, $bot)) {
-			throw new Exception('You do not have permission to reject this bot');
+			throw new AuthorizationException('You do not have permission to reject this bot');
 		}
 		$status = $bot->getApprovalStatus() ?? 'draft';
 
@@ -662,7 +663,7 @@ class BotService {
 	 */
 	public function getPendingApprovals(string $userId): array {
 		if (!$this->permissionService->hasApprovalRights($userId)) {
-			throw new Exception('You do not have permission to view pending approvals');
+			throw new AuthorizationException('You do not have permission to view pending approvals');
 		}
 
 		$pendingBots = $this->botMapper->findByApprovalStatus('pending');
@@ -703,7 +704,7 @@ class BotService {
 	public function enableTesting(int $botId, string $userId): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($userId, $bot)) {
-			throw new Exception('You do not have permission to enable testing for this bot');
+			throw new AuthorizationException('You do not have permission to enable testing for this bot');
 		}
 		$status = $bot->getApprovalStatus() ?? 'draft';
 
@@ -817,18 +818,18 @@ class BotService {
 					$replyToMessageId,
 					$threadRootMessageId
 				);
-				
+
 				$this->logger->info('Request queued due to rate limit', [
 					'request_id' => $queued->getId(),
 					'bot_id' => $effectiveBot->getId(),
 					'room_token' => $roomToken,
 				]);
-				
+
 				$waitSeconds = $this->rateLimitService->getSecondsUntilAvailable();
 				$queueStats = $this->rateLimitService->getQueueStats();
 				$position = $queueStats['pending'];
 				$estimatedWait = max($waitSeconds, $position * 2);
-				
+
 				// Use custom message if configured, otherwise use default
 				$customMessage = $this->rateLimitService->getQueueMessage();
 				if ($customMessage !== null && $customMessage !== '') {
@@ -839,7 +840,7 @@ class BotService {
 						$customMessage
 					);
 				}
-				
+
 				// Default message
 				return sprintf(
 					"⏳ Your request has been queued and will be processed shortly. " .
@@ -849,7 +850,7 @@ class BotService {
 					$estimatedWait
 				);
 			}
-			
+
 			// Record that we're about to make a request
 			$this->rateLimitService->recordUsage();
 		}
@@ -1584,7 +1585,7 @@ class BotService {
 
 		// Get tools assigned to this bot (public info only, no configs)
 		$tools = [];
-		
+
 		// MCP tools
 		$mcpAssignments = $this->toolRegistry->getToolsForBot($botId);
 		foreach ($mcpAssignments as $entry) {
@@ -1595,7 +1596,7 @@ class BotService {
 				'is_builtin' => false,
 			];
 		}
-		
+
 		// Built-in tools
 		$builtInAssignments = $this->toolRegistry->getBuiltInToolsForBot($botId);
 		foreach ($builtInAssignments as $entry) {
@@ -1603,6 +1604,7 @@ class BotService {
 				'name' => $this->formatBuiltInToolName($entry['name']),
 				'description' => $this->getBuiltInToolDescription($entry['name']),
 				'is_builtin' => true,
+				'builtin_name' => $entry['name'],
 			];
 		}
 
@@ -2253,13 +2255,13 @@ class BotService {
 		$wikiConfig = $this->initializeWikiForAssignments($bot, $assignments, $visibility);
 		$this->botToolMapper->deleteByBot($bot->getId());
 		$now = time();
-		
+
 		foreach ($assignments as $assignment) {
 			$botTool = new BotTool();
 			$botTool->setBotId($bot->getId());
 			$botTool->setCreatedAt($now);
 			$botTool->setUpdatedAt($now);
-			
+
 			if ($assignment['is_builtin']) {
 				// Built-in tool: store by name
 				$botTool->setBuiltInToolName($assignment['builtin_name']);
@@ -2277,7 +2279,7 @@ class BotService {
 				$botTool->setToolId($tool->getId());
 				$botTool->setBuiltInToolName(null);
 			}
-			
+
 			$config = $assignment['config'];
 			$botTool->setConfigOverride(count($config) > 0 ? (json_encode($config) ?: '{}') : null);
 			$this->botToolMapper->insert($botTool);
@@ -2635,7 +2637,7 @@ class BotService {
 			$builtinName = null;
 			$isBuiltin = false;
 			$config = [];
-			
+
 			if (is_array($entry)) {
 				// Check if it's a built-in tool
 				if (isset($entry['is_builtin']) && $entry['is_builtin'] === true) {
@@ -2654,7 +2656,7 @@ class BotService {
 				$isBuiltin = true;
 				$builtinName = substr($entry, 8);
 			}
-			
+
 			// Validate assignment
 			if ($isBuiltin) {
 				if ($builtinName === null || $builtinName === '') {

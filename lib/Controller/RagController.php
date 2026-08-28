@@ -15,9 +15,10 @@ use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\UrlContentFetcher;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\DataResponse;
-use OCP\IRequest;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
+use OCP\IL10N;
+use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
 class RagController extends Controller {
@@ -30,6 +31,7 @@ class RagController extends Controller {
     private IRootFolder $rootFolder;
     private ?string $userId;
     private LoggerInterface $logger;
+    private IL10N $l10n;
 
     public function __construct(
         string $appName,
@@ -42,7 +44,8 @@ class RagController extends Controller {
         PermissionService $permissionService,
         IRootFolder $rootFolder,
         ?string $userId,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        IL10N $l10n,
     ) {
         parent::__construct($appName, $request);
         $this->botService = $botService;
@@ -54,6 +57,7 @@ class RagController extends Controller {
         $this->rootFolder = $rootFolder;
         $this->userId = $userId;
         $this->logger = $logger;
+        $this->l10n = $l10n;
     }
 
     /**
@@ -63,7 +67,7 @@ class RagController extends Controller {
         try {
             $bot = $this->botService->getBot($botId);
             if (!$this->canViewSources($bot)) {
-                return new DataResponse(['error' => 'Unauthorized'], 403);
+                return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
             }
 
             $sources = $this->botSourceMapper->findByBot($botId);
@@ -76,13 +80,17 @@ class RagController extends Controller {
                 'bot_id' => $botId,
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse(
+                'rag_sources_load_failed',
+                $this->l10n->t('Failed to load knowledge sources'),
+                400,
+            );
         }
     }
 
     /**
      * @NoAdminRequired
-     * 
+     *
      * Add a new source to a bot. Supports two types:
      * - File/folder: pass nodeId and nodeType ('file' or 'folder')
      * - URL: pass sourceUrl (nodeType will be set to 'url')
@@ -90,12 +98,12 @@ class RagController extends Controller {
     public function store(int $botId, ?int $nodeId = null, ?string $nodeType = null, ?string $sourceUrl = null): DataResponse {
         try {
             if ($this->userId === null) {
-                return new DataResponse(['error' => 'Unauthorized'], 401);
+                return $this->errorResponse('not_authenticated', $this->l10n->t('Unauthorized'), 401);
             }
 
             $bot = $this->botService->getBot($botId);
             if (!$this->canManageSources($bot)) {
-                return new DataResponse(['error' => 'Unauthorized'], 403);
+                return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
             }
 
             // Determine source type: URL or file/folder
@@ -105,11 +113,15 @@ class RagController extends Controller {
 
             // File/folder source
             if ($nodeId === null || $nodeType === null) {
-                return new DataResponse(['error' => 'Either sourceUrl or nodeId+nodeType must be provided'], 400);
+                return $this->errorResponse(
+                    'rag_source_required',
+                    $this->l10n->t('Either a source URL or a file or folder must be provided.'),
+                    400,
+                );
             }
 
             if (!in_array($nodeType, ['file', 'folder'], true)) {
-                return new DataResponse(['error' => 'Invalid node type'], 400);
+                return $this->errorResponse('rag_node_type_invalid', $this->l10n->t('Invalid source type'), 400);
             }
 
             $existing = $this->botSourceMapper->findOneByBotAndNode($botId, $nodeId);
@@ -135,7 +147,11 @@ class RagController extends Controller {
                 'bot_id' => $botId,
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse(
+                'rag_source_add_failed',
+                $this->l10n->t('Failed to add the knowledge source'),
+                400,
+            );
         }
     }
 
@@ -145,7 +161,11 @@ class RagController extends Controller {
     private function storeUrlSource(int $botId, string $sourceUrl): DataResponse {
         // Validate URL
         if (!$this->urlContentFetcher->isValidUrl($sourceUrl)) {
-            return new DataResponse(['error' => 'Invalid URL. Only http:// and https:// URLs are allowed.'], 400);
+            return $this->errorResponse(
+                'rag_url_invalid',
+                $this->l10n->t('Invalid URL. Only http:// and https:// URLs are allowed.'),
+                400,
+            );
         }
 
         // Check for duplicate
@@ -177,6 +197,15 @@ class RagController extends Controller {
         $data = $source->jsonSerialize();
         $data['path'] = null;
         $data['display_name'] = null;
+        $hasProcessingError = $source->getStatus() === 'error'
+            && $source->getErrorMessage() !== null
+            && $source->getErrorMessage() !== '';
+        $data['error_message'] = $hasProcessingError
+            ? $this->l10n->t('The knowledge source could not be processed.')
+            : null;
+        $data['source_error_code'] = $hasProcessingError
+            ? 'knowledge_source_processing_failed'
+            : null;
 
         // Handle URL sources differently
         if ($source->getNodeType() === 'url') {
@@ -259,7 +288,7 @@ class RagController extends Controller {
         try {
             $bot = $this->botService->getBot($botId);
             if (!$this->canManageSources($bot)) {
-                return new DataResponse(['error' => 'Unauthorized'], 403);
+                return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
             }
 
             $source = $this->getLinkedSource($botId, $sourceId);
@@ -274,7 +303,11 @@ class RagController extends Controller {
                 'source_id' => $sourceId,
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse(
+                'rag_source_delete_failed',
+                $this->l10n->t('Failed to delete the knowledge source'),
+                400,
+            );
         }
     }
 
@@ -285,7 +318,7 @@ class RagController extends Controller {
         try {
             $bot = $this->botService->getBot($botId);
             if (!$this->canManageSources($bot)) {
-                return new DataResponse(['error' => 'Unauthorized'], 403);
+                return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
             }
 
             $source = $this->getLinkedSource($botId, $sourceId);
@@ -299,7 +332,11 @@ class RagController extends Controller {
                 'source_id' => $sourceId,
                 'exception' => $e,
             ]);
-            return new DataResponse(['error' => $e->getMessage()], 400);
+            return $this->errorResponse(
+                'rag_source_reindex_failed',
+                $this->l10n->t('Failed to reindex the knowledge source'),
+                400,
+            );
         }
     }
 
@@ -313,5 +350,12 @@ class RagController extends Controller {
         }
 
         return $source;
+    }
+
+    private function errorResponse(string $errorCode, string $error, int $status): DataResponse {
+        return new DataResponse([
+            'error' => $error,
+            'errorCode' => $errorCode,
+        ], $status);
     }
 }

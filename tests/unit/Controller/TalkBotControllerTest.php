@@ -12,6 +12,7 @@ use OCA\EducAI\Service\BotService;
 use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 use PHPUnit\Framework\TestCase;
@@ -29,6 +30,7 @@ class TalkBotControllerTest extends TestCase {
 
 		$this->assertSame(401, $response->getStatus());
 		$this->assertSame('Not authenticated', $response->getData()['error']);
+		$this->assertSame('not_authenticated', $response->getData()['errorCode']);
 	}
 
 	public function testRoomsMapsAndSortsAccessibleConversations(): void {
@@ -88,6 +90,7 @@ class TalkBotControllerTest extends TestCase {
 			'You do not have permission to enable bots in this conversation. Only moderators can enable bots.',
 			$response->getData()['error']
 		);
+		$this->assertSame('talk_bot_enable_forbidden', $response->getData()['errorCode']);
 	}
 
 	public function testEnableBotKeepsAlreadyEnabledResponseIdempotentForNonModerators(): void {
@@ -269,6 +272,8 @@ class TalkBotControllerTest extends TestCase {
 
 		$this->assertSame(502, $response->getStatus());
 		$this->assertStringContainsString('Talk could not complete this action right now', $response->getData()['error']);
+		$this->assertStringNotContainsString('HTTP 500', $response->getData()['error']);
+		$this->assertSame('talk_start_failed', $response->getData()['errorCode']);
 	}
 
 	private function createController(
@@ -276,7 +281,7 @@ class TalkBotControllerTest extends TestCase {
 		?IRequest $request = null,
 		?string $userId = 'alice',
 		?BotMapper $botMapper = null,
-		?BotService $botService = null
+		?BotService $botService = null,
 	): TalkBotController {
 		$request ??= $this->createRequest();
 
@@ -299,8 +304,22 @@ class TalkBotControllerTest extends TestCase {
 			$botMapper ?? $this->createMock(BotMapper::class),
 			$botService ?? $this->createMock(BotService::class),
 			$this->createMock(LoggerInterface::class),
-			$userId
+			$userId,
+			$this->createL10n(),
 		);
+	}
+
+	private function createL10n(): IL10N {
+		$builder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$builder->addMethods(['t']);
+		}
+		$l10n = $builder->getMock();
+		$l10n->method('t')->willReturnCallback(static function (string $text, array $parameters = []): string {
+			return $parameters === [] ? $text : vsprintf($text, $parameters);
+		});
+
+		return $l10n;
 	}
 
 	private function createRequest(array $params = []): IRequest {

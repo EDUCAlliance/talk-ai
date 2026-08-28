@@ -67,7 +67,7 @@
 				<div v-if="bot.rag_enabled && bot.rag_source_count > 0" class="detail-section">
 					<div class="rag-info">
 						<IconBookOpenVariant :size="18" />
-						<span>{{ t('educai', 'Has access to {count} knowledge source(s)', { count: bot.rag_source_count }) }}</span>
+						<span>{{ n('educai', 'Has access to %n knowledge source', 'Has access to %n knowledge sources', bot.rag_source_count) }}</span>
 					</div>
 				</div>
 
@@ -101,6 +101,8 @@
 <script>
 import axios from '@nextcloud/axios'
 import { APP_DISPLAY_NAME } from '../branding.js'
+import { t } from '../l10n.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 
@@ -246,9 +248,10 @@ export default {
 					this.$emit('bot-enabled')
 				} catch (error) {
 					console.error('Failed to enable bot:', error)
-					const errorMessage = error.response?.data?.error
-						?? t('educai', 'Failed to enable {name} bot', { name: APP_DISPLAY_NAME })
-					showError(errorMessage)
+					showError(getApiErrorMessage(
+						error,
+						t('educai', 'Failed to enable {name} bot', { name: APP_DISPLAY_NAME }),
+					))
 					this.enabling = false
 					return
 				}
@@ -271,7 +274,7 @@ export default {
 	position: fixed;
 	z-index: 10000;
 	top: 0;
-	left: 0;
+	inset-inline-start: 0;
 	width: 100%;
 	height: 100%;
 	background: rgba(0, 0, 0, 0.5);

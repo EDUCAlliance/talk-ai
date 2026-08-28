@@ -8,11 +8,34 @@ use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Service\PermissionService;
 use OCP\App\IAppManager;
 use OCP\IGroupManager;
+use OCP\IL10N;
 use OCP\IUserManager;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class PermissionServiceTest extends TestCase {
+	public function testAvailableVisibilityLabelsUseRequestLocale(): void {
+		$l10nBuilder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$l10nBuilder->addMethods(['t']);
+		}
+		$l10n = $l10nBuilder->getMock();
+		$l10n->method('t')->willReturnCallback(static fn (string $text): string => 'translated:' . $text);
+		$service = $this->createScopedPermissionService(
+			static fn (string $userId): bool => true,
+			static fn (string $userId): array => [],
+			static fn (string $userId): array => [],
+			$l10n,
+		);
+
+		$options = $service->getAvailableVisibilities('admin');
+
+		$this->assertSame('translated:Just for me (personal)', $options[0]['label']);
+		$this->assertSame('translated:Global (available to all users)', $options[1]['label']);
+		$this->assertSame('translated:Specific groups', $options[2]['label']);
+		$this->assertSame('translated:Specific teams', $options[3]['label']);
+	}
+
 	public function testCanApproveBotRequiresMatchingScope(): void {
 		$service = $this->createPermissionService(false, ['group-a', 'group-b'], []);
 		$bot = $this->createBot('owner', 'groups', ['group-a', 'group-b']);
@@ -85,14 +108,17 @@ class PermissionServiceTest extends TestCase {
 	private function createScopedPermissionService(
 		callable $isAdminResolver,
 		callable $adminGroupsResolver,
-		callable $adminTeamsResolver
+		callable $adminTeamsResolver,
+		?IL10N $l10n = null,
 	): PermissionService {
+		$l10n ??= $this->createL10n();
 		$service = $this->getMockBuilder(PermissionService::class)
 			->setConstructorArgs([
 				$this->createMock(IGroupManager::class),
 				$this->createMock(IUserManager::class),
 				$this->createMock(IAppManager::class),
 				$this->createMock(LoggerInterface::class),
+				$l10n,
 			])
 			->onlyMethods(['isAdmin', 'getAdminGroups', 'getAdminTeams'])
 			->getMock();
@@ -102,6 +128,17 @@ class PermissionServiceTest extends TestCase {
 		$service->method('getAdminTeams')->willReturnCallback($adminTeamsResolver);
 
 		return $service;
+	}
+
+	private function createL10n(): IL10N {
+		$builder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$builder->addMethods(['t']);
+		}
+		$l10n = $builder->getMock();
+		$l10n->method('t')->willReturnCallback(static fn (string $text): string => $text);
+
+		return $l10n;
 	}
 
 	/**

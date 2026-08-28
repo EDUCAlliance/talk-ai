@@ -40,6 +40,7 @@ use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\AttachmentResolver;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolProvider;
+use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\EmbeddingClient;
@@ -409,6 +410,10 @@ class Application extends App implements IBootstrap {
 			);
 		});
 
+		$context->registerService(BuiltInToolUiService::class, function (IContainer $c) {
+			return new BuiltInToolUiService($c->get(\OCP\IL10N::class));
+		});
+
 		$context->registerService(\OCA\EducAI\ToolProvider\ToolProviderRegistry::class, function (IContainer $c) {
 			return new \OCA\EducAI\ToolProvider\ToolProviderRegistry(
 				$c->get(BuiltInToolProvider::class),
@@ -455,7 +460,8 @@ class Application extends App implements IBootstrap {
 				$c->get(\OCP\IGroupManager::class),
 				$c->get(\OCP\IUserManager::class),
 				$c->get(\OCP\App\IAppManager::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(\OCP\IL10N::class)
 			);
 		});
 

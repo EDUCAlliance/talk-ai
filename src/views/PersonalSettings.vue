@@ -3,16 +3,16 @@
 		<header class="personal-header">
 			<div>
 				<h2>{{ APP_DISPLAY_NAME }}</h2>
-				<p>Manage your bots and review your own AI activity.</p>
+				<p>{{ t('educai', 'Manage your bots and review your own AI activity.') }}</p>
 			</div>
-			<nav class="personal-tabs" :aria-label="APP_DISPLAY_NAME + ' personal settings'">
+			<nav class="personal-tabs" :aria-label="t('educai', '{appName} personal settings', { appName: APP_DISPLAY_NAME })">
 				<button
 					type="button"
 					class="tab-button"
 					:class="{ active: activeView === 'bots' }"
 					@click="setView('bots')">
 					<span class="icon-comment" />
-					My bots
+					{{ t('educai', 'My bots') }}
 				</button>
 				<button
 					type="button"
@@ -20,7 +20,7 @@
 					:class="{ active: activeView === 'activity' }"
 					@click="setView('activity')">
 					<span class="icon-search" />
-					Activity
+					{{ t('educai', 'Activity') }}
 				</button>
 			</nav>
 		</header>
