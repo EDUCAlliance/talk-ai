@@ -24,6 +24,7 @@ Funded by the European Union. Views and opinions expressed are however those of 
 	<version>2.40.0</version>
 	<licence>agpl</licence>
 	<author mail="nextcloud.apps@educalliance.eu" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
+	<author>Giovanni Fonseca</author>
 	<namespace>EducAI</namespace>
 	<category>tools</category>
 	<bugs>https://github.com/EDUCAlliance/talk-ai/issues</bugs>
