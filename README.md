@@ -117,6 +117,11 @@ Funded by the European Union. Views and opinions expressed are however those of 
 
 Talk AI is developed **by [EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant (hence the `educai` package id). The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–34 install.
 
+### Project team
+
+- **Pascal Kienast** — Lead developer and author
+- **Giovanni Fonseca** — Product Owner and co-author
+
 Deployment-specific functionality (e.g. EDUC's course-catalogue search) lives in separate companion apps that plug into the [tool-provider extension point](docs/TOOL_PROVIDERS.md) — the core stays clean.
 
 Contributions welcome. Licensed under **AGPL-3.0-or-later**.

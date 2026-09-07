@@ -6,7 +6,12 @@
 		{
 			"name": "Pascal Kienast",
 			"email": "nextcloud.apps@educalliance.eu",
-			"homepage": "https://educalliance.eu"
+			"homepage": "https://educalliance.eu",
+			"role": "Lead Developer"
+		},
+		{
+			"name": "Giovanni Fonseca",
+			"role": "Product Owner"
 		}
 	],
 	"autoload": {
