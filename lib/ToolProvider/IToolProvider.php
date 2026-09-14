@@ -17,6 +17,7 @@ namespace OCA\EducAI\ToolProvider;
  *
  *   [
  *     'name'        => 'my_tool',              // unique tool name (snake_case)
+ *     'aliases'     => ['old_tool_name'],      // optional saved-loadout aliases
  *     'description' => '...',                  // LLM-facing description
  *     'schema'      => [...],                  // JSON schema for the arguments
  *     'policy'      => [...],                  // execution policy, see ToolExecutionPolicyService
@@ -31,6 +32,8 @@ interface IToolProvider {
 	 * May return an empty array when the provider is not configured/enabled.
 	 * This is called when assembling the tool loadout for a bot and when
 	 * listing available tools in the UI.
+	 * Optional aliases resolve existing assignments to the canonical name;
+	 * canonical assignments take priority and are the only model-facing name.
 	 *
 	 * @return array<int,array<string,mixed>>
 	 */

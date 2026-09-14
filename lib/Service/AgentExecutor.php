@@ -1127,15 +1127,26 @@ class AgentExecutor {
 
 		// Get available built-in tool definitions from provider
 		$builtInToolDefs = $this->toolProviderRegistry->getAvailableTools();
+		$availableNames = array_column($builtInToolDefs, 'name');
 		foreach ($builtInToolDefs as $toolDef) {
 			$name = $toolDef['name'] ?? null;
 			if (!is_string($name)) {
 				continue;
 			}
 
-			$isAssigned = in_array($name, $assignedBuiltInNames, true);
-
-			if (!$isAssigned) {
+			$assignedName = in_array($name, $assignedBuiltInNames, true) ? $name : null;
+			// Providers may retain old loadout names without exposing duplicate tools
+			// or rewriting saved bot assignments. Canonical assignments take priority.
+			if ($assignedName === null && is_array($toolDef['aliases'] ?? null)) {
+				foreach ($toolDef['aliases'] as $alias) {
+					if (is_string($alias) && !in_array($alias, $availableNames, true)
+						&& in_array($alias, $assignedBuiltInNames, true)) {
+						$assignedName = $alias;
+						break;
+					}
+				}
+			}
+			if ($assignedName === null) {
 				continue;
 			}
 
@@ -1154,13 +1165,13 @@ class AgentExecutor {
 			$builtIn[$name] = [
 				'name' => $name,
 				'definition' => $definition,
-				'config' => $assignedBuiltInConfigs[$name] ?? [],
+				'config' => $assignedBuiltInConfigs[$assignedName] ?? [],
 				'policy' => $policy,
 			];
 			// Also add to map for schema filtering
 			$map[$name] = [
 				'tool' => null, // No MCP tool for built-in
-				'config' => $assignedBuiltInConfigs[$name] ?? [],
+				'config' => $assignedBuiltInConfigs[$assignedName] ?? [],
 				'definition' => $definition,
 				'invokeName' => $name,
 				'policy' => $policy,

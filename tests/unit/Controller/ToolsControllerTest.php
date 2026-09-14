@@ -8,6 +8,7 @@ use OCA\EducAI\Controller\ToolsController;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Service\BuiltInToolProvider;
 use OCA\EducAI\Service\BuiltInToolUiService;
+use OCA\EducAI\Service\CatalogueClient;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\McpClient;
@@ -57,10 +58,40 @@ class ToolsControllerTest extends TestCase {
 		$this->assertStringNotContainsString('secret', $response->getData()['error']);
 	}
 
+	public function testCatalogueConnectionUsesUnsavedEndpointWithoutChangingSettings(): void {
+		$catalogueClient = $this->createMock(CatalogueClient::class);
+		$catalogueClient->expects($this->once())->method('testConnection')
+			->with('https://catalogue.example/api')->willReturn(['success' => true, 'version' => '1.0', 'error' => null]);
+		$controller = $this->createController(
+			$this->createMock(ToolRegistry::class),
+			$this->createMock(ToolProviderRegistry::class),
+			$this->createL10n(),
+			$catalogueClient,
+		);
+
+		$this->assertSame(['success' => true, 'error' => null], $controller->testCatalogue('https://catalogue.example/api')->getData());
+	}
+
+	public function testCatalogueConnectionFailureUsesSafeTranslatedError(): void {
+		$catalogueClient = $this->createMock(CatalogueClient::class);
+		$catalogueClient->method('testConnection')->willReturn(['success' => false, 'version' => null, 'error' => 'upstream-private-error']);
+		$controller = $this->createController(
+			$this->createMock(ToolRegistry::class),
+			$this->createMock(ToolProviderRegistry::class),
+			$this->createL10n(),
+			$catalogueClient,
+		);
+
+		$response = $controller->testCatalogue();
+		$this->assertFalse($response->getData()['success']);
+		$this->assertSame('translated:Catalogue connection test failed', $response->getData()['error']);
+	}
+
 	private function createController(
 		ToolRegistry $toolRegistry,
 		ToolProviderRegistry $providerRegistry,
 		IL10N $l10n,
+		?CatalogueClient $catalogueClient = null,
 	): ToolsController {
 		return new ToolsController(
 			'educai',
@@ -78,6 +109,7 @@ class ToolsControllerTest extends TestCase {
 			$this->createMock(LoggerInterface::class),
 			$l10n,
 			new BuiltInToolUiService($l10n),
+			$catalogueClient ?? $this->createMock(CatalogueClient::class),
 		);
 	}
 

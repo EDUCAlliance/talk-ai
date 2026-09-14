@@ -61,6 +61,8 @@ class BotService {
 	private ?WikiRootRegistryService $wikiRootRegistryService;
 	private ?WikiLocationService $wikiLocationService;
 	private ?TraceService $traceService;
+	private BrandingService $brandingService;
+	private WikiPathService $wikiPathService;
 
 	public function __construct(
 		BotMapper $botMapper,
@@ -86,6 +88,8 @@ class BotService {
 		?WikiRootRegistryService $wikiRootRegistryService = null,
 		?WikiLocationService $wikiLocationService = null,
 		?TraceService $traceService = null,
+		?BrandingService $brandingService = null,
+		?WikiPathService $wikiPathService = null,
 	) {
 		$this->botMapper = $botMapper;
 		$this->conversationMapper = $conversationMapper;
@@ -110,6 +114,8 @@ class BotService {
 		$this->wikiRootRegistryService = $wikiRootRegistryService;
 		$this->wikiLocationService = $wikiLocationService;
 		$this->traceService = $traceService;
+		$this->brandingService = $brandingService ?? new BrandingService();
+		$this->wikiPathService = $wikiPathService ?? new WikiPathService($this->brandingService);
 	}
 
 	/**
@@ -985,12 +991,12 @@ class BotService {
 		}
 		if ($hasWikiTools) {
 			$systemPrompt .= "\n\n## Wiki Instructions\n";
-			$systemPrompt .= 'You have access to a persistent ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . " Markdown wiki for this bot. Use it for durable knowledge, not temporary chat context.\n";
+			$systemPrompt .= 'You have access to a persistent ' . $this->brandingService->getDisplayName() . " Markdown wiki for this bot. Use it for durable knowledge, not temporary chat context.\n";
 			$systemPrompt .= "Search the wiki before answering questions about durable personal or bot knowledge.\n";
 			$systemPrompt .= "When `wiki_read_page` returns `has_more=true`, continue reading with `offset=next_offset` before finishing any incomplete file review. If you intentionally stop before the full file was reviewed, explicitly mention the page path and `next_offset` needed to continue.\n";
 			$systemPrompt .= "Only save new information when the user explicitly asks you to save, remember, document, or maintain it.\n";
 			$systemPrompt .= "If the user explicitly asks you to write, save, document, or remember information in the wiki, call `wiki_write_page` before claiming that it was written or saved.\n";
-			$systemPrompt .= 'After accepted wiki updates, check whether `index.md` needs a curated overview update: add or revise short summaries, topic/entity groupings, important pages, open questions, or synthesis notes. Leave the `Existing Files` section to ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . " automation.\n";
+			$systemPrompt .= 'After accepted wiki updates, check whether `index.md` needs a curated overview update: add or revise short summaries, topic/entity groupings, important pages, open questions, or synthesis notes. Leave the `Existing Files` section to ' . $this->brandingService->getDisplayName() . " automation.\n";
 			$systemPrompt .= "Append a concise event to `log.md` after accepted wiki updates.\n";
 			$systemPrompt .= "Treat the wiki tool response as authoritative for where a page was stored.\n";
 		}
@@ -2591,36 +2597,7 @@ class BotService {
 	}
 
 	private function normalizeWikiRootPath(string $path): string {
-		$path = trim(str_replace('\\', '/', $path));
-		if ($path === '') {
-			throw new Exception('Wiki root path is required.');
-		}
-		if (str_starts_with($path, '/')) {
-			throw new Exception('Wiki root path must be relative.');
-		}
-		if (preg_match('/[\x00-\x1F\x7F]/', $path) === 1) {
-			throw new Exception('Wiki root path contains an invalid character.');
-		}
-
-		$path = trim($path, '/');
-		if (!str_starts_with($path, \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/')) {
-			throw new Exception('Wiki root path must start with ' . \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/.');
-		}
-		if (strlen($path) > 512) {
-			throw new Exception('Wiki root path is too long.');
-		}
-
-		$segments = explode('/', $path);
-		foreach ($segments as $segment) {
-			if ($segment === '' || $segment === '.' || $segment === '..') {
-				throw new Exception('Wiki root path must not contain empty, current, or parent segments.');
-			}
-			if (str_starts_with($segment, '.')) {
-				throw new Exception('Wiki root path must not target hidden/internal folders.');
-			}
-		}
-
-		return implode('/', $segments);
+		return $this->wikiPathService->normalizeRootPath($path);
 	}
 
 	/**

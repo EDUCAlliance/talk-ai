@@ -63,6 +63,10 @@ return [
 		['name' => 'tools#destroy', 'url' => '/api/v1/admin/tools/{id}', 'verb' => 'DELETE'],
 		['name' => 'tools#test', 'url' => '/api/v1/admin/tools/test', 'verb' => 'POST'],
 
+		['name' => 'settings#embeddingStatus', 'url' => '/api/v1/admin/embeddings/status', 'verb' => 'GET'],
+		['name' => 'settings#catalogueStatus', 'url' => '/api/v1/admin/catalogue/status', 'verb' => 'GET'],
+		['name' => 'settings#catalogueReindex', 'url' => '/api/v1/admin/catalogue/reindex', 'verb' => 'POST'],
+		['name' => 'tools#testCatalogue', 'url' => '/api/v1/admin/catalogue/test', 'verb' => 'POST'],
 		['name' => 'settings#reindexAllEmbeddings', 'url' => '/api/v1/admin/embeddings/reindex-all', 'verb' => 'POST'],
 
 		// Provider health-check routes

@@ -27,7 +27,8 @@ class SettingsService {
 		SettingsMapper $mapper,
 		CredentialService $credentialService,
 		TalkBotRegistrationService $talkBotRegistrationService,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		private EmbeddingConfigurationService $embeddingConfiguration,
 	) {
 		$this->mapper = $mapper;
 		$this->credentialService = $credentialService;
@@ -216,6 +217,7 @@ class SettingsService {
 		?string $appIconWhiteUrl = null
 	): Settings {
 		$settings = $this->mapper->getSettings();
+		$previousSettings = clone $settings;
 		$shouldSyncTalkBot = false;
 		$talkBotSecret = '';
 		
@@ -367,6 +369,7 @@ class SettingsService {
 		$settings->setUpdatedAt(time());
 
 		$updatedSettings = $this->mapper->update($settings);
+		$this->embeddingConfiguration->recordChange($previousSettings, $updatedSettings);
 
 		if ($shouldSyncTalkBot) {
 			$this->talkBotRegistrationService->syncRegistration($talkBotSecret);

@@ -26,6 +26,7 @@ class WikiRootRegistryService {
 	private IRootFolder $rootFolder;
 	private WikiLocationService $wikiLocationService;
 	private LoggerInterface $logger;
+	private WikiPathService $wikiPathService;
 
 	public function __construct(
 		BotMapper $botMapper,
@@ -34,7 +35,8 @@ class WikiRootRegistryService {
 		WikiRootBotMapper $rootBotMapper,
 		IRootFolder $rootFolder,
 		WikiLocationService $wikiLocationService,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		?WikiPathService $wikiPathService = null
 	) {
 		$this->botMapper = $botMapper;
 		$this->botToolMapper = $botToolMapper;
@@ -43,6 +45,7 @@ class WikiRootRegistryService {
 		$this->rootFolder = $rootFolder;
 		$this->wikiLocationService = $wikiLocationService;
 		$this->logger = $logger;
+		$this->wikiPathService = $wikiPathService ?? new WikiPathService();
 	}
 
 	/**
@@ -163,11 +166,11 @@ class WikiRootRegistryService {
 			throw new Exception('Team bots can use LLM Wiki only with a collective wiki location.');
 		}
 
+		$userFolder = $this->rootFolder->getUserFolder($bot->getUserId());
 		$rootPath = isset($config['wiki_root_path']) && is_string($config['wiki_root_path']) && trim($config['wiki_root_path']) !== ''
 			? $this->normalizeWikiRootPath($config['wiki_root_path'])
-			: \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/Personal Wikis/' . $this->slugify($bot->getMentionName() !== '' ? $bot->getMentionName() : $bot->getBotName());
+			: $this->wikiPathService->getDefaultPath($userFolder, $this->slugify($bot->getMentionName() !== '' ? $bot->getMentionName() : $bot->getBotName()));
 
-		$userFolder = $this->rootFolder->getUserFolder($bot->getUserId());
 		$node = $userFolder->get($rootPath);
 		if (!$node instanceof Folder) {
 			throw new Exception('Wiki root path is not a folder.');
@@ -264,20 +267,7 @@ class WikiRootRegistryService {
 	}
 
 	private function normalizeWikiRootPath(string $path): string {
-		$path = trim(str_replace('\\', '/', $path));
-		$path = trim($path, '/');
-		if ($path === '' || !str_starts_with($path, \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/')) {
-			throw new Exception('Invalid wiki root path.');
-		}
-		if (strlen($path) > 512) {
-			throw new Exception('Wiki root path is too long.');
-		}
-		foreach (explode('/', $path) as $segment) {
-			if ($segment === '' || $segment === '.' || $segment === '..' || str_starts_with($segment, '.')) {
-				throw new Exception('Invalid wiki root path segment.');
-			}
-		}
-		return $path;
+		return $this->wikiPathService->normalizeRootPath($path);
 	}
 
 	private function slugify(string $value): string {

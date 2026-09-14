@@ -8,6 +8,7 @@ use Exception;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Exception\TalkApiException;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\BrandingService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Http\DataResponse;
@@ -24,7 +25,7 @@ use Psr\Log\LoggerInterface;
  * in conversations, which is required for the bot to receive messages.
  */
 class TalkBotController extends Controller {
-	private const EDUC_AI_BOT_NAME = \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME;
+	private BrandingService $brandingService;
 
 	private IClientService $clientService;
 	private IURLGenerator $urlGenerator;
@@ -45,6 +46,7 @@ class TalkBotController extends Controller {
 		LoggerInterface $logger,
 		?string $userId,
 		IL10N $l10n,
+		?BrandingService $brandingService = null,
 	) {
 		parent::__construct($appName, $request);
 		$this->clientService = $clientService;
@@ -55,6 +57,7 @@ class TalkBotController extends Controller {
 		$this->logger = $logger;
 		$this->userId = $userId;
 		$this->l10n = $l10n;
+		$this->brandingService = $brandingService ?? new BrandingService();
 	}
 
 	/**
@@ -136,12 +139,12 @@ class TalkBotController extends Controller {
 			$educAiBot = $this->findEducAiBot($bots);
 
 			if ($educAiBot === null) {
-				$this->logger->warning(self::EDUC_AI_BOT_NAME . ' bot not found in Talk', [
+				$this->logger->warning($this->brandingService->getDisplayName() . ' bot not found in Talk', [
 					'roomToken' => $roomToken,
 				]);
 				return $this->errorResponse(
 					'talk_bot_not_registered',
-					$this->l10n->t('%s bot is not registered in Talk. Please ask an administrator to register it.', [self::EDUC_AI_BOT_NAME]),
+					$this->l10n->t('%s bot is not registered in Talk. Please ask an administrator to register it.', [$this->brandingService->getDisplayName()]),
 					404,
 				);
 			}
@@ -172,7 +175,7 @@ class TalkBotController extends Controller {
 			// Enable the bot
 			$this->enableBotInRoom($roomToken, $botId);
 
-			$this->logger->info(self::EDUC_AI_BOT_NAME . ' bot enabled in room', [
+			$this->logger->info($this->brandingService->getDisplayName() . ' bot enabled in room', [
 				'roomToken' => $roomToken,
 				'botId' => $botId,
 				'userId' => $this->userId,
@@ -416,7 +419,7 @@ class TalkBotController extends Controller {
 
 		if ($educAiBot === null) {
 			throw new TalkApiException(
-				self::EDUC_AI_BOT_NAME . ' bot is not registered in Talk. Please ask an administrator to register it.',
+				$this->brandingService->getDisplayName() . ' bot is not registered in Talk. Please ask an administrator to register it.',
 				404,
 				'',
 				'bot_not_registered',
@@ -565,8 +568,9 @@ class TalkBotController extends Controller {
 	 * @return array|null Bot data or null if not found
 	 */
 	private function findEducAiBot(array $bots): ?array {
+		$managedId = $this->brandingService->getManagedTalkBotId();
 		foreach ($bots as $bot) {
-			if (($bot['name'] ?? '') === self::EDUC_AI_BOT_NAME) {
+			if ($managedId !== null ? (int)($bot['id'] ?? 0) === $managedId : ($bot['name'] ?? '') === $this->brandingService->getDisplayName()) {
 				return $bot;
 			}
 		}
@@ -606,7 +610,7 @@ class TalkBotController extends Controller {
 	private function formatStartChatTalkError(TalkApiException $e): string {
 		$status = $e->getStatusCode();
 		if ($e->getReason() === 'bot_not_registered') {
-			return $this->l10n->t('%s bot is not registered in Talk. Please ask an administrator to register it.', [self::EDUC_AI_BOT_NAME]);
+			return $this->l10n->t('%s bot is not registered in Talk. Please ask an administrator to register it.', [$this->brandingService->getDisplayName()]);
 		}
 		if ($status === 403) {
 			return $this->l10n->t('You do not have permission to enable bots in this conversation. Only moderators can enable bots.');

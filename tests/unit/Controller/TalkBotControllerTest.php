@@ -9,16 +9,37 @@ use OCA\EducAI\Controller\TalkBotController;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\BrandingService;
 use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
 use OCP\IL10N;
+use OCP\IConfig;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class TalkBotControllerTest extends TestCase {
+	public function testStatusUsesManagedIdEvenBeforeARegistrationNameRefresh(): void {
+		$client = $this->createMock(IClient::class);
+		$client->method('get')->willReturnOnConsecutiveCalls(
+			$this->createResponse(['ocs' => ['data' => ['participantType' => 3]]]),
+			$this->createResponse(['ocs' => ['data' => [
+				['id' => 99, 'name' => 'Campus Assistant', 'state' => 0],
+				['id' => 42, 'name' => 'EDUC AI', 'state' => 1],
+			]]]),
+		);
+		$config = $this->createMock(IConfig::class);
+		$config->method('getAppValue')->willReturnCallback(static fn (string $app, string $key, string $default): string => [
+			'talk_bot_id' => '42', 'display_name' => 'Campus Assistant',
+		][$key] ?? $default);
+		$response = $this->createController($client, null, 'alice', null, null, new BrandingService($config))->status('room-token');
+		$this->assertSame(200, $response->getStatus());
+		$this->assertSame(42, $response->getData()['educAiBotId']);
+		$this->assertTrue($response->getData()['botEnabled']);
+	}
+
 	public function testRoomsRequiresAuthenticatedUser(): void {
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->never())->method('get');
@@ -282,6 +303,7 @@ class TalkBotControllerTest extends TestCase {
 		?string $userId = 'alice',
 		?BotMapper $botMapper = null,
 		?BotService $botService = null,
+		?BrandingService $brandingService = null,
 	): TalkBotController {
 		$request ??= $this->createRequest();
 
@@ -306,6 +328,7 @@ class TalkBotControllerTest extends TestCase {
 			$this->createMock(LoggerInterface::class),
 			$userId,
 			$this->createL10n(),
+			$brandingService,
 		);
 	}
 

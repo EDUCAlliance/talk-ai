@@ -29,6 +29,7 @@ It connects Talk messages, per-bot system prompts, any **OpenAI-compatible** mod
 - **Bring your own model.** Any OpenAI-compatible chat / model-list / embedding / vision / speech endpoint. Primary + optional secondary endpoint, plus an automatic fallback model on eligible timeouts or connection failures.
 - **Knowledge (RAG).** Index Nextcloud files and folders; optional Docling conversion for PDF, Office and image formats. Bots answer from your documents.
 - **Agentic tools.** Built-in tools for document search, room-document search, image analysis, audio transcription and persistent Markdown wikis — plus an **extension point** so companion apps can contribute their own tools, and **MCP** servers admins approve and users assign per bot.
+- **One configurable package.** Optional course catalogue integration, central reindex/status controls and persistent instance branding (including EDUC AI). See [the unified-package upgrade guide](docs/UNIFIED_PACKAGE.md) and [OCC branding commands](docs/ADMIN_BRANDING.md).
 - **Native Talk integration.** Shared Talk bot, Smart Picker support, signature-verified webhooks.
 
 ## Screenshots

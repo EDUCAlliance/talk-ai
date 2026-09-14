@@ -6,6 +6,7 @@ namespace OCA\EducAI\Reference;
 
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\BrandingService;
 use OCP\Collaboration\Reference\ADiscoverableReferenceProvider;
 use OCP\Collaboration\Reference\Reference;
 use OCP\IL10N;
@@ -28,7 +29,8 @@ class BotReferenceProvider extends ADiscoverableReferenceProvider {
 		private AppIconService $appIconService,
 		private IL10N $l10n,
 		private LoggerInterface $logger,
-		private ?string $userId
+		private ?string $userId,
+		private BrandingService $brandingService,
 	) {
 		$this->logger->debug('[EducAI] BotReferenceProvider constructed', [
 			'userId' => $this->userId,
@@ -46,7 +48,7 @@ class BotReferenceProvider extends ADiscoverableReferenceProvider {
 	 * @inheritDoc
 	 */
 	public function getTitle(): string {
-		return \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME;
+		return $this->brandingService->getDisplayName();
 	}
 
 	/**
