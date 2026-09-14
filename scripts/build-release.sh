@@ -23,7 +23,9 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
 	exit 1
 fi
 
-BUILD_ROOT="$(mktemp -d)"
+TEMP_BASE="$SOURCE_ROOT/build/.release-tmp"
+mkdir -p "$TEMP_BASE"
+BUILD_ROOT="$(mktemp -d "$TEMP_BASE/build.XXXXXX")"
 trap 'rm -rf "$BUILD_ROOT"' EXIT
 
 WORK_ROOT="$BUILD_ROOT/source"
@@ -34,7 +36,7 @@ ARTIFACT="$OUTPUT_DIRECTORY/$APP_NAME-$VERSION.tar.gz"
 mkdir -p "$WORK_ROOT" "$PACKAGE_ROOT" "$OUTPUT_DIRECTORY"
 
 rsync -a \
-	--exclude '/.git/' \
+	--exclude '/.git'  \
 	--exclude '/build/' \
 	--exclude '/node_modules/' \
 	--exclude '/vendor/' \

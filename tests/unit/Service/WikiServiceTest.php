@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\Service;
 use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Service\BrandingService;
 use OCA\EducAI\Service\TextSessionResetService;
 use OCA\EducAI\Service\WikiLocationService;
 use OCA\EducAI\Service\WikiService;
@@ -14,10 +15,53 @@ use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
+use OCP\IConfig;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class WikiServiceTest extends TestCase {
+	public function testDisplayNameChangeKeepsTheInternalWikiRootAndExistingContent(): void {
+		$root = new InMemoryRootFolder();
+		$bot = $this->createBot('alice', '@studybot', 'personal');
+		$values = ['display_name' => 'EDUC AI', 'wiki_root_folder' => 'EDUC AI'];
+		$config = $this->createMock(IConfig::class);
+		$config->method('getAppValue')->willReturnCallback(static function (string $app, string $key, string $default) use (&$values): string {
+			return $values[$key] ?? $default;
+		});
+		$config->method('setAppValue')->willReturnCallback(static function (string $app, string $key, string $value) use (&$values): void {
+			$values[$key] = $value;
+		});
+		$branding = new BrandingService($config);
+		$service = $this->createService($root, $bot, null, null, $branding);
+		$service->writePage(42, 'pages/existing.md', 'Preserve me');
+		$branding->setDisplayName('Campus Assistant');
+		$this->assertSame('Campus Assistant', $branding->getDisplayName());
+		$this->assertSame('Preserve me', $service->readPage(42, 'pages/existing.md')['content']);
+		$this->assertSame('EDUC AI/Personal Wikis/studybot', $service->readPage(42, 'pages/existing.md')['wiki_root']);
+	}
+
+	public function testOlderPrivateDefaultFolderIsReusedWithoutCreatingPublicDuplicate(): void {
+		$root = new InMemoryRootFolder();
+		$existing = $root->getUserFolder('alice')->newFolder('EDUC AI')->newFolder('Personal Wikis')->newFolder('studybot');
+		$existing->newFile('existing.md')->putContent('Legacy knowledge');
+		$service = $this->createService($root, $this->createBot('alice', '@studybot', 'personal'));
+		$this->assertSame('Legacy knowledge', $service->readPage(42, 'existing.md')['content']);
+		$this->assertSame('EDUC AI/Personal Wikis/studybot', $service->initializeWiki(42)['wiki_root']);
+		$this->expectException(NotFoundException::class);
+		$root->getUserFolder('alice')->get('Talk AI');
+	}
+
+	public function testWhenBothLegacyDefaultsExistConfiguredRootWins(): void {
+		$root = new InMemoryRootFolder();
+		foreach (['Talk AI', 'EDUC AI'] as $prefix) {
+			$existing = $root->getUserFolder('alice')->newFolder($prefix)->newFolder('Personal Wikis')->newFolder('studybot');
+			$existing->newFile('existing.md')->putContent($prefix);
+		}
+		$service = $this->createService($root, $this->createBot('alice', '@studybot', 'personal'));
+		$this->assertSame('Talk AI', $service->readPage(42, 'existing.md')['content']);
+		$this->assertSame('EDUC AI', $service->readPage(42, 'existing.md', ['wiki_root_path' => 'EDUC AI/Personal Wikis/studybot'])['content']);
+	}
+
 	public function testPersonalBotWritesPageDirectly(): void {
 		$root = new InMemoryRootFolder();
 		$bot = $this->createBot('alice', '@studybot', 'personal');
@@ -350,7 +394,8 @@ class WikiServiceTest extends TestCase {
 		InMemoryRootFolder $root,
 		Bot $bot,
 		?WikiLocationService $wikiLocationService = null,
-		?TextSessionResetService $textSessionResetService = null
+		?TextSessionResetService $textSessionResetService = null,
+		?BrandingService $brandingService = null
 	): WikiService {
 		$botMapper = $this->createMock(BotMapper::class);
 		$botMapper->method('findById')->with(42)->willReturn($bot);
@@ -363,7 +408,8 @@ class WikiServiceTest extends TestCase {
 			$botMapper,
 			$this->createMock(LoggerInterface::class),
 			$wikiLocationService,
-			$textSessionResetService
+			$textSessionResetService,
+			$brandingService
 		);
 	}
 

@@ -390,8 +390,11 @@
 							</div>
 							<div v-if="formData.personalWikiLocation === 'personal_files'">
 								<p class="hint">
-									{{ t('educai', 'Default path:') }}
+									{{ t('educai', 'Default path for new wikis:') }}
 									<code>{{ defaultPersonalWikiPath }}</code>
+								</p>
+								<p class="hint">
+									{{ t('educai', 'Existing wiki folders are kept in their current location when the app name changes.') }}
 								</p>
 								<details
 									class="advanced-settings"
@@ -406,7 +409,7 @@
 											:placeholder="WIKI_ROOT_FOLDER + '/Personal Wikis/my-bot'"
 											@input="markPersonalWikiChanged">
 										<p class="hint">
-											{{ t('educai', 'Optional. Leave blank to use the default path. Custom paths must be relative and start with {prefix}.', { prefix: WIKI_ROOT_FOLDER + '/' }) }}
+											{{ t('educai', 'Optional. Leave blank to reuse the existing wiki or use the default for a new wiki. Paths must be relative and start with {prefix}; existing Talk AI/ and EDUC AI/ paths are also supported.', { prefix: WIKI_ROOT_FOLDER + '/' }) }}
 										</p>
 									</div>
 								</details>
@@ -631,6 +634,7 @@ import { getClient, defaultRootPath, getDefaultPropfind, resultToNode } from '@n
 import NcProgressBar from '@nextcloud/vue/dist/Components/NcProgressBar.js'
 import { getCanonicalLocale, t } from '../l10n.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
+import { normalizeToolSelectionAliases } from '../utils/toolAliases.js'
 
 const WIKI_BUILT_IN_TOOLS = new Set([
 	'wiki_search',
@@ -1182,6 +1186,7 @@ export default {
 				this.availableTools = Array.isArray(tools)
 					? tools.filter(t => !(t.is_builtin && (t.builtin_name === 'rag_search_documents' || this.isWikiTool(t))))
 					: []
+				this.normalizeToolSelectionAliases()
 			} catch (e) {
 				this.availableTools = []
 			} finally {
@@ -1377,7 +1382,13 @@ export default {
 			this.personalWikiChanged = false
 			this.formData.selectedTools = this.sanitizeSelectedToolsForVisibility(selected)
 			this.toolConfigs = configs
+			this.normalizeToolSelectionAliases()
 			this.removeUnavailableSelectedTools()
+		},
+		normalizeToolSelectionAliases() {
+			const normalized = normalizeToolSelectionAliases(this.formData.selectedTools, this.toolConfigs, this.availableTools)
+			this.formData.selectedTools = normalized.selected
+			this.toolConfigs = normalized.configs
 		},
 		async loadRagSources() {
 			if (!this.isEditing) {

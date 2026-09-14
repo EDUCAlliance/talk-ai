@@ -1274,6 +1274,53 @@ class AgentExecutorTest extends TestCase {
 		$this->assertSame(['query' => 'x'], $result['toolInvocations'][0]['arguments']);
 	}
 
+	public function testLegacyCatalogueAssignmentAdvertisesAndCallsCanonicalToolWithSavedConfig(): void {
+		$definition = $this->searchToolDefinition('catalogue_search') + ['aliases' => ['catalogue_search_courses']];
+		[$executor, $llmClient, $toolRegistry, $toolProvider] = $this->createHarness([$definition]);
+		$toolRegistry->expects($this->once())->method('getBuiltInToolsForBot')->with(42)
+			->willReturn([['name' => 'catalogue_search_courses', 'config' => ['scope' => 'preserved']]]);
+		$toolProvider->expects($this->once())->method('executeTool')
+			->with('catalogue_search', ['query' => 'physics'], ['scope' => 'preserved'])
+			->willReturn(['content' => [['type' => 'text', 'text' => 'Physics course']]]);
+		$this->expectSyncTurns(
+			$llmClient,
+			[
+				$this->turn('', [$this->toolCall('legacy-catalogue', 'catalogue_search', '{"query":"physics"}')], 'tool_calls'),
+				$this->turn('Physics course found', [], 'stop'),
+			],
+			function (int $index, array $messages, array $knownToolNames, array $options): void {
+				$this->assertSame(['catalogue_search'], $knownToolNames);
+				$this->assertSame(['catalogue_search'], array_column(array_column($options['tools'], 'function'), 'name'));
+			}
+		);
+
+		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find physics']], [], ['bot_id' => 42]);
+		$this->assertSame('completed', $result['status']);
+		$this->assertSame('Physics course found', $result['content']);
+		$this->assertCount(1, $result['toolInvocations']);
+	}
+
+	public function testCanonicalAssignmentTakesPriorityOverItsLegacyAlias(): void {
+		$definition = $this->searchToolDefinition('catalogue_search') + ['aliases' => ['catalogue_search_courses']];
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$definition]);
+		$toolProvider->expects($this->once())->method('executeTool')
+			->with('catalogue_search', ['query' => 'physics'], ['scope' => 'canonical'])
+			->willReturn(['text' => 'Physics course']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('canonical-catalogue', 'catalogue_search', '{"query":"physics"}')], 'tool_calls'),
+			$this->turn('Done', [], 'stop'),
+		]);
+
+		$result = $executor->run('system', [['role' => 'user', 'content' => 'Find physics']], [], [
+			'built_in_tools' => [
+				['name' => 'catalogue_search_courses', 'config' => ['scope' => 'legacy']],
+				['name' => 'catalogue_search', 'config' => ['scope' => 'canonical']],
+			],
+		]);
+		$this->assertSame('completed', $result['status']);
+		$this->assertCount(1, $result['toolInvocations']);
+	}
+
 	public function testExplicitEmptyBuiltInLoadoutIsAuthoritativeWithBotId(): void {
 		[$executor, $llmClient, $toolRegistry, $toolProvider] = $this->createHarness([
 			$this->toolDefinition(BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE),

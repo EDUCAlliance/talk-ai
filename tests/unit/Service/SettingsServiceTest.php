@@ -48,7 +48,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -88,7 +89,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -134,7 +136,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -183,7 +186,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -252,7 +256,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -299,7 +304,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -335,7 +341,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$this->expectException(\InvalidArgumentException::class);
@@ -369,7 +376,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -404,7 +412,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$this->expectException(\InvalidArgumentException::class);
@@ -437,7 +446,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$this->expectException(\InvalidArgumentException::class);
@@ -474,7 +484,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$this->expectException(\InvalidArgumentException::class);
@@ -518,7 +529,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -568,7 +580,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -613,7 +626,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$talkBotRegistrationService,
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$result = $service->updateSettings(
@@ -644,7 +658,8 @@ class SettingsServiceTest extends TestCase {
 			$mapper,
 			$credentialService,
 			$this->createMock(TalkBotRegistrationService::class),
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
 		);
 
 		$mapper->method('getSettings')->willReturn($settings);

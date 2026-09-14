@@ -25,14 +25,20 @@ class WikiService {
 	private LoggerInterface $logger;
 	private ?WikiLocationService $wikiLocationService;
 	private TextSessionResetService $textSessionResetService;
+	private BrandingService $brandingService;
+	private WikiPathService $wikiPathService;
 
 	public function __construct(
 		IRootFolder $rootFolder,
 		BotMapper $botMapper,
 		LoggerInterface $logger,
 		?WikiLocationService $wikiLocationService = null,
-		?TextSessionResetService $textSessionResetService = null
+		?TextSessionResetService $textSessionResetService = null,
+		?BrandingService $brandingService = null,
+		?WikiPathService $wikiPathService = null
 	) {
+		$this->brandingService = $brandingService ?? new BrandingService();
+		$this->wikiPathService = $wikiPathService ?? new WikiPathService($this->brandingService);
 		$this->rootFolder = $rootFolder;
 		$this->botMapper = $botMapper;
 		$this->logger = $logger;
@@ -257,11 +263,12 @@ class WikiService {
 			}
 		}
 		$slug = $this->slugify($bot->getMentionName() !== '' ? $bot->getMentionName() : $bot->getBotName());
-		$rootPath = \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/Personal Wikis/' . $slug;
 		if ($location === 'personal_files' && isset($config['wiki_root_path']) && is_string($config['wiki_root_path']) && trim($config['wiki_root_path']) !== '') {
 			$rootPath = $this->normalizeWikiRootPath($config['wiki_root_path']);
 		} elseif ($location === 'collective') {
 			$rootPath = 'Collective #' . $collectiveId;
+		} else {
+			$rootPath = $this->wikiPathService->getDefaultPath($this->rootFolder->getUserFolder($bot->getUserId()), $slug);
 		}
 
 		return [
@@ -334,7 +341,7 @@ class WikiService {
 	 */
 	private function ensureDefaultFiles(Folder $wikiRoot, array $context): void {
 		$defaults = [
-			'index.md' => "# Index\n\nThis wiki is maintained by " . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ".\n\n## Pages\n",
+			'index.md' => "# Index\n\nThis wiki is maintained by " . $this->brandingService->getDisplayName() . ".\n\n## Pages\n",
 			'log.md' => "# Log\n\n## [" . date('Y-m-d H:i') . "] wiki | Initialized\n- Wiki root: " . $context['root_path'] . "\n- Location: " . $context['location'] . "\n- Visibility: " . $context['visibility'] . "\n",
 			'schema.md' => $this->defaultSchema($context),
 		];
@@ -366,7 +373,7 @@ class WikiService {
 			}
 			$content = (string)$node->getContent();
 		} catch (NotFoundException $e) {
-			$content = "# Index\n\nThis wiki is maintained by " . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ".\n";
+			$content = "# Index\n\nThis wiki is maintained by " . $this->brandingService->getDisplayName() . ".\n";
 		}
 
 		$nextContent = $this->upsertManagedIndexBlock($content, $managedBlock);
@@ -471,7 +478,7 @@ class WikiService {
 			. "- Search the wiki before answering questions about durable knowledge.\n"
 			. "- Keep `index.md` as the content-oriented map of the wiki: short summaries, topic/entity groupings, important pages, current synthesis, open questions, and useful entry points.\n"
 			. "- Review `index.md` after accepted wiki updates and update the curated overview when new or changed pages affect navigation or synthesis.\n"
-			. "- The `Existing Files` section in `index.md` is maintained automatically by " . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . " and should not be rewritten manually.\n"
+			. "- The `Existing Files` section in `index.md` is maintained automatically by " . $this->brandingService->getDisplayName() . " and should not be rewritten manually.\n"
 			. "- Append a concise entry to `log.md` for every accepted wiki update.\n"
 			. "- Mark contradictions and uncertainty instead of silently replacing claims.\n"
 			. "- Use Markdown links between related pages.\n"
@@ -479,36 +486,7 @@ class WikiService {
 	}
 
 	private function normalizeWikiRootPath(string $path): string {
-		$path = trim(str_replace('\\', '/', $path));
-		if ($path === '') {
-			throw new Exception('Wiki root path is required.');
-		}
-		if (str_starts_with($path, '/')) {
-			throw new Exception('Wiki root path must be relative.');
-		}
-		if (preg_match('/[\x00-\x1F\x7F]/', $path) === 1) {
-			throw new Exception('Wiki root path contains an invalid character.');
-		}
-
-		$path = trim($path, '/');
-		if (!str_starts_with($path, \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/')) {
-			throw new Exception('Wiki root path must start with ' . \OCA\EducAI\AppInfo\Application::WIKI_ROOT_FOLDER . '/.');
-		}
-		if (strlen($path) > 512) {
-			throw new Exception('Wiki root path is too long.');
-		}
-
-		$segments = explode('/', $path);
-		foreach ($segments as $segment) {
-			if ($segment === '' || $segment === '.' || $segment === '..') {
-				throw new Exception('Wiki root path must not contain empty, current, or parent segments.');
-			}
-			if (str_starts_with($segment, '.')) {
-				throw new Exception('Wiki root path must not target hidden/internal folders.');
-			}
-		}
-
-		return implode('/', $segments);
+		return $this->wikiPathService->normalizeRootPath($path);
 	}
 
 	private function normalizePagePath(string $path): string {

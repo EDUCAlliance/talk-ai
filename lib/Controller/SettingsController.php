@@ -7,13 +7,12 @@ namespace OCA\EducAI\Controller;
 use Exception;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
-use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\EmbeddingAdminService;
 use OCA\EducAI\Service\LLMClient;
-use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\SettingsService;
 use OCA\EducAI\Service\TraceService;
@@ -22,7 +21,6 @@ use OCP\App\IAppManager;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Http\DataResponse;
-use OCP\BackgroundJob\IJobList;
 use OCP\IGroupManager;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -36,9 +34,6 @@ class SettingsController extends Controller {
 	private SettingsService $settingsService;
 	private LLMClient $llmClient;
 	private RateLimitService $rateLimitService;
-	private RagIngestionService $ragIngestionService;
-	private BotSourceMapper $botSourceMapper;
-	private IJobList $jobList;
 	private BotService $botService;
 	private BotMapper $botMapper;
 	private TalkHandler $talkHandler;
@@ -57,9 +52,6 @@ class SettingsController extends Controller {
 		SettingsService $settingsService,
 		LLMClient $llmClient,
 		RateLimitService $rateLimitService,
-		RagIngestionService $ragIngestionService,
-		BotSourceMapper $botSourceMapper,
-		IJobList $jobList,
 		BotService $botService,
 		BotMapper $botMapper,
 		TalkHandler $talkHandler,
@@ -71,14 +63,12 @@ class SettingsController extends Controller {
 		LoggerInterface $logger,
 		TraceService $traceService,
 		IL10N $l10n,
+		private EmbeddingAdminService $embeddingAdmin,
 	) {
 		parent::__construct($appName, $request);
 		$this->settingsService = $settingsService;
 		$this->llmClient = $llmClient;
 		$this->rateLimitService = $rateLimitService;
-		$this->ragIngestionService = $ragIngestionService;
-		$this->botSourceMapper = $botSourceMapper;
-		$this->jobList = $jobList;
 		$this->botService = $botService;
 		$this->botMapper = $botMapper;
 		$this->talkHandler = $talkHandler;
@@ -898,31 +888,54 @@ class SettingsController extends Controller {
 
 	/**
 	 * @AdminRequired
-	 * Queue reindex for all embeddings (all bot RAG sources)
+	 */
+	public function embeddingStatus(): DataResponse {
+		try {
+			return new DataResponse($this->embeddingAdmin->getStatus());
+		} catch (Exception $e) {
+			$this->logger->error('Failed to load embedding status', ['exception' => $e]);
+			return $this->errorResponse('embedding_status_failed', $this->l10n->t('Failed to load embedding status'), 500);
+		}
+	}
+
+	/**
+	 * @AdminRequired
+	 */
+	public function catalogueStatus(): DataResponse {
+		try {
+			return new DataResponse($this->embeddingAdmin->getCatalogueStatus());
+		} catch (Exception $e) {
+			$this->logger->error('Failed to load Catalogue status', ['exception' => $e]);
+			return $this->errorResponse('catalogue_status_failed', $this->l10n->t('Failed to load catalogue status'), 500);
+		}
+	}
+
+	/**
+	 * @AdminRequired
+	 * Queue only: never run remote Catalogue ingestion inside the HTTP request.
+	 */
+	public function catalogueReindex(): DataResponse {
+		try {
+			$queued = $this->embeddingAdmin->queueCatalogue();
+			return new DataResponse(['success' => true, 'queued' => $queued, 'already_queued' => !$queued]);
+		} catch (\InvalidArgumentException $e) {
+			return $this->errorResponse('catalogue_disabled', $this->l10n->t('Catalogue integration is not enabled'), 400);
+		} catch (Exception $e) {
+			$this->logger->error('Failed to queue Catalogue reindex', ['exception' => $e]);
+			return $this->errorResponse('catalogue_reindex_failed', $this->l10n->t('Failed to queue catalogue reindex'), 500);
+		}
+	}
+
+	/**
+	 * @AdminRequired
+	 * Queue all enabled scopes; report partial failures without losing accepted counts.
 	 */
 	public function reindexAllEmbeddings(): DataResponse {
 		try {
-			$sources = $this->botSourceMapper->findAll();
-			$queuedRagSources = 0;
-			foreach ($sources as $source) {
-				$this->ragIngestionService->enqueueSource($source->getId(), true);
-				$queuedRagSources++;
-			}
-
-			return new DataResponse([
-				'success' => true,
-				'queued_rag_sources' => $queuedRagSources,
-				'message' => $this->l10n->t('Reindex jobs queued. Processing happens via background jobs.'),
-			]);
+			return new DataResponse($this->embeddingAdmin->queueAll());
 		} catch (Exception $e) {
-			$this->logger->error('Failed to queue global embedding reindex', [
-				'exception' => $e,
-			]);
-			return new DataResponse([
-				'success' => false,
-				'error' => $this->l10n->t('Failed to queue reindex jobs'),
-				'errorCode' => 'reindex_failed',
-			], 500);
+			$this->logger->error('Failed to queue global embedding reindex', ['exception' => $e]);
+			return $this->errorResponse('reindex_failed', $this->l10n->t('Failed to queue reindex jobs'), 500);
 		}
 	}
 

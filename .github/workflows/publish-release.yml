@@ -31,7 +31,15 @@ env:
   APP_NAME: educai
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ github.event.release.tag_name || inputs.tag }}
+    permissions:
+      contents: read
+
   build-and-publish:
+    needs: validate
     name: Build, sign and publish
     runs-on: ubuntu-latest
     timeout-minutes: 25

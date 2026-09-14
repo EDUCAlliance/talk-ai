@@ -452,7 +452,10 @@
 				</div>
 			</section>
 
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('rag') }">
+			<section ref="embeddingSettings"
+class="accordion-section"
+tabindex="-1"
+:class="{ 'accordion-section--open': isSectionOpen('rag') }">
 				<button
 					type="button"
 					class="accordion-header"
@@ -460,8 +463,8 @@
 					:aria-controls="sectionId('rag')"
 					@click="toggleSection('rag')">
 					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'RAG & Embeddings') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Knowledge retrieval, embedding provider, limits, and chunking.') }}</span>
+						<span class="accordion-title">{{ t('educai', 'Embeddings / Knowledge sources') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Reindex all sources, monitor progress and configure embeddings.') }}</span>
 					</span>
 					<span class="accordion-meta" :class="{ 'accordion-meta--warning': hasPendingEmbeddingConfigChange }">
 						{{ ragSummary }}
@@ -472,6 +475,12 @@
 					v-show="isSectionOpen('rag')"
 					:id="sectionId('rag')"
 					class="accordion-panel">
+					<EmbeddingMaintenance
+						:pending-changes="hasPendingIndexSettings"
+						:saving="saving"
+						:active="isSectionOpen('rag')"
+						:refresh-key="indexRefreshKey"
+						@save-settings="saveSettings" />
 					<div class="section-heading">
 						<h4>{{ t('educai', 'Retrieval-Augmented Generation') }}</h4>
 						<p class="hint">
@@ -636,6 +645,47 @@
 				</p>
 			</div>
 		</div>
+				</div>
+			</section>
+
+			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('catalogue') }">
+				<button type="button"
+class="accordion-header"
+:aria-expanded="String(isSectionOpen('catalogue'))"
+:aria-controls="sectionId('catalogue')"
+@click="toggleSection('catalogue')">
+					<span class="accordion-heading">
+						<span class="accordion-title">{{ t('educai', 'Course catalogue integration') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Optional course search and catalogue indexing.') }}</span>
+					</span>
+					<span class="accordion-meta">{{ settings.catalogueEnabled ? t('educai', 'Enabled') : t('educai', 'Disabled') }}</span>
+					<span class="accordion-chevron" aria-hidden="true">›</span>
+				</button>
+				<div v-show="isSectionOpen('catalogue')" :id="sectionId('catalogue')" class="accordion-panel">
+					<div class="form-group">
+						<label class="checkbox"><input v-model="settings.catalogueEnabled" type="checkbox">{{ t('educai', 'Enable course catalogue integration') }}</label>
+						<p class="hint">{{ t('educai', 'Disabled by default. When disabled, catalogue tools and automatic requests are unavailable; saved settings and index data are retained. Branding is configured independently.') }}</p>
+					</div>
+					<div class="form-group">
+						<label for="catalogue-endpoint">{{ t('educai', 'Catalogue API endpoint') }}</label>
+						<input id="catalogue-endpoint"
+v-model="settings.catalogueApiEndpoint"
+type="url"
+placeholder="https://catalogue.example.org/api"
+autocomplete="off">
+					</div>
+					<div class="form-group">
+						<label for="catalogue-interval">{{ t('educai', 'Automatic refresh interval (hours)') }}</label>
+						<input id="catalogue-interval"
+v-model.number="settings.catalogueReindexHours"
+type="number"
+min="1"
+step="1">
+					</div>
+					<button type="button" :disabled="catalogueTesting || !settings.catalogueApiEndpoint.trim()" @click="testCatalogue">{{ catalogueTesting ? t('educai', 'Testing…') : t('educai', 'Test catalogue connection') }}</button>
+					<p v-if="catalogueTestResult" role="status">{{ catalogueTestResult }}</p>
+					<p class="hint">{{ t('educai', 'This test contacts the endpoint entered above without saving or enabling the integration.') }}</p>
+					<button type="button" @click="openIndexMaintenance">{{ t('educai', 'Open index maintenance') }}</button>
 				</div>
 			</section>
 
@@ -1358,12 +1408,14 @@ import { showSuccess, showError } from '@nextcloud/dialogs'
 import { t, n, getCanonicalLocale } from '../l10n.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import BotForm from './BotForm.vue'
+import EmbeddingMaintenance from './EmbeddingMaintenance.vue'
 import { applyEducAiRuntimeIconPayload } from '../utils/appIconRuntime.js'
 
 export default {
 	name: 'AdminSettings',
 	components: {
 		BotForm,
+		EmbeddingMaintenance,
 	},
 	data() {
 		return {
@@ -1424,7 +1476,8 @@ export default {
 				essentials: true,
 				modelEndpoints: false,
 				fallbackTimeouts: false,
-				rag: false,
+				rag: true,
+				catalogue: false,
 				docling: false,
 				media: false,
 				limits: false,
@@ -1462,12 +1515,16 @@ export default {
 			rateLimitLoading: false,
 			rateLimitStatus: null,
 			queueProcessing: false,
-			globalEmbeddingReindexing: false,
+			indexRefreshKey: 0,
+			indexSettingsBaseline: { ragEnabled: false, catalogueEnabled: false, catalogueApiEndpoint: '', ragChunkSize: 750, ragChunkOverlap: 50 },
+			catalogueTesting: false,
+			catalogueTestResult: '',
 			embeddingConfigBaseline: {
 				apiProvider: 'custom',
 				apiEndpoint: '',
 				embeddingApiEndpoint: '',
 				embeddingModel: '',
+				defaultModel: '',
 				hasApiKey: false,
 				hasEmbeddingApiKey: false,
 			},
@@ -1490,6 +1547,9 @@ export default {
 		}
 	},
 	computed: {
+		hasPendingIndexSettings() {
+			return this.hasPendingEmbeddingConfigChange || Object.keys(this.indexSettingsBaseline).some(key => String(this.settings[key]).trim() !== String(this.indexSettingsBaseline[key]).trim())
+		},
 		appIconSummary() {
 			if (this.settings.appIconMode === 'custom') {
 				return t('educai', 'Custom')
@@ -1510,6 +1570,7 @@ export default {
 				embeddingApiEndpoint: (this.settings.embeddingApiEndpoint || '').trim(),
 				embeddingApiKey: this.settings.embeddingApiKey ? this.settings.embeddingApiKey : null,
 				embeddingModel: (this.settings.embeddingModel || '').trim(),
+				defaultModel: this.toEndpointModelId(this.settings.defaultModel),
 			}
 			return this.hasEmbeddingConfigChange(payload)
 		},
@@ -1952,6 +2013,7 @@ export default {
 					apiEndpoint: this.settings.apiEndpoint,
 					embeddingApiEndpoint: this.settings.embeddingApiEndpoint,
 					embeddingModel: this.settings.embeddingModel,
+					defaultModel: this.toEndpointModelId(data.default_model),
 					hasApiKey: data.api_key === '***',
 					hasEmbeddingApiKey: data.embedding_api_key === '***',
 				}
@@ -1961,6 +2023,7 @@ export default {
 				this.settings.catalogueEnabled = !!data.catalogue_enabled
 				this.settings.catalogueApiEndpoint = data.catalogue_api_endpoint || ''
 				this.settings.catalogueReindexHours = typeof data.catalogue_reindex_hours === 'number' ? data.catalogue_reindex_hours : 24
+				this.captureIndexSettingsBaseline()
 				this.settings.doclingEnabled = !!data.docling_enabled
 				this.settings.doclingApiEndpoint = data.docling_api_endpoint || ''
 				this.doclingHasStoredApiKey = data.docling_api_key === '***'
@@ -2095,6 +2158,9 @@ export default {
 					payload,
 				)
 				applyEducAiRuntimeIconPayload(response.data, { refreshNavigation: true })
+				this.captureIndexSettingsBaseline(payload)
+				this.indexRefreshKey++
+				if (embeddingConfigChanged) this.openIndexMaintenance()
 				if (embeddingConfigChanged) {
 					showSuccess(t('educai', 'Settings saved. Run "Reindex All Embeddings" now to rebuild vectors for the new embedding configuration.'))
 				} else {
@@ -2102,21 +2168,18 @@ export default {
 				}
 				// Keep baseline in sync after successful save
 				const apiKeyUpdated = !!(payload.apiKey && payload.apiKey.trim() !== '')
-				const secondaryApiKeyUpdated = !!(payload.secondaryApiKey && payload.secondaryApiKey.trim() !== '')
 				const embeddingKeyUpdated = !!(payload.embeddingApiKey && payload.embeddingApiKey.trim() !== '')
 				const doclingKeyUpdated = !!(payload.doclingApiKey && payload.doclingApiKey.trim() !== '')
 				this.doclingHasStoredApiKey = this.doclingHasStoredApiKey || doclingKeyUpdated
-				this.clearSecretInputs()
+				this.clearSecretInputs(payload)
 				this.embeddingConfigBaseline = {
-					apiProvider: this.settings.apiProvider || 'custom',
-					apiEndpoint: this.settings.apiEndpoint,
-					embeddingApiEndpoint: this.settings.embeddingApiEndpoint,
-					embeddingModel: this.settings.embeddingModel,
+					apiProvider: payload.apiProvider || 'custom',
+					apiEndpoint: payload.apiEndpoint,
+					embeddingApiEndpoint: payload.embeddingApiEndpoint,
+					embeddingModel: payload.embeddingModel,
+					defaultModel: payload.defaultModel,
 					hasApiKey: this.embeddingConfigBaseline.hasApiKey || apiKeyUpdated,
 					hasEmbeddingApiKey: this.embeddingConfigBaseline.hasEmbeddingApiKey || embeddingKeyUpdated,
-				}
-				if (secondaryApiKeyUpdated) {
-					this.settings.secondaryApiKey = ''
 				}
 			} catch (error) {
 				console.error('Failed to save settings:', error)
@@ -2125,14 +2188,10 @@ export default {
 				this.saving = false
 			}
 		},
-		clearSecretInputs() {
-			this.settings.apiKey = ''
-			this.settings.secondaryApiKey = ''
-			this.settings.webhookSecret = ''
-			this.settings.embeddingApiKey = ''
-			this.settings.doclingApiKey = ''
-			this.settings.visionApiKey = ''
-			this.settings.speechApiKey = ''
+		clearSecretInputs(saved) {
+			for (const key of ['apiKey', 'secondaryApiKey', 'webhookSecret', 'embeddingApiKey', 'doclingApiKey', 'visionApiKey', 'speechApiKey']) {
+				if ((this.settings[key] || '').trim() === (saved[key] || '').trim()) this.settings[key] = ''
+			}
 		},
 		openCreateTool() {
 			this.resetToolForm()
@@ -2284,13 +2343,13 @@ export default {
 			const nextProvider = (payload.apiProvider || 'custom').trim()
 			const nextApiEndpoint = (payload.apiEndpoint || '').trim()
 			const nextEmbeddingEndpoint = (payload.embeddingApiEndpoint || '').trim()
-			const nextEmbeddingModel = (payload.embeddingModel || '').trim()
+			const nextEmbeddingModel = (payload.embeddingModel || payload.defaultModel || '').trim()
 			const nextEffectiveEndpoint = this.resolveEffectiveEmbeddingEndpoint(nextApiEndpoint, nextEmbeddingEndpoint)
 
 			const baseProvider = (this.embeddingConfigBaseline.apiProvider || 'custom').trim()
 			const baseApiEndpoint = (this.embeddingConfigBaseline.apiEndpoint || '').trim()
 			const baseEmbeddingEndpoint = (this.embeddingConfigBaseline.embeddingApiEndpoint || '').trim()
-			const baseEmbeddingModel = (this.embeddingConfigBaseline.embeddingModel || '').trim()
+			const baseEmbeddingModel = (this.embeddingConfigBaseline.embeddingModel || this.embeddingConfigBaseline.defaultModel || '').trim()
 			const baseEffectiveEndpoint = this.resolveEffectiveEmbeddingEndpoint(baseApiEndpoint, baseEmbeddingEndpoint)
 
 			const embeddingKeyUpdated = !!(payload.embeddingApiKey && payload.embeddingApiKey.trim() !== '')
@@ -2305,34 +2364,34 @@ export default {
 				|| (usesMainKeyForEmbeddings && mainKeyUpdated)
 			)
 		},
+		openIndexMaintenance() {
+			this.openSections.rag = true
+			this.$nextTick(() => {
+				this.$refs.embeddingSettings?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+				this.$refs.embeddingSettings?.focus({ preventScroll: true })
+			})
+		},
+		captureIndexSettingsBaseline(saved = this.settings) {
+			Object.keys(this.indexSettingsBaseline).forEach(key => { this.indexSettingsBaseline[key] = saved[key] })
+		},
+		async testCatalogue() {
+			this.catalogueTesting = true
+			this.catalogueTestResult = ''
+			try {
+				const { data } = await axios.post(generateUrl('/apps/educai/api/v1/admin/catalogue/test'), { catalogueApiEndpoint: this.settings.catalogueApiEndpoint.trim() })
+				this.catalogueTestResult = data.success ? t('educai', 'Catalogue connection successful') : getApiErrorMessage(data, t('educai', 'Catalogue connection failed'))
+			} catch (error) {
+				this.catalogueTestResult = getApiErrorMessage(error, t('educai', 'Catalogue connection failed'))
+			} finally {
+				this.catalogueTesting = false
+			}
+		},
 		resolveEffectiveEmbeddingEndpoint(apiEndpoint, embeddingApiEndpoint) {
 			const embeddingEndpoint = (embeddingApiEndpoint || '').trim()
 			if (embeddingEndpoint !== '') {
 				return embeddingEndpoint
 			}
 			return (apiEndpoint || '').trim()
-		},
-		async reindexAllEmbeddings() {
-			this.globalEmbeddingReindexing = true
-			try {
-				const resp = await axios.post(generateUrl('/apps/educai/api/v1/admin/embeddings/reindex-all'))
-				if (resp.data?.success) {
-					const catalogueJobs = resp.data?.queued_catalogue_jobs ?? 0
-					const ragSources = resp.data?.queued_rag_sources ?? 0
-					showSuccess(t('educai', 'Queued reindex jobs: catalogue={catalogue}, bot sources={sources}', {
-						catalogue: this.formatNumber(catalogueJobs),
-						sources: this.formatNumber(ragSources),
-					}))
-					this.loadCatalogueStatus()
-				} else {
-					showError(getApiErrorMessage(resp, t('educai', 'Failed to queue global embedding reindex')))
-				}
-			} catch (error) {
-				console.error('Failed to queue global embedding reindex', error)
-				showError(getApiErrorMessage(error, t('educai', 'Failed to queue global embedding reindex')))
-			} finally {
-				this.globalEmbeddingReindexing = false
-			}
 		},
 		formatTimestamp(timestamp) {
 			if (!timestamp) return t('educai', 'Never')

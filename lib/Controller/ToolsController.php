@@ -8,6 +8,7 @@ use Exception;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Service\BuiltInToolUiService;
+use OCA\EducAI\Service\CatalogueClient;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\McpClient;
@@ -36,6 +37,7 @@ class ToolsController extends Controller {
     private LoggerInterface $logger;
     private IL10N $l10n;
     private BuiltInToolUiService $builtInToolUiService;
+    private CatalogueClient $catalogueClient;
 
     public function __construct(
         string $appName,
@@ -53,6 +55,7 @@ class ToolsController extends Controller {
         LoggerInterface $logger,
         IL10N $l10n,
         BuiltInToolUiService $builtInToolUiService,
+        CatalogueClient $catalogueClient,
     ) {
         parent::__construct($appName, $request);
         $this->toolMapper = $toolMapper;
@@ -68,6 +71,7 @@ class ToolsController extends Controller {
         $this->logger = $logger;
         $this->l10n = $l10n;
         $this->builtInToolUiService = $builtInToolUiService;
+        $this->catalogueClient = $catalogueClient;
     }
 
     /**
@@ -107,6 +111,10 @@ class ToolsController extends Controller {
                     ),
                     'is_builtin' => true,
                     'builtin_name' => $builtIn['name'],
+                    'aliases' => array_values(array_filter(
+                        is_array($builtIn['aliases'] ?? null) ? $builtIn['aliases'] : [],
+                        static fn ($alias): bool => is_string($alias) && $alias !== '',
+                    )),
                 ];
             }
 
@@ -330,6 +338,20 @@ class ToolsController extends Controller {
             ]);
             return $this->errorResponse('tool_connection_failed', $this->l10n->t('Tool connection test failed'), 400);
         }
+    }
+
+    /**
+     * @AdminRequired
+     * Explicitly test a saved or unsaved Catalogue endpoint, without enabling it.
+     */
+    public function testCatalogue(?string $catalogueApiEndpoint = null): DataResponse {
+        return $this->runConnectionTest(
+            'Catalogue',
+            $catalogueApiEndpoint,
+            fn (): array => $this->catalogueClient->testConnection($catalogueApiEndpoint),
+            'catalogue_connection_failed',
+            $this->l10n->t('Catalogue connection test failed'),
+        );
     }
 
     /**

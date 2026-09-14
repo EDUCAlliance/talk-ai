@@ -20,7 +20,6 @@ use Symfony\Component\Console\Output\ConsoleOutput;
 class TalkBotRegistrationService {
 	public const TALK_APP_ID = 'spreed';
 
-	private const BOT_NAME = \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME;
 	private const BOT_DESCRIPTION = 'Multi-bot AI manager for Nextcloud Talk';
 	private const BOT_FEATURES = 3;
 	private const CONFIG_BOT_ID = 'talk_bot_id';
@@ -34,6 +33,7 @@ class TalkBotRegistrationService {
 	private IURLGenerator $urlGenerator;
 	private IClientService $clientService;
 	private LoggerInterface $logger;
+	private BrandingService $brandingService;
 	private bool $consoleCommandsLoaded = false;
 
 	public function __construct(
@@ -44,7 +44,8 @@ class TalkBotRegistrationService {
 		IRequest $request,
 		IURLGenerator $urlGenerator,
 		IClientService $clientService,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		?BrandingService $brandingService = null
 	) {
 		$this->settingsMapper = $settingsMapper;
 		$this->credentialService = $credentialService;
@@ -54,6 +55,39 @@ class TalkBotRegistrationService {
 		$this->urlGenerator = $urlGenerator;
 		$this->clientService = $clientService;
 		$this->logger = $logger;
+		$this->brandingService = $brandingService ?? new BrandingService($config);
+	}
+
+	/**
+	 * Rename only the app-managed Talk registration, preserving its ID, state,
+	 * secret, features and room memberships. Never rename users' bot definitions.
+	 *
+	 * @return array{status:string,message:string}
+	 */
+	public function updateManagedDisplayName(): array {
+		if (!$this->isTalkAvailable()) {
+			return ['status' => 'skipped', 'message' => 'Branding saved. Talk is not enabled; its registration will use this name when enabled.'];
+		}
+		try {
+			$mapper = $this->getTalkBotServerMapper();
+			if ($mapper === null || !method_exists($mapper, 'findById') || !method_exists($mapper, 'update')) {
+				throw new \RuntimeException('Talk does not support updating the managed registration in place.');
+			}
+			$existing = $this->findRegisteredBotViaTalkMapper($this->getStoredBotUrl() ?: $this->getWebhookUrl());
+			$id = $this->extractBotId($existing);
+			if ($id === null) {
+				return ['status' => 'skipped', 'message' => 'Branding saved. No existing managed Talk registration found; new registrations will use this name.'];
+			}
+			$bot = $mapper->findById($id);
+			if ($bot->getName() !== $this->brandingService->getDisplayName()) {
+				$bot->setName($this->brandingService->getDisplayName());
+				$mapper->update($bot);
+			}
+			return ['status' => 'updated', 'message' => 'Updated the managed Talk display name in place; existing room activations are unchanged.'];
+		} catch (\Throwable $e) {
+			$this->logger->warning('EducAI: Failed to update the managed Talk display name', ['exception' => $e]);
+			return ['status' => 'error', 'message' => 'Branding saved, but the managed Talk name could not be updated. Check the Nextcloud log and rerun this command after resolving the problem.'];
+		}
 	}
 
 	/**
@@ -69,14 +103,14 @@ class TalkBotRegistrationService {
 			if (!$this->isTalkAvailable()) {
 				return [
 					'status' => 'skipped',
-					'message' => 'Nextcloud Talk is not enabled. Skipping EDUC AI bot registration.',
+					'message' => 'Nextcloud Talk is not enabled. Skipping managed Talk bot registration.',
 				];
 			}
 
 			if ($resolvedSecret === '') {
 				return [
 					'status' => 'skipped',
-					'message' => 'Webhook secret is not configured yet. EDUC AI bot registration is deferred.',
+					'message' => 'Webhook secret is not configured yet. Managed Talk bot registration is deferred.',
 				];
 			}
 
@@ -94,7 +128,7 @@ class TalkBotRegistrationService {
 
 			return [
 				'status' => 'error',
-				'message' => 'Failed to sync EDUC AI bot registration: ' . $e->getMessage(),
+				'message' => 'Failed to sync managed Talk bot registration: ' . $e->getMessage(),
 			];
 		}
 	}
@@ -107,7 +141,7 @@ class TalkBotRegistrationService {
 			$this->clearStoredBotMetadata();
 			return [
 				'status' => 'skipped',
-				'message' => 'Nextcloud Talk is not enabled. Cleared stored EDUC AI bot metadata only.',
+				'message' => 'Nextcloud Talk is not enabled. Cleared stored managed Talk bot metadata only.',
 			];
 		}
 
@@ -124,7 +158,7 @@ class TalkBotRegistrationService {
 
 			return [
 				'status' => 'error',
-				'message' => 'Failed to unregister EDUC AI bot: ' . $e->getMessage(),
+				'message' => 'Failed to unregister managed Talk bot: ' . $e->getMessage(),
 			];
 		}
 	}
@@ -199,10 +233,10 @@ class TalkBotRegistrationService {
 			return [
 				'status' => $updatedInPlace ? 'updated' : ($forceRefresh ? 'refreshed' : 'reused'),
 				'message' => $updatedInPlace
-					? 'Updated existing ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ' Talk bot registration in place.'
+					? 'Updated existing ' . $this->brandingService->getDisplayName() . ' Talk bot registration in place.'
 					: ($forceRefresh
-						? 'Reused existing ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ' Talk bot registration without reinstalling it.'
-						: \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ' bot is already registered in Talk.'),
+						? 'Reused existing ' . $this->brandingService->getDisplayName() . ' Talk bot registration without reinstalling it.'
+						: $this->brandingService->getDisplayName() . ' bot is already registered in Talk.'),
 				'bot_id' => $botId,
 			];
 		}
@@ -228,7 +262,7 @@ class TalkBotRegistrationService {
 
 		return [
 			'status' => 'registered',
-			'message' => 'Registered EDUC AI bot with Nextcloud Talk.',
+			'message' => 'Registered the managed bot with Nextcloud Talk.',
 			'bot_id' => $botId,
 		];
 	}
@@ -240,7 +274,7 @@ class TalkBotRegistrationService {
 		if (!$this->hasOcsSessionContext()) {
 			return [
 				'status' => 'skipped',
-				'message' => 'Skipped EDUC AI bot registration because the current request has no usable Talk admin session.',
+				'message' => 'Skipped managed Talk bot registration because the current request has no usable Talk admin session.',
 			];
 		}
 
@@ -260,10 +294,10 @@ class TalkBotRegistrationService {
 			return [
 				'status' => $updatedInPlace ? 'updated' : ($forceRefresh ? 'refreshed' : 'reused'),
 				'message' => $updatedInPlace
-					? 'Updated existing ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ' Talk bot registration in place.'
+					? 'Updated existing ' . $this->brandingService->getDisplayName() . ' Talk bot registration in place.'
 					: ($forceRefresh
-						? 'Reused existing ' . \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ' Talk bot registration without reinstalling it.'
-						: \OCA\EducAI\AppInfo\Application::APP_DISPLAY_NAME . ' bot is already registered in Talk.'),
+						? 'Reused existing ' . $this->brandingService->getDisplayName() . ' Talk bot registration without reinstalling it.'
+						: $this->brandingService->getDisplayName() . ' bot is already registered in Talk.'),
 				'bot_id' => $botId,
 			];
 		}
@@ -289,14 +323,14 @@ class TalkBotRegistrationService {
 
 			return [
 				'status' => 'registered',
-				'message' => 'Registered EDUC AI bot with Nextcloud Talk.',
+				'message' => 'Registered the managed bot with Nextcloud Talk.',
 				'bot_id' => $botId,
 			];
 		}
 
 		return [
 			'status' => 'skipped',
-			'message' => 'Skipped EDUC AI bot registration because the current request has no usable Talk admin session.',
+			'message' => 'Skipped managed Talk bot registration because the current request has no usable Talk admin session.',
 		];
 	}
 
@@ -311,7 +345,7 @@ class TalkBotRegistrationService {
 			$this->clearStoredBotMetadata();
 			return [
 				'status' => 'skipped',
-				'message' => 'No stored EDUC AI Talk bot metadata found.',
+				'message' => 'No stored managed Talk bot metadata found.',
 			];
 		}
 
@@ -320,7 +354,7 @@ class TalkBotRegistrationService {
 
 		return [
 			'status' => 'unregistered',
-			'message' => 'Unregistered EDUC AI bot from Nextcloud Talk.',
+			'message' => 'Unregistered managed Talk bot from Nextcloud Talk.',
 		];
 	}
 
@@ -332,7 +366,7 @@ class TalkBotRegistrationService {
 			$this->clearStoredBotMetadata();
 			return [
 				'status' => 'skipped',
-				'message' => 'Skipped EDUC AI bot removal because the current request has no usable Talk admin session.',
+				'message' => 'Skipped managed Talk bot removal because the current request has no usable Talk admin session.',
 			];
 		}
 
@@ -345,7 +379,7 @@ class TalkBotRegistrationService {
 			$this->clearStoredBotMetadata();
 			return [
 				'status' => 'skipped',
-				'message' => 'No EDUC AI Talk bot registration found to remove.',
+				'message' => 'No managed Talk bot registration found to remove.',
 			];
 		}
 
@@ -354,7 +388,7 @@ class TalkBotRegistrationService {
 
 		return [
 			'status' => 'unregistered',
-			'message' => 'Unregistered EDUC AI bot from Nextcloud Talk.',
+			'message' => 'Unregistered managed Talk bot from Nextcloud Talk.',
 		];
 	}
 
@@ -378,7 +412,7 @@ class TalkBotRegistrationService {
 			'command' => 'talk:bot:install',
 			'--output' => 'json',
 			'--feature' => ['webhook', 'response'],
-			'name' => self::BOT_NAME,
+			'name' => $this->brandingService->getDisplayName(),
 			'secret' => $secret,
 			'url' => $webhookUrl,
 			'description' => self::BOT_DESCRIPTION,
@@ -438,27 +472,6 @@ class TalkBotRegistrationService {
 			}
 		}
 
-		if (!method_exists($mapper, 'getAllBots')) {
-			return null;
-		}
-
-		try {
-			foreach ($mapper->getAllBots() as $bot) {
-				if (!is_object($bot) || !method_exists($bot, 'jsonSerialize')) {
-					continue;
-				}
-
-				$botData = $bot->jsonSerialize();
-				if (($botData['name'] ?? '') === self::BOT_NAME) {
-					return $botData;
-				}
-			}
-		} catch (\Throwable $e) {
-			$this->logger->debug('EducAI: Failed to inspect Talk bot registrations through mapper', [
-				'exception' => $e,
-			]);
-		}
-
 		return null;
 	}
 
@@ -476,8 +489,8 @@ class TalkBotRegistrationService {
 			$bot = $mapper->findById($botId);
 			$changed = false;
 
-			if ((string)$bot->getName() !== self::BOT_NAME) {
-				$bot->setName(self::BOT_NAME);
+			if ((string)$bot->getName() !== $this->brandingService->getDisplayName()) {
+				$bot->setName($this->brandingService->getDisplayName());
 				$changed = true;
 			}
 
@@ -539,7 +552,7 @@ class TalkBotRegistrationService {
 			}
 
 			$bot = new $botClass();
-			$bot->setName(self::BOT_NAME);
+			$bot->setName($this->brandingService->getDisplayName());
 			$bot->setDescription(self::BOT_DESCRIPTION);
 			$bot->setSecret($secret);
 			$bot->setUrl($webhookUrl);
@@ -561,8 +574,8 @@ class TalkBotRegistrationService {
 	private function hasValidTalkBotParameters(string $secret, string $webhookUrl): bool {
 		$secretLength = strlen($secret);
 
-		return strlen(self::BOT_NAME) > 0
-			&& strlen(self::BOT_NAME) <= 64
+		return strlen($this->brandingService->getDisplayName()) > 0
+			&& strlen($this->brandingService->getDisplayName()) <= 64
 			&& $secretLength >= 40
 			&& $secretLength <= 128
 			&& strlen($webhookUrl) <= 4000
@@ -570,7 +583,7 @@ class TalkBotRegistrationService {
 			&& strlen(self::BOT_DESCRIPTION) <= 4000;
 	}
 
-	private function getTalkBotServerMapper(): ?object {
+	protected function getTalkBotServerMapper(): ?object {
 		$mapperClass = 'OCA\\Talk\\Model\\BotServerMapper';
 
 		try {
@@ -628,7 +641,7 @@ class TalkBotRegistrationService {
 			'cookies' => $this->getForwardedCookies(),
 			'query' => ['format' => 'json'],
 			'json' => [
-				'name' => self::BOT_NAME,
+				'name' => $this->brandingService->getDisplayName(),
 				'secret' => $secret,
 				'url' => $webhookUrl,
 				'description' => self::BOT_DESCRIPTION,
@@ -807,12 +820,6 @@ class TalkBotRegistrationService {
 			}
 
 			if (($bot['url'] ?? '') === $webhookUrl) {
-				return $bot;
-			}
-		}
-
-		foreach ($bots as $bot) {
-			if (is_array($bot) && ($bot['name'] ?? '') === self::BOT_NAME) {
 				return $bot;
 			}
 		}

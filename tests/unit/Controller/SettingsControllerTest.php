@@ -71,6 +71,7 @@ class SettingsControllerTest extends TestCase {
 			$this->createMock(TraceService::class),
 			$llmClient,
 			$l10n,
+			$this->createMock(\OCA\EducAI\Service\EmbeddingAdminService::class),
 		);
 
 		$data = $controller->models()->getData();
@@ -950,9 +951,6 @@ class SettingsControllerTest extends TestCase {
 			$this->createMock(SettingsService::class),
 			$llmClient ?? $this->createMock(LLMClient::class),
 			$rateLimitService,
-			$this->createMock(RagIngestionService::class),
-			$this->createMock(BotSourceMapper::class),
-			$this->createMock(IJobList::class),
 			$botService,
 			$botMapper,
 			$talkHandler,
@@ -964,6 +962,7 @@ class SettingsControllerTest extends TestCase {
 			$this->createMock(LoggerInterface::class),
 			$traceService,
 			$l10n,
+			$this->createMock(\OCA\EducAI\Service\EmbeddingAdminService::class),
 		);
 	}
 

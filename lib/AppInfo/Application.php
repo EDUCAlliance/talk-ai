@@ -39,6 +39,7 @@ use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\AttachmentResolver;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\BrandingService;
 use OCA\EducAI\Service\BuiltInToolProvider;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\CredentialService;
@@ -67,6 +68,9 @@ use OCA\EducAI\Service\WikiFileEventSyncService;
 use OCA\EducAI\Service\WikiLocationService;
 use OCA\EducAI\Service\WikiRootRegistryService;
 use OCA\EducAI\Service\WikiService;
+use OCA\EducAI\Service\WikiPathService;
+use OCA\EducAI\ToolProvider\CatalogueToolProviderListener;
+use OCA\EducAI\ToolProvider\CollectToolProvidersEvent;
 use OCA\EducAI\Webhook\TalkAttachmentNormalizer;
 use OCA\EducAI\Webhook\TalkHandler;
 use OCA\EducAI\Webhook\TalkMessageParser;
@@ -75,6 +79,7 @@ use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
 use OCP\AppFramework\Bootstrap\IRegistrationContext;
+use OCP\AppFramework\Services\IInitialState;
 use OCP\BackgroundJob\IJobList;
 use OCP\Collaboration\Reference\RenderReferenceEvent;
 use OCP\Files\Events\Node\NodeCopiedEvent;
@@ -91,9 +96,9 @@ use OCP\IURLGenerator;
 class Application extends App implements IBootstrap {
 
 	public const APP_ID = 'educai';
-	/** User-facing product name (UI, Talk bot name). The private EDUC build overrides this to 'EDUC AI'. */
+	/** Default only. Runtime display names are resolved by BrandingService. */
 	public const APP_DISPLAY_NAME = 'Talk AI';
-	/** Root folder for bot wikis in user storage. MUST NOT change on existing installs (paths are stored in the DB). */
+	/** Default only. Persisted storage roots are independent from display branding. */
 	public const WIKI_ROOT_FOLDER = 'Talk AI';
 	private const WIKI_REGISTRY_BACKFILL_VERSION = '20260504';
 
@@ -103,6 +108,12 @@ class Application extends App implements IBootstrap {
 
 	public function register(IRegistrationContext $context): void {
 		// Register services
+		$context->registerService(BrandingService::class, function (IContainer $c) {
+			return new BrandingService($c->get(IConfig::class));
+		});
+		$context->registerService(WikiPathService::class, function (IContainer $c) {
+			return new WikiPathService($c->get(BrandingService::class));
+		});
 		$context->registerService(BotMapper::class, function (IContainer $c) {
 			return new BotMapper($c->get(\OCP\IDBConnection::class));
 		});
@@ -200,7 +211,8 @@ class Application extends App implements IBootstrap {
 				$c->get(\OCP\IRequest::class),
 				$c->get(\OCP\IURLGenerator::class),
 				$c->get(\OCP\Http\Client\IClientService::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(BrandingService::class)
 			);
 		});
 
@@ -209,7 +221,8 @@ class Application extends App implements IBootstrap {
 				$c->get(SettingsMapper::class),
 				$c->get(CredentialService::class),
 				$c->get(TalkBotRegistrationService::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(\OCA\EducAI\Service\EmbeddingConfigurationService::class)
 			);
 		});
 
@@ -339,7 +352,9 @@ class Application extends App implements IBootstrap {
 				$c->get(BotMapper::class),
 				$c->get(\Psr\Log\LoggerInterface::class),
 				$c->get(WikiLocationService::class),
-				$c->get(TextSessionResetService::class)
+				$c->get(TextSessionResetService::class),
+				$c->get(BrandingService::class),
+				$c->get(WikiPathService::class)
 			);
 		});
 
@@ -372,7 +387,8 @@ class Application extends App implements IBootstrap {
 				$c->get(WikiRootBotMapper::class),
 				$c->get(\OCP\Files\IRootFolder::class),
 				$c->get(WikiLocationService::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(WikiPathService::class)
 			);
 		});
 
@@ -489,7 +505,9 @@ class Application extends App implements IBootstrap {
 				$c->get(RoomImageIngestionService::class),
 				$c->get(WikiRootRegistryService::class),
 				$c->get(WikiLocationService::class),
-				$c->get(TraceService::class)
+				$c->get(TraceService::class),
+				$c->get(BrandingService::class),
+				$c->get(WikiPathService::class)
 			);
 		});
 
@@ -585,7 +603,8 @@ class Application extends App implements IBootstrap {
 
 		$context->registerService(RegisterTalkBotRepairStep::class, function (IContainer $c) {
 			return new RegisterTalkBotRepairStep(
-				$c->get(TalkBotRegistrationService::class)
+				$c->get(TalkBotRegistrationService::class),
+				$c->get(BrandingService::class)
 			);
 		});
 
@@ -613,11 +632,13 @@ class Application extends App implements IBootstrap {
 				$c->get(AppIconService::class),
 				$c->get(\OCP\IL10N::class),
 				$c->get(\Psr\Log\LoggerInterface::class),
-				$c->get(\OCP\IUserSession::class)->getUser()?->getUID()
+				$c->get(\OCP\IUserSession::class)->getUser()?->getUID(),
+				$c->get(BrandingService::class)
 			);
 		});
 
 		$context->registerReferenceProvider(BotReferenceProvider::class);
+		$context->registerEventListener(CollectToolProvidersEvent::class, CatalogueToolProviderListener::class);
 
 		$context->registerEventListener(
 			RenderReferenceEvent::class,
@@ -656,13 +677,17 @@ class Application extends App implements IBootstrap {
 	}
 
 	public function boot(IBootContext $context): void {
-		$context->injectFn(function (INavigationManager $navigationManager, IURLGenerator $urlGenerator, IL10N $l10n, AppIconService $appIconService): void {
-			$navigationManager->add(static function () use ($urlGenerator, $l10n, $appIconService): array {
+		$context->injectFn(function (IInitialState $initialState, BrandingService $brandingService): void {
+			$initialState->provideLazyInitialState('branding', static fn (): array => $brandingService->getPublicState());
+		});
+
+		$context->injectFn(function (INavigationManager $navigationManager, IURLGenerator $urlGenerator, IL10N $l10n, AppIconService $appIconService, BrandingService $brandingService): void {
+			$navigationManager->add(static function () use ($urlGenerator, $l10n, $appIconService, $brandingService): array {
 				return [
 					'id' => self::APP_ID,
 					'order' => 100,
 					'href' => $urlGenerator->linkToRoute('educai.page.index'),
-					'name' => self::APP_DISPLAY_NAME,
+					'name' => $brandingService->getDisplayName(),
 					'icon' => $appIconService->getAppNavigationIcon(),
 					'type' => INavigationManager::TYPE_APPS,
 					'app' => self::APP_ID,
