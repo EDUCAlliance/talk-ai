@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace OCA\EducAI\Migration;
 
 use Closure;
+use Doctrine\DBAL\Types\Type;
 use OCP\DB\ISchemaWrapper;
+use OCP\DB\Schema\IColumn;
 use OCP\DB\Types;
 use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
@@ -32,20 +34,13 @@ class Version022700Date20260116000000 extends SimpleMigrationStep {
 		if ($schema->hasTable('educai_settings')) {
 			$table = $schema->getTable('educai_settings');
 
-			// Change webhook_secret from varchar(255) to text to hold encrypted values
-			// Encrypted values are ~300+ characters
-			if ($table->hasColumn('webhook_secret')) {
-				$column = $table->getColumn('webhook_secret');
-				// Change to TEXT type which can hold large encrypted values
-				$column->setType(\Doctrine\DBAL\Types\Type::getType(Types::TEXT));
-				$column->setLength(null); // TEXT doesn't need length
-			}
-
-			// Change catalogue_api_key from varchar(512) to text for consistency
-			if ($table->hasColumn('catalogue_api_key')) {
-				$column = $table->getColumn('catalogue_api_key');
-				$column->setType(\Doctrine\DBAL\Types\Type::getType(Types::TEXT));
-				$column->setLength(null);
+			foreach (['webhook_secret', 'catalogue_api_key'] as $name) {
+				if ($table->hasColumn($name)) {
+					$column = $table->getColumn($name);
+					// NC35 exposes IColumn; older versions return Doctrine columns.
+					$column->setType($column instanceof IColumn ? Types::TEXT : Type::getType(Types::TEXT));
+					$column->setLength(null);
+				}
 			}
 
 			return $schema;

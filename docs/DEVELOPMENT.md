@@ -1,6 +1,6 @@
 # Development
 
-Build, test, and local verification. Requirements: Nextcloud 30–34, PHP 8.1+, Node.js 22, npm 10.5+. The package scripts expect the app inside a Nextcloud checkout, usually under `apps-extra/educai`.
+Build, test, and local verification. Requirements: Nextcloud 30–35, PHP 8.1+, Node.js 22, npm 10.5+. The package scripts expect the app inside a Nextcloud checkout, usually under `apps-extra/educai`.
 
 ## Frontend
 

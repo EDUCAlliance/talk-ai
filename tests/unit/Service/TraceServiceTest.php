@@ -14,6 +14,41 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class TraceServiceTest extends TestCase {
+	public function testUnicodePreviewsRemainValidWithinStorageLimits(): void {
+		$runMapper = $this->createMock(TraceRunMapper::class);
+		$eventMapper = $this->createMock(TraceEventMapper::class);
+		$capturedRun = null;
+		$capturedEvent = null;
+		$runMapper->expects($this->once())->method('insertRun')
+			->willReturnCallback(static function (TraceRun $run) use (&$capturedRun): TraceRun {
+				$run->setId(7);
+				$capturedRun = $run;
+				return $run;
+			});
+		$eventMapper->expects($this->once())->method('insertEvent')
+			->willReturnCallback(static function (TraceEvent $event) use (&$capturedEvent): TraceEvent {
+				$capturedEvent = $event;
+				return $event;
+			});
+		$service = new TraceService($runMapper, $eventMapper, $this->createMock(LoggerInterface::class));
+		$text = str_repeat('🧪', 2000);
+		$runId = $service->startRun(['user_id' => 'alice', 'user_message' => $text]);
+		$service->recordEvent($runId, 'error', ['payload' => $text, 'result' => $text, 'error_message' => $text]);
+
+		$this->assertSame(7, $runId);
+		foreach ([
+			[$capturedRun->getUserMessagePreview(), 500],
+			[$capturedEvent->getPayloadPreview(), 1000],
+			[$capturedEvent->getResultPreview(), 1000],
+			[$capturedEvent->getErrorMessage(), 4096],
+		] as [$preview, $limit]) {
+			$this->assertTrue(mb_check_encoding($preview, 'UTF-8'));
+			$this->assertLessThanOrEqual($limit, strlen($preview));
+			$this->assertStringEndsWith('...', $preview);
+			$this->assertStringStartsWith(substr($preview, 0, -3), $text);
+		}
+	}
+
 	public function testStartRunCreatesPreviewAndReturnsId(): void {
 		$runMapper = $this->createMock(TraceRunMapper::class);
 		$eventMapper = $this->createMock(TraceEventMapper::class);
