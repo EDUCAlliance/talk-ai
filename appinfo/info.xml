@@ -21,7 +21,7 @@ Developed by EDUC — the European Digital UniverCity (its package id is educai)
 
 Funded by the European Union. Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union or the European Education and Culture Executive Agency (EACEA). Neither the European Union nor EACEA can be held responsible for them.
 	]]></description>
-	<version>2.41.0</version>
+	<version>2.42.0</version>
 	<licence>agpl</licence>
 	<author mail="nextcloud.apps@educalliance.eu" homepage="https://github.com/EDUCAlliance/talk-ai">Pascal Kienast</author>
 	<author>Giovanni Fonseca</author>
@@ -33,7 +33,7 @@ Funded by the European Union. Views and opinions expressed are however those of 
 	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/create-bot.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/admin-settings.png</screenshot>
 	<dependencies>
-		<nextcloud min-version="30" max-version="34"/>
+		<nextcloud min-version="30" max-version="35"/>
 	</dependencies>
 	<navigations>
 		<navigation>

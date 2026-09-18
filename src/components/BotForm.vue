@@ -43,7 +43,7 @@
 								type="text"
 								placeholder="supportbot"
 								:disabled="isEditing"
-								pattern="[a-zA-Z0-9_-]+"
+								pattern="[-a-zA-Z0-9_]+"
 								required>
 						</div>
 						<p class="hint">
