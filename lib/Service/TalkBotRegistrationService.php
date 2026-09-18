@@ -595,7 +595,7 @@ class TalkBotRegistrationService {
 				return null;
 			}
 
-			$mapper = \OC::$server->get($mapperClass);
+			$mapper = \OCP\Server::get($mapperClass);
 			return is_object($mapper) ? $mapper : null;
 		} catch (\Throwable $e) {
 			$this->logger->debug('EducAI: Failed to access Talk bot mapper', [
@@ -722,7 +722,7 @@ class TalkBotRegistrationService {
 	}
 
 	private function runOccCommand(array $arguments): string {
-		$application = \OC::$server->get(ConsoleApplication::class);
+		$application = \OCP\Server::get(ConsoleApplication::class);
 
 		if (!$this->consoleCommandsLoaded) {
 			// Only pass a minimal bootstrap input when loading commands.

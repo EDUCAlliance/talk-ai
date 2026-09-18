@@ -36,21 +36,31 @@ class Version022700Date20260116000000 extends SimpleMigrationStep {
 			// Encrypted values are ~300+ characters
 			if ($table->hasColumn('webhook_secret')) {
 				$column = $table->getColumn('webhook_secret');
-				// Change to TEXT type which can hold large encrypted values
-				$column->setType(\Doctrine\DBAL\Types\Type::getType(Types::TEXT));
-				$column->setLength(null); // TEXT doesn't need length
+				$this->setColumnToText($column);
 			}
 
 			// Change catalogue_api_key from varchar(512) to text for consistency
 			if ($table->hasColumn('catalogue_api_key')) {
 				$column = $table->getColumn('catalogue_api_key');
-				$column->setType(\Doctrine\DBAL\Types\Type::getType(Types::TEXT));
-				$column->setLength(null);
+				$this->setColumnToText($column);
 			}
 
 			return $schema;
 		}
 
 		return null;
+	}
+
+	/**
+	 * Nextcloud 35 wraps Doctrine schema types: setType() takes OCP\DB\Types
+	 * constants. Nextcloud 30–34 still expect a Doctrine Type instance.
+	 */
+	private function setColumnToText(object $column): void {
+		try {
+			$column->setType(Types::TEXT);
+		} catch (\TypeError) {
+			$column->setType(\Doctrine\DBAL\Types\Type::getType(Types::TEXT));
+		}
+		$column->setLength(null);
 	}
 }

@@ -9,7 +9,7 @@
 **Run many purpose-built AI assistants inside Nextcloud Talk — each with its own prompt, model, knowledge and tools, under real access governance.**
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE)
-[![Nextcloud 30–34](https://img.shields.io/badge/Nextcloud-30–34-0082c9.svg)](https://nextcloud.com)
+[![Nextcloud 30–35](https://img.shields.io/badge/Nextcloud-30–35-0082c9.svg)](https://nextcloud.com)
 [![OpenAI-compatible](https://img.shields.io/badge/API-OpenAI--compatible-10a37f.svg)](#model-providers)
 
 </div>
@@ -93,7 +93,7 @@ Talk AI speaks the OpenAI HTTP API, so it works with OpenAI, Azure OpenAI, self-
 
 ## Development
 
-Requirements: Nextcloud 30–34 · PHP 8.1+ · Node.js 22 / npm 10.5+.
+Requirements: Nextcloud 30–35 · PHP 8.1+ · Node.js 22 / npm 10.5+.
 
 ```bash
 npm run build          # production build
@@ -116,7 +116,7 @@ Funded by the European Union. Views and opinions expressed are however those of 
 
 <a href="https://educalliance.eu"><img src="img/educ-logo.png" width="220" align="right" alt="EDUC — the European Digital UniverCity"></a>
 
-Talk AI is developed **by [EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant (hence the `educai` package id). The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–34 install.
+Talk AI is developed **by [EDUC — the European Digital UniverCity](https://educalliance.eu)**, an alliance of European universities, where it runs as the alliance-wide Talk assistant (hence the `educai` package id). The app is fully generic: it works with any OpenAI-compatible endpoint on any Nextcloud 30–35 install.
 
 ### Project team
 

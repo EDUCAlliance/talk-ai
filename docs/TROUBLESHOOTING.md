@@ -56,7 +56,7 @@ Or in `config/config.php` (remember to revert):
 
 ## Environment Checks
 
-- Nextcloud 30–34 (`occ status`)
+- Nextcloud 30–35 (`occ status`)
 - PHP 8.1+ (`php -v`)
 - App files readable by the web server (`chown -R www-data:www-data .../apps-extra/educai`)
 - Frontend built (`npm ci && npm run build`), hard-refresh the browser after updates
