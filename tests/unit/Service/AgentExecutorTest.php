@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\Service;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Exception\AgentRunInterruptedException;
+use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\IncompleteProviderStreamException;
 use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Service\AgentExecutor;
@@ -30,6 +31,45 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class AgentExecutorTest extends TestCase {
+	public function testContextOverflowRemainsDistinctAndDoesNotReplayCompletedTools(): void {
+		foreach ([false, true] as $stream) {
+			$toolName = BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE;
+			[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($toolName)]);
+			$toolProvider->expects($this->once())->method('executeTool')->willReturn(['text' => 'Saved.']);
+			$initialMessages = [['role' => 'user', 'content' => 'Save the note']];
+			$turns = 0;
+			$llmClient->expects($this->exactly(2))
+				->method($stream ? 'streamAgentTurn' : 'sendAgentTurn')
+				->willReturnCallback(function (...$arguments) use (&$turns, $toolName): AgentTurn {
+					$options = $arguments[count($arguments) - 1];
+					$options['provider_attempt_budget']->consume();
+					if ($turns++ === 0) {
+						return $this->turn('', [$this->toolCall('write-once', $toolName, '{}')], 'tool_calls');
+					}
+					throw new ContextLengthExceededException(400);
+				});
+			$options = $this->builtInOptions([$toolName]);
+			if ($stream) {
+				$options['on_partial_result'] = static function (): void {
+					self::fail('No assistant result should be emitted');
+				};
+				$options['on_tool_progress'] = static function (): void {};
+			}
+
+			$result = $executor->run('system', $initialMessages, [], $options);
+
+			$this->assertSame('error', $result['status']);
+			$this->assertSame(ContextLengthExceededException::REASON, $result['terminalReason']);
+			$this->assertSame('', $result['content']);
+			$this->assertSame(2, $result['providerAttempts']);
+			$this->assertSame(1, $result['logicalTurns']);
+			$this->assertCount(1, $result['toolInvocations']);
+			$this->assertSame('ok', $result['toolInvocations'][0]['status']);
+			$this->assertSame($initialMessages[0], $result['messages'][0]);
+			$this->assertSame('Saved.', $result['messages'][2]['content']);
+		}
+	}
+
 	public function testPlainFinalTextUsesOneLogicalTurnAndNoTools(): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness();
 		$text = " Exact answer.\n";
@@ -1537,6 +1577,43 @@ class AgentExecutorTest extends TestCase {
 
 		$this->assertSame(4003, mb_strlen($result['toolInvocations'][0]['response'], 'UTF-8'));
 		$this->assertTrue(mb_check_encoding($result['toolInvocations'][0]['response'], 'UTF-8'));
+	}
+
+	public function testWikiOutputBudgetPreservesValidJsonAndReportsUnrepresentableMetadata(): void {
+		foreach ([false, true] as $oversizedMetadata) {
+			$name = BuiltInToolProvider::TOOL_WIKI_READ_PAGE;
+			[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($name)]);
+			$page = [
+				'success' => true, 'action' => 'read', 'path' => $oversizedMetadata ? str_repeat('x', 4100) : 'test.md',
+				'offset' => 100, 'total_length' => 3100, 'returned_length' => 3000,
+				'has_more' => false, 'next_offset' => null, 'content' => str_repeat('"', 3000),
+			];
+			$toolProvider->expects($this->once())->method('executeTool')->willReturn([
+				'content' => [['type' => 'text', 'text' => json_encode($page, JSON_THROW_ON_ERROR)]],
+			]);
+			$this->expectSyncTurns($llmClient, [
+				$this->turn('', [$this->toolCall('read-page', $name, '{}')], 'tool_calls'),
+				$this->turn('Done', [], 'stop'),
+			], function (int $index, array $messages) use ($oversizedMetadata): void {
+				if ($index !== 1) {
+					return;
+				}
+				$output = $messages[2]['content'];
+				$this->assertLessThanOrEqual(4000, mb_strlen($output, 'UTF-8'));
+				$delivered = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+				if ($oversizedMetadata) {
+					$this->assertSame('tool_execution_failed', $this->decodeToolError($output)['code']);
+					$this->assertArrayNotHasKey('next_offset', $delivered);
+				} else {
+					$this->assertTrue($delivered['has_more'], 'Previously final source page now has an undelivered remainder');
+					$this->assertSame(100 + mb_strlen($delivered['content'], 'UTF-8'), $delivered['next_offset']);
+					$this->assertSame(mb_strlen($delivered['content'], 'UTF-8'), $delivered['returned_length']);
+					$this->assertNotEmpty($delivered['content']);
+				}
+			});
+			$result = $executor->run('system', [['role' => 'user', 'content' => 'Read page']], [], $this->builtInOptions([$name]));
+			$this->assertSame($oversizedMetadata ? 'error' : 'ok', $result['toolInvocations'][0]['status']);
+		}
 	}
 
 	public function testExecutionExceptionProducesSecretSafeStructuredObservation(): void {

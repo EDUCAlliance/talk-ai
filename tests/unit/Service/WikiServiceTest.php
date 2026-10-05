@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\Service;
 use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\BrandingService;
 use OCA\EducAI\Service\TextSessionResetService;
 use OCA\EducAI\Service\WikiLocationService;
@@ -16,6 +17,7 @@ use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 use OCP\IConfig;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -275,6 +277,51 @@ class WikiServiceTest extends TestCase {
 		$this->assertSame(9, $read['total_length']);
 		$this->assertSame(4, $read['returned_length']);
 		$this->assertSame(5, $read['next_offset']);
+	}
+
+	#[DataProvider('escapedWikiPages')]
+	public function testAgentCanReconstructWikiUsingOnlyDeliveredPaginationOffsets(string $content): void {
+		$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'pages/escaped.md', $content, 'create');
+		$reflection = new \ReflectionClass(AgentExecutor::class);
+		$executor = $reflection->newInstanceWithoutConstructor();
+		$sanitize = $reflection->getMethod('sanitizeOutput');
+		$offset = 0;
+		$reconstructed = '';
+		$pages = 0;
+		do {
+			$this->assertLessThan(50, ++$pages, 'Pagination must make progress');
+			$page = $service->readPage(42, 'pages/escaped.md', $offset);
+			// The actual built-in provider wraps this JSON as an MCP text block.
+			$text = json_encode($page, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+			$output = $sanitize->invoke($executor, ['content' => [['type' => 'text', 'text' => $text]]], true);
+			$this->assertLessThanOrEqual(4000, mb_strlen($output, 'UTF-8'));
+			$delivered = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+			$length = mb_strlen($delivered['content'], 'UTF-8');
+			$this->assertSame($length, $delivered['returned_length']);
+			$this->assertSame($offset, $delivered['offset']);
+			$this->assertSame(mb_substr($content, $offset, $length, 'UTF-8'), $delivered['content']);
+			$reconstructed .= $delivered['content'];
+			if ($delivered['has_more']) {
+				$this->assertGreaterThan(0, $length);
+				$this->assertSame($offset + $length, $delivered['next_offset']);
+				$offset = $delivered['next_offset'];
+			} else {
+				$this->assertNull($delivered['next_offset']);
+			}
+		} while ($delivered['has_more']);
+		$this->assertSame($content, $reconstructed);
+	}
+
+	/** @return array<string,array{string}> */
+	public static function escapedWikiPages(): array {
+		return [
+			'quotes' => [str_repeat('"', 7000)],
+			'backslashes' => [str_repeat('\\', 7000)],
+			'control characters' => [str_repeat("a\x01\n\t", 2000)],
+			'Unicode and escapes' => [str_repeat("🐈ä\"\\", 2000)],
+			'ordinary ASCII' => [str_repeat('abc', 2500)],
+		];
 	}
 
 	public function testLogEventResetsExistingLogTextSession(): void {

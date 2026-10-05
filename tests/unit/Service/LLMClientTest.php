@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\Service;
 use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Exception\AgentRunInterruptedException;
+use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\IncompleteProviderStreamException;
 use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Exception\ProviderContractException;
@@ -21,10 +22,119 @@ use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
 use OCP\IConfig;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class LLMClientTest extends TestCase {
+	#[DataProvider('contextLengthErrorResponses')]
+	public function testContextOverflowDoesNotRetryUnchangedRequest(
+		array|string $body,
+		int $status,
+		bool $stream,
+		bool $throwHttpException,
+	): void {
+		$response = is_array($body) ? $this->jsonResponse($body, $status) : $this->rawResponse($body, $status);
+		$client = $this->createMock(IClient::class);
+		$request = $client->expects($this->once())->method('post');
+		if ($throwHttpException) {
+			$request->willThrowException(new \RuntimeException('Wrapped transport error', 0, new FakeProviderHttpException($response, $status)));
+		} else {
+			$request->willReturn($response);
+		}
+		$events = [];
+		$llmClient = $this->chatLlmClient($client, traceService: $this->recordingTraceService($events), withFallback: true);
+		$budget = new ProviderAttemptBudget();
+		$options = ['provider_attempt_budget' => $budget, 'trace_run_id' => 91];
+		$messages = [['role' => 'user', 'content' => str_repeat('input ', 12000)]];
+		$chunks = [];
+
+		try {
+			if ($stream) {
+				$llmClient->streamAgentTurn('system', $messages, [], static function (array $chunk) use (&$chunks): void {
+					$chunks[] = $chunk;
+				}, null, $options);
+			} else {
+				$llmClient->sendAgentTurn('system', $messages, [], null, $options);
+			}
+			$this->fail('Expected a typed context overflow');
+		} catch (ContextLengthExceededException $e) {
+			$this->assertSame(ContextLengthExceededException::MESSAGE, $e->getMessage());
+			$this->assertSame($status, $e->getCode());
+			$this->assertNull($e->getPrevious());
+		}
+
+		$this->assertSame([], $chunks);
+		$this->assertSame(1, $budget->getConsumed());
+		$attempts = array_values(array_filter($events, static fn (array $event): bool => $event['event_type'] === 'provider_attempt'));
+		$this->assertCount(1, $attempts);
+		$this->assertSame('initial', $attempts[0]['event']['payload']['reason']);
+		$this->assertSame('selected', $attempts[0]['event']['payload']['route']);
+		$this->assertSame($status, $attempts[0]['event']['payload']['http_status']);
+	}
+
+	public static function contextLengthErrorResponses(): iterable {
+		$cases = [
+			'coded overflow' => [['error' => ['code' => 'context_length_exceeded', 'message' => 'private-provider-details']], 400],
+			'coded window overflow' => [['error' => ['code' => 'context_window_exceeded']], 422],
+			'typed context size error' => [['error' => ['type' => 'exceed_context_size_error']], 400],
+			'relay context error' => [['error' => ['type' => 'ContextWindowExceededError']], 500],
+			'code after long diagnostic' => [['error' => ['message' => str_repeat('diagnostic ', 100), 'code' => 'context_length_exceeded']], 400],
+			'maximum context diagnostic' => [['error' => ['message' => "This model's maximum context length is 8192 tokens. However, you requested 12000 tokens."]], 400],
+			'oversized prompt diagnostic' => [['error' => ['type' => 'invalid_request_error', 'message' => 'prompt is too long: 200001 tokens > 200000 maximum']], 400],
+			'context size diagnostic' => [['error' => ['message' => 'request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it']], 400],
+			'plain overflow diagnostic' => ['context_length_exceeded: private-provider-details', 413],
+		];
+		foreach ($cases as $name => [$body, $status]) {
+			foreach ([false, true] as $stream) {
+				foreach ([false, true] as $throwHttpException) {
+					yield $name . ($stream ? ' streaming' : ' synchronous') . ($throwHttpException ? ' wrapped exception' : ' response') => [$body, $status, $stream, $throwHttpException];
+				}
+			}
+		}
+	}
+
+	public function testContextErrorInSuccessfulTransportIsTypedWithoutFallback(): void {
+		foreach ([false, true] as $stream) {
+			$body = ['error' => ['code' => 'context_length_exceeded', 'message' => 'private-provider-details']];
+			$response = $stream
+				? $this->rawResponse('data: ' . json_encode($body) . "\n\ndata: [DONE]\n\n")
+				: $this->jsonResponse($body);
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->once())->method('post')->willReturn($response);
+			$llmClient = $this->chatLlmClient($client, withFallback: true);
+			$budget = new ProviderAttemptBudget();
+			$messages = [['role' => 'user', 'content' => 'input']];
+			$options = ['provider_attempt_budget' => $budget];
+
+			try {
+				if ($stream) {
+					$llmClient->streamAgentTurn('system', $messages, [], static function (): void {
+						self::fail('An error frame must not reach the public callback');
+					}, null, $options);
+				} else {
+					$llmClient->sendAgentTurn('system', $messages, [], null, $options);
+				}
+				$this->fail('Expected a typed context overflow');
+			} catch (ContextLengthExceededException $e) {
+				$this->assertSame(ContextLengthExceededException::MESSAGE, $e->getMessage());
+			}
+			$this->assertSame(1, $budget->getConsumed());
+		}
+	}
+
+	public function testUnrelatedRequestSizeErrorRemainsDistinctFromContextOverflow(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())->method('post')->willReturn($this->rawResponse('Request Entity Too Large', 413));
+		try {
+			$this->chatLlmClient($client, withFallback: true)->sendAgentTurn('system', [['role' => 'user', 'content' => 'input']], []);
+			$this->fail('Expected a provider failure');
+		} catch (\Exception $e) {
+			$this->assertNotInstanceOf(ContextLengthExceededException::class, $e);
+			$this->assertSame(413, $e->getPrevious()?->getCode());
+		}
+	}
+
 	public function testListModelOptionsCombinesPrimaryAndSecondaryEndpoints(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');

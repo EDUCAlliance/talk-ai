@@ -16,6 +16,7 @@ use OCA\EducAI\Db\ConversationMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolProvider;
@@ -1859,9 +1860,10 @@ class BotServiceTest extends TestCase {
 	}
 
 	#[DataProvider('nonCompletedAgentResults')]
-	public function testProcessMessageMapsNonCompletedAgentResultToSafeGenericResponse(
+	public function testProcessMessageMapsNonCompletedAgentResultToSafeResponse(
 		string $status,
 		string $terminalReason,
+		bool $contextOverflow = false,
 	): void {
 		$bot = $this->createPersonalBot();
 		$conversationMapper = $this->createMock(ConversationMapper::class);
@@ -1924,7 +1926,9 @@ class BotServiceTest extends TestCase {
 		);
 
 		$this->assertSame(
-			"Sorry, I'm having trouble connecting to the AI service right now. Please try again later.",
+			$contextOverflow
+				? "This request is too large for the model's context window. Please shorten your message, reduce the conversation context, or choose a model with a larger context window."
+				: "Sorry, I'm having trouble connecting to the AI service right now. Please try again later.",
 			$service->processMessage(
 				bot: $bot,
 				message: 'Hello',
@@ -1943,18 +1947,19 @@ class BotServiceTest extends TestCase {
 			)
 		);
 		$this->assertSame([
-			'Agent execution terminated: ' . $terminalReason,
+			$contextOverflow ? ContextLengthExceededException::MESSAGE : 'Agent execution terminated: ' . $terminalReason,
 		], $executionErrors);
 		$this->assertSame([], $visibleAssistantPartials);
 		$this->assertSame(['🔧 _Using tool: search_test..._'], $visibleToolProgress);
 	}
 
-	/** @return array<string,array{string,string}> */
+	/** @return array<string,array{string,string,2?:bool}> */
 	public static function nonCompletedAgentResults(): array {
 		return [
 			'length' => ['budget_exhausted', 'length'],
 			'content filter' => ['error', 'content_filter'],
 			'turn budget' => ['budget_exhausted', 'max_turns'],
+			'context overflow' => ['error', ContextLengthExceededException::REASON, true],
 		];
 	}
 

@@ -151,6 +151,16 @@ PHP);
 			return;
 	}
 
+	if ($class === 'OCP\\AppFramework\\Http') {
+		require_once __DIR__ . '/../../vendor/nextcloud/ocp/OCP/AppFramework/Http.php';
+		return;
+	}
+
+	if ($class === 'OCP\\AppFramework\\Http\\Response') {
+		require_once __DIR__ . '/../../vendor/nextcloud/ocp/OCP/AppFramework/Http/Response.php';
+		return;
+	}
+
 	if ($class === 'OCP\\AppFramework\\Http\\DataResponse') {
 		eval(<<<'PHP'
 namespace OCP\AppFramework\Http;

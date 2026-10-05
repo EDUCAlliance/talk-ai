@@ -33,7 +33,7 @@ class TalkMessageParser {
 
 		return new IncomingTalkMessage(
 			trim($text),
-			(string)$content,
+			is_array($content) ? json_encode($content, JSON_THROW_ON_ERROR) : (string)$content,
 			$roomToken,
 			$actorId,
 			$messageId,
