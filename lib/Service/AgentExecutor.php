@@ -6,6 +6,7 @@ namespace OCA\EducAI\Service;
 
 use Closure;
 use OCA\EducAI\Exception\AgentRunInterruptedException;
+use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use Psr\Log\LoggerInterface;
@@ -311,16 +312,17 @@ class AgentExecutor {
 					$rateLimitHeaders
 				);
 			} catch (\Throwable $e) {
+				$contextOverflow = $e instanceof ContextLengthExceededException;
 				$this->logger->error('EducAI: Agent provider turn failed', ['exception' => $e]);
 				$this->traceService?->recordEvent($traceRunId, 'error', [
 					'status' => 'error',
 					'payload' => ['stage' => 'agent_loop', 'turn' => $turnNumber],
-					'error_message' => 'Provider request failed',
+					'error_message' => $contextOverflow ? ContextLengthExceededException::MESSAGE : 'Provider request failed',
 				]);
 
 				return $this->buildRunResult(
 					'error',
-					'provider_error',
+					$contextOverflow ? ContextLengthExceededException::REASON : 'provider_error',
 					'',
 					$messages,
 					$toolInvocations,
@@ -793,7 +795,7 @@ class AgentExecutor {
 					$toolName
 				);
 			} else {
-				$output = $this->sanitizeOutput($result);
+				$output = $this->sanitizeOutput($result, $isBuiltIn && $toolName === BuiltInToolProvider::TOOL_WIKI_READ_PAGE);
 			}
 		} catch (AgentRunInterruptedException $e) {
 			throw $e;
@@ -1309,9 +1311,12 @@ class AgentExecutor {
 	/**
 	 * @param array<string,mixed> $result
 	 */
-	private function sanitizeOutput(array $result): string {
+	private function sanitizeOutput(array $result, bool $wikiPage = false): string {
 		$textContent = $this->extractTextFromToolPayload($result);
 		if ($textContent !== null) {
+			if ($wikiPage) {
+				return $this->sanitizeWikiPageOutput($textContent);
+			}
 			return $this->truncateUtf8($textContent, 4000);
 		}
 
@@ -1320,6 +1325,48 @@ class AgentExecutor {
 			return 'Received invalid tool response';
 		}
 		return $this->truncateUtf8($encoded, 4000);
+	}
+
+	/** Keep pagination offsets aligned with the content actually sent to the model. */
+	private function sanitizeWikiPageOutput(string $text): string {
+		if (mb_strlen($text, 'UTF-8') <= 4000) {
+			return $text;
+		}
+		$page = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+		if (!is_array($page) || ($page['success'] ?? null) !== true || ($page['action'] ?? null) !== 'read'
+			|| !is_string($page['content'] ?? null) || !is_int($page['offset'] ?? null)
+			|| !is_int($page['total_length'] ?? null) || $page['offset'] < 0) {
+			throw new \RuntimeException('Wiki page cannot be represented within the tool output limit');
+		}
+		$content = $page['content'];
+		$available = mb_strlen($content, 'UTF-8');
+		$encode = static function (int $length) use ($page, $content): string {
+			$page['content'] = mb_substr($content, 0, $length, 'UTF-8');
+			$page['returned_length'] = $length;
+			$page['has_more'] = $page['offset'] + $length < $page['total_length'];
+			$page['next_offset'] = $page['has_more'] ? $page['offset'] + $length : null;
+			return json_encode($page, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+		};
+		// Metadata may itself be too large. Never advertise a continuation that
+		// makes no progress, or cut serialized JSON and silently skip unseen text.
+		$minimum = min(1, $available);
+		$best = $encode($minimum);
+		if (mb_strlen($best, 'UTF-8') > 4000) {
+			throw new \RuntimeException('Wiki page metadata exceeds the tool output limit');
+		}
+		$low = $minimum;
+		$high = $available;
+		while ($low <= $high) {
+			$length = intdiv($low + $high, 2);
+			$candidate = $encode($length);
+			if (mb_strlen($candidate, 'UTF-8') <= 4000) {
+				$best = $candidate;
+				$low = $length + 1;
+			} else {
+				$high = $length - 1;
+			}
+		}
+		return $best;
 	}
 
 	private function truncateUtf8(string $text, int $maxLength): string {

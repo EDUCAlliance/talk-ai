@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Controller;
 
-use Exception;
+use OCA\EducAI\Exception\InvalidWebhookException;
 use OCA\EducAI\Webhook\TalkHandler;
+use OCA\EducAI\Webhook\TalkWebhookPayload;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Response;
@@ -33,17 +34,30 @@ class WebhookController extends Controller {
 	 * Handle incoming webhook from Nextcloud Talk
 	 */
 	public function talk(): Response {
-		$body = file_get_contents('php://input');
 		$signature = $this->request->getHeader('X-Nextcloud-Talk-Signature');
 		$random = $this->request->getHeader('X-Nextcloud-Talk-Random');
-
-		$this->logger->info('========== Talk AI Webhook Received ==========', [
-			'has_signature' => !empty($signature),
-			'has_random' => !empty($random),
-			'body_length' => strlen($body),
-		]);
+		if ($signature === '' || $random === '') {
+			return new Response(Http::STATUS_UNAUTHORIZED);
+		}
+		$contentLength = $this->request->getHeader('Content-Length');
+		if (ctype_digit($contentLength) && (int)$contentLength > TalkWebhookPayload::MAX_BODY_BYTES) {
+			return new Response(Http::STATUS_REQUEST_ENTITY_TOO_LARGE);
+		}
 
 		try {
+			$stream = $this->openRequestBody();
+			if ($stream === false) {
+				throw new \RuntimeException('Could not open Talk webhook body');
+			}
+			try {
+				// Do not trust Content-Length: chunked requests still get a bounded read.
+				$body = TalkWebhookPayload::readBody($stream);
+			} finally {
+				fclose($stream);
+			}
+			$this->logger->info('========== Talk AI Webhook Received ==========', [
+				'body_length' => strlen($body),
+			]);
 			$this->talkHandler->handleIncoming([
 				'body' => $body,
 				'signature' => $signature,
@@ -56,7 +70,13 @@ class WebhookController extends Controller {
 			$response->setStatus(Http::STATUS_OK);
 			return $response;
 			
-		} catch (Exception $e) {
+		} catch (InvalidWebhookException $e) {
+			$this->logger->warning('Rejected Talk webhook request', [
+				'error' => $e->getMessage(),
+				'status' => $e->getStatusCode(),
+			]);
+			return new Response($e->getStatusCode());
+		} catch (\Throwable $e) {
 			$this->logger->error('========== Webhook Processing FAILED ==========', [
 				'error' => $e->getMessage(),
 				'exception' => $e,
@@ -66,5 +86,10 @@ class WebhookController extends Controller {
 			$response->setStatus(Http::STATUS_OK); // Return 200 anyway to not trigger Talk retries
 			return $response;
 		}
+	}
+
+	/** @return resource|false */
+	protected function openRequestBody() {
+		return fopen('php://input', 'rb');
 	}
 }

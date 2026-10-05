@@ -7,6 +7,7 @@ namespace OCA\EducAI\Webhook;
 use Exception;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\ChatRoom;
+use OCA\EducAI\Exception\InvalidWebhookException;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
@@ -28,6 +29,10 @@ class TalkHandler {
 	public const DELIVERY_RETRYABLE = 'retryable';
 	public const DELIVERY_PERMANENT = 'permanent';
 	public const DELIVERY_AMBIGUOUS = 'ambiguous';
+	private const TALK_MESSAGE_LIMIT = 32000;
+	/** @var array<string, true> Chunks whose dispatch could not be confirmed in this request. */
+	private array $unconfirmedTalkChunks = [];
+	private ?string $lastLargeReplyDeliveryError = null;
 
 	private const IGNORED_TALK_SYSTEM_EVENT_NAMES = [
 		'thread_created',
@@ -83,19 +88,19 @@ class TalkHandler {
 		$body = $request['body'] ?? '';
 		$signature = $request['signature'] ?? '';
 		$random = $request['random'] ?? '';
+		if (!is_string($body) || !is_string($signature) || !is_string($random)) {
+			throw new InvalidWebhookException('Invalid Talk webhook request');
+		}
+		TalkWebhookPayload::assertBodySize($body);
 
 		// Verify signature
 		if (!$this->verifySignature($signature, $random, $body)) {
 			$this->logger->warning('Invalid webhook signature');
-			throw new Exception('Invalid signature');
+			throw new InvalidWebhookException('Invalid signature', 401);
 		}
 
 		// Parse payload
-		$payload = json_decode($body, true);
-		if (!$payload) {
-			$this->logger->error('Invalid JSON payload', ['body_length' => strlen($body)]);
-			throw new Exception('Invalid JSON payload');
-		}
+		$payload = TalkWebhookPayload::decode($body);
 
 		$this->logger->info('Received Talk webhook', [
 			'payload_keys' => array_keys($payload),
@@ -629,13 +634,14 @@ class TalkHandler {
 		$thinkingMessageSent = false;
 		$thinkingBuffer = '';
 		$isInThinkingMode = false;
+		$largeAssistantDeliveries = [];
 
 		$traceStatus = 'success';
 		$traceErrorSummary = null;
 
 		try {
 			// Process message and get response
-			$assistantProgress = function (string $partial) use ($roomToken, $replyTargetId, $threadRootMessageId, &$alreadySent, &$isFirstMessage, &$assistantStreamDeliveryFailed, &$thinkingMessageSent, &$thinkingBuffer, &$isInThinkingMode): void {
+			$assistantProgress = function (string $partial) use ($roomToken, $replyTargetId, $threadRootMessageId, &$alreadySent, &$isFirstMessage, &$assistantStreamDeliveryFailed, &$thinkingMessageSent, &$thinkingBuffer, &$isInThinkingMode, &$largeAssistantDeliveries): void {
 				$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
 
 				// Handle thinking tokens - filter them out and show placeholder
@@ -652,7 +658,16 @@ class TalkHandler {
 				// Only send if there's actual content after filtering thinking tokens
 				if ($filteredPartial !== null && trim($filteredPartial) !== '') {
 					$replyTo = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
-					if ($this->sendReplyToTalk($roomToken, $filteredPartial, $replyTo)) {
+					$referenceId = null;
+					if (mb_strlen($filteredPartial, 'UTF-8') > self::TALK_MESSAGE_LIMIT) {
+						$referenceId = bin2hex(random_bytes(32));
+						$largeAssistantDeliveries[hash('sha256', trim($filteredPartial))] = [
+							'reference_id' => $referenceId,
+							'reply_to' => $replyTo,
+							'message' => $filteredPartial,
+						];
+					}
+					if ($this->sendReplyToTalk($roomToken, $filteredPartial, $replyTo, $referenceId)) {
 						$alreadySent = true;
 						$isFirstMessage = false;
 					} else {
@@ -731,13 +746,22 @@ class TalkHandler {
 				} else {
 					// Normal case - send the filtered response
 					$finalReplyTarget = $this->resolveStreamingReplyTarget($isFirstMessage, $replyTargetId, $threadRootMessageId);
-					$result = $this->sendReplyToTalk($roomToken, $filteredResponse, $finalReplyTarget);
+					$previousDelivery = $largeAssistantDeliveries[hash('sha256', trim($filteredResponse))] ?? null;
+					// A partially delivered oversized stream must resume with the same
+					// chunk references, even after a tool message changed the reply target.
+					$result = $this->sendReplyToTalk(
+						$roomToken,
+						$previousDelivery['message'] ?? $filteredResponse,
+						$previousDelivery['reply_to'] ?? $finalReplyTarget,
+						$previousDelivery['reference_id'] ?? null,
+					);
 
 					if ($result) {
 						$this->logger->info('Bot response sent successfully to Talk');
 					} else {
 						if ($traceStatus !== 'error') {
 							$traceStatus = 'partial';
+							$traceErrorSummary ??= $this->lastLargeReplyDeliveryError;
 						}
 						$this->logger->error('Failed to send bot response to Talk - check Talk API logs');
 					}
@@ -1108,6 +1132,130 @@ class TalkHandler {
 	 * @return array{status: string, error: ?string, http_status: ?int}
 	 */
 	public function sendReplyToTalkWithOutcome(string $roomToken, string $message, int $replyToId = 0, ?string $referenceId = null): array {
+		$this->lastLargeReplyDeliveryError = null;
+		if (mb_strlen($message, 'UTF-8') <= self::TALK_MESSAGE_LIMIT) {
+			return $this->sendTalkMessageWithOutcome($roomToken, $message, $replyToId, $referenceId);
+		}
+		if (!mb_check_encoding($message, 'UTF-8')) {
+			return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Talk reply is not valid UTF-8');
+		}
+		if (trim($message) === '') {
+			return $this->deliveryOutcome(self::DELIVERY_SUCCESS);
+		}
+
+		$outcome = $this->sendLargeReplyToTalk($roomToken, $message, $replyToId, $referenceId);
+		if ($outcome['status'] !== self::DELIVERY_SUCCESS) {
+			$this->lastLargeReplyDeliveryError = $outcome['error'];
+		}
+		return $outcome;
+	}
+
+	/**
+	 * Talk limits messages by UTF-8 characters, not bytes. Keep every raw character
+	 * and sign each chunk independently. Talk itself trims boundary whitespace.
+	 *
+	 * A referenceId is only a correlation field: Talk does NOT deduplicate it.
+	 * Reconcile committed chunks before retrying an interrupted multi-message reply.
+	 * The queue serializes workers; this lookup is not a concurrent-send lock.
+	 *
+	 * @return array{status: string, error: ?string, http_status: ?int}
+	 */
+	private function sendLargeReplyToTalk(string $roomToken, string $message, int $replyToId, ?string $referenceId): array {
+		$secret = $this->settingsService->getWebhookSecret();
+		if (empty($secret)) {
+			return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Talk webhook secret is not configured');
+		}
+		try {
+			$roomId = $this->findTalkRoomId($roomToken);
+			$qb = $this->db->getQueryBuilder();
+			$qb->select('url_hash')
+				->from('talk_bots_server')
+				->where($qb->expr()->eq('secret', $qb->createNamedParameter($secret)));
+			$result = $qb->executeQuery();
+			$actors = [];
+			while ($row = $result->fetch()) {
+				if (is_string($row['url_hash'] ?? null) && $row['url_hash'] !== '') {
+					$actors[] = 'bot-' . $row['url_hash'];
+				}
+			}
+			$result->closeCursor();
+			if ($roomId === null || $actors === []) {
+				throw new \RuntimeException('Talk room or bot registration could not be resolved');
+			}
+		} catch (\Throwable $e) {
+			// No dispatch is safe when we cannot determine whether a previous worker
+			// already committed a prefix. A later attempt may retry the lookup only.
+			$this->logger->warning('Cannot reconcile long Talk reply; no chunks sent', ['room_token' => $roomToken]);
+			return $this->deliveryOutcome(self::DELIVERY_RETRYABLE, 'Long Talk reply delivery cannot be checked; no chunks resent');
+		}
+
+		$baseReference = $referenceId !== null && trim($referenceId) !== '' ? $referenceId : bin2hex(random_bytes(32));
+		$messageHash = hash('sha256', $message);
+		$chunks = mb_str_split($message, self::TALK_MESSAGE_LIMIT, 'UTF-8');
+		foreach ($chunks as $index => $chunk) {
+			if (trim($chunk) === '') {
+				// Talk rejects whitespace-only messages, just as on the short path.
+				continue;
+			}
+			$chunkReference = hash('sha256', $baseReference . "\0" . $messageHash . "\0" . $index);
+			try {
+				if ($this->isTalkChunkDelivered($roomId, $actors, $chunkReference, $chunk)) {
+					continue;
+				}
+			} catch (\Throwable $e) {
+				return $this->deliveryOutcome(self::DELIVERY_RETRYABLE, 'Long Talk reply delivery cannot be checked; no chunks resent');
+			}
+			if (isset($this->unconfirmedTalkChunks[$chunkReference])) {
+				return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Long Talk reply delivery remains unconfirmed; automatic resend stopped to avoid duplicate chunks');
+			}
+
+			$outcome = $this->sendTalkMessageWithOutcome($roomToken, $chunk, $replyToId, $chunkReference);
+			if ($outcome['status'] === self::DELIVERY_AMBIGUOUS) {
+				// A timeout may have happened after Talk committed the chunk. Confirm
+				// that case; otherwise do not race a still-running request by resending.
+				try {
+					if ($this->isTalkChunkDelivered($roomId, $actors, $chunkReference, $chunk)) {
+						continue;
+					}
+				} catch (\Throwable $e) {
+					// Unknown is not proof that Talk rejected the message.
+				}
+				$this->unconfirmedTalkChunks[$chunkReference] = true;
+				return $this->deliveryOutcome(self::DELIVERY_PERMANENT, 'Long Talk reply delivery is unconfirmed after dispatch; automatic resend stopped to avoid duplicate chunks');
+			}
+			if ($outcome['status'] !== self::DELIVERY_SUCCESS) {
+				return $outcome;
+			}
+		}
+		return $this->deliveryOutcome(self::DELIVERY_SUCCESS);
+	}
+
+	/** @param list<string> $actors */
+	private function isTalkChunkDelivered(int $roomId, array $actors, string $referenceId, string $message): bool {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('message')
+			->from('comments')
+			->where($qb->expr()->eq('object_type', $qb->createNamedParameter('chat')))
+			->andWhere($qb->expr()->eq('object_id', $qb->createNamedParameter((string)$roomId)))
+			->andWhere($qb->expr()->eq('actor_type', $qb->createNamedParameter('bots')))
+			->andWhere($qb->expr()->in('actor_id', $qb->createNamedParameter($actors, IQueryBuilder::PARAM_STR_ARRAY)))
+			->andWhere($qb->expr()->eq('reference_id', $qb->createNamedParameter($referenceId)));
+		$result = $qb->executeQuery();
+		$rows = $result->fetchAll();
+		$result->closeCursor();
+		foreach ($rows as $row) {
+			if (($row['message'] ?? null) === trim($message)) {
+				return true;
+			}
+		}
+		if ($rows !== []) {
+			throw new \RuntimeException('Talk chunk reference exists with different content');
+		}
+		return false;
+	}
+
+	/** @return array{status: string, error: ?string, http_status: ?int} */
+	private function sendTalkMessageWithOutcome(string $roomToken, string $message, int $replyToId, ?string $referenceId): array {
 		try {
 			// Never send empty messages - Talk API will reject them with 400
 			if (trim($message) === '') {

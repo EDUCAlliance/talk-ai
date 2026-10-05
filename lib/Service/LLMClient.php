@@ -6,6 +6,7 @@ namespace OCA\EducAI\Service;
 
 use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Exception\AgentRunInterruptedException;
+use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\IncompleteProviderStreamException;
 use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Exception\ProviderContractException;
@@ -260,7 +261,7 @@ class LLMClient {
 				$route,
 			);
 		} catch (\Exception $e) {
-			if ($streamStarted || !$this->isServerHttpError($e)) {
+			if ($streamStarted || $this->isNonRetryableProviderException($e) || !$this->isServerHttpError($e)) {
 				throw $e;
 			}
 
@@ -411,6 +412,7 @@ class LLMClient {
 
 	private function isNonRetryableProviderException(\Exception $exception): bool {
 		return $exception instanceof ProviderAttemptBudgetExceededException
+			|| $exception instanceof ContextLengthExceededException
 			|| $exception instanceof AgentRunInterruptedException
 			|| $exception instanceof IncompleteProviderStreamException
 			|| $exception instanceof ProviderContractException;
@@ -959,6 +961,9 @@ class LLMClient {
 		if (!is_array($body)) {
 			throw new ProviderContractException();
 		}
+		if (isset($body['error']) && $this->isContextLengthError($body)) {
+			throw new ContextLengthExceededException();
+		}
 		$choices = $body['choices'] ?? null;
 		if ($choices === null || $choices === []) {
 			throw new IncompleteProviderStreamException();
@@ -1042,6 +1047,9 @@ class LLMClient {
 				}
 				if (!is_array($chunk)) {
 					throw new ProviderContractException();
+				}
+				if (isset($chunk['error']) && $this->isContextLengthError($chunk)) {
+					throw new ContextLengthExceededException();
 				}
 
 				if (is_string($chunk['model'] ?? null) && $chunk['model'] !== '') {
@@ -1536,6 +1544,12 @@ class LLMClient {
 	}
 
 	private function throwProviderHttpError(int $statusCode, string $rawBody): never {
+		$body = json_decode($rawBody, true);
+		if ($this->isContextLengthError(is_array($body) ? $body : $rawBody)) {
+			$this->logger->warning('LLM provider rejected the request context length', ['status' => $statusCode]);
+			throw new ContextLengthExceededException($statusCode);
+		}
+
 		$excerpt = $this->excerptProviderErrorBody($rawBody);
 		$this->logger->error('LLM provider returned HTTP error', [
 			'status' => $statusCode,
@@ -1548,6 +1562,53 @@ class LLMClient {
 		}
 
 		throw new \Exception($message, $statusCode);
+	}
+
+	/**
+	 * Classify only explicit provider error codes or unambiguous diagnostics.
+	 * Parameter-profile retries and model fallback resend the same context, so
+	 * neither can safely recover an overflow. Do not inspect assistant content.
+	 *
+	 * @param array<string,mixed>|string $body
+	 */
+	private function isContextLengthError(array|string $body): bool {
+		$error = is_array($body) ? ($body['error'] ?? $body) : $body;
+		if (is_array($error)) {
+			foreach (['code', 'type'] as $field) {
+				if (!is_string($error[$field] ?? null)) {
+					continue;
+				}
+				$code = strtolower(str_replace(['_', '-', ' '], '', $error[$field]));
+				if (in_array($code, [
+					'contextlengthexceeded',
+					'contextwindowexceeded',
+					'contextwindowexceedederror',
+					'contextlengtherror',
+					'exceedcontextsizeerror',
+					'prompttoolong',
+					'inputtoolong',
+				], true)) {
+					return true;
+				}
+			}
+			$error = $error['message'] ?? null;
+		}
+		if (!is_string($error)) {
+			return false;
+		}
+
+		foreach ([
+			'/\b(?:context_length_exceeded|context_window_exceeded|ContextWindowExceededError|exceed_context_size_error)\b/i',
+			'/\b(?:prompt|input)(?:\s+is)?\s+too\s+long\b/i',
+			'/\b(?:maximum|max)\s+context\s+(?:length|window|size)\b.{0,256}\b(?:exceed\w*|requested|resulted)\b/is',
+			'/\bexceed(?:s|ed)?\b.{0,128}\bcontext\s+(?:length|window|size|limit)\b/is',
+		] as $pattern) {
+			if (preg_match($pattern, $error) === 1) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private function readResponseBody(mixed $response): string {

@@ -17,6 +17,7 @@ use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
+use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
@@ -37,6 +38,7 @@ use Psr\Log\LoggerInterface;
 class BotService {
 	public const TEMPERATURE_NOT_PROVIDED = '__educai_temperature_not_provided__';
 	private const AI_SERVICE_UNAVAILABLE_MESSAGE = "Sorry, I'm having trouble connecting to the AI service right now. Please try again later.";
+	private const CONTEXT_LIMIT_MESSAGE = "This request is too large for the model's context window. Please shorten your message, reduce the conversation context, or choose a model with a larger context window.";
 
 	private BotMapper $botMapper;
 	private ConversationMapper $conversationMapper;
@@ -1110,6 +1112,9 @@ class BotService {
 
 			if ($agentStatus !== 'completed') {
 				$discardAssistantBuffer();
+				if ($terminalReason === ContextLengthExceededException::REASON) {
+					throw new ContextLengthExceededException();
+				}
 				throw new Exception('Agent execution terminated: ' . $terminalReason);
 			}
 			if (trim($assistantMessage) === '') {
@@ -1217,7 +1222,9 @@ class BotService {
 				}
 			}
 
-			return self::AI_SERVICE_UNAVAILABLE_MESSAGE;
+			return $e instanceof ContextLengthExceededException
+				? self::CONTEXT_LIMIT_MESSAGE
+				: self::AI_SERVICE_UNAVAILABLE_MESSAGE;
 		}
 	}
 
