@@ -32,7 +32,6 @@ class TalkHandler {
 	private const TALK_MESSAGE_LIMIT = 32000;
 	/** @var array<string, true> Chunks whose dispatch could not be confirmed in this request. */
 	private array $unconfirmedTalkChunks = [];
-	private ?string $lastLargeReplyDeliveryError = null;
 
 	private const IGNORED_TALK_SYSTEM_EVENT_NAMES = [
 		'thread_created',
@@ -749,19 +748,21 @@ class TalkHandler {
 					$previousDelivery = $largeAssistantDeliveries[hash('sha256', trim($filteredResponse))] ?? null;
 					// A partially delivered oversized stream must resume with the same
 					// chunk references, even after a tool message changed the reply target.
-					$result = $this->sendReplyToTalk(
+					$deliveryOutcome = $this->sendReplyToTalkWithOutcome(
 						$roomToken,
 						$previousDelivery['message'] ?? $filteredResponse,
 						$previousDelivery['reply_to'] ?? $finalReplyTarget,
 						$previousDelivery['reference_id'] ?? null,
 					);
 
-					if ($result) {
+					if ($deliveryOutcome['status'] === self::DELIVERY_SUCCESS) {
 						$this->logger->info('Bot response sent successfully to Talk');
 					} else {
 						if ($traceStatus !== 'error') {
 							$traceStatus = 'partial';
-							$traceErrorSummary ??= $this->lastLargeReplyDeliveryError;
+							if (mb_strlen($previousDelivery['message'] ?? $filteredResponse, 'UTF-8') > self::TALK_MESSAGE_LIMIT) {
+								$traceErrorSummary ??= $deliveryOutcome['error'];
+							}
 						}
 						$this->logger->error('Failed to send bot response to Talk - check Talk API logs');
 					}
@@ -1132,7 +1133,6 @@ class TalkHandler {
 	 * @return array{status: string, error: ?string, http_status: ?int}
 	 */
 	public function sendReplyToTalkWithOutcome(string $roomToken, string $message, int $replyToId = 0, ?string $referenceId = null): array {
-		$this->lastLargeReplyDeliveryError = null;
 		if (mb_strlen($message, 'UTF-8') <= self::TALK_MESSAGE_LIMIT) {
 			return $this->sendTalkMessageWithOutcome($roomToken, $message, $replyToId, $referenceId);
 		}
@@ -1143,11 +1143,7 @@ class TalkHandler {
 			return $this->deliveryOutcome(self::DELIVERY_SUCCESS);
 		}
 
-		$outcome = $this->sendLargeReplyToTalk($roomToken, $message, $replyToId, $referenceId);
-		if ($outcome['status'] !== self::DELIVERY_SUCCESS) {
-			$this->lastLargeReplyDeliveryError = $outcome['error'];
-		}
-		return $outcome;
+		return $this->sendLargeReplyToTalk($roomToken, $message, $replyToId, $referenceId);
 	}
 
 	/**

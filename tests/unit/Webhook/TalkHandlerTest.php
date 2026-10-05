@@ -201,12 +201,12 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(IURLGenerator::class),
 				$this->createMock(LoggerInterface::class),
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
-		$handler->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+		$handler->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): array {
 				$sentMessages[] = $message;
-				return true;
+				return ['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -264,13 +264,13 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(IURLGenerator::class),
 				$this->createMock(LoggerInterface::class),
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->once())
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): array {
 				$sentMessages[] = $message;
-				return true;
+				return ['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -321,13 +321,13 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(IURLGenerator::class),
 				$this->createMock(LoggerInterface::class),
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->once())
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): array {
 				$sentMessages[] = $message;
-				return true;
+				return ['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -382,13 +382,14 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(LoggerInterface::class),
 				$traceService,
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->exactly(2))
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): array {
 				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
-				return array_shift($deliveryResults);
+				$delivered = array_shift($deliveryResults);
+				return ['status' => $delivered ? TalkHandler::DELIVERY_SUCCESS : TalkHandler::DELIVERY_RETRYABLE, 'error' => $delivered ? null : 'Delivery failed', 'http_status' => null];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -457,13 +458,14 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(LoggerInterface::class),
 				$traceService,
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->exactly(3))
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): array {
 				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
-				return array_shift($deliveryResults);
+				$delivered = array_shift($deliveryResults);
+				return ['status' => $delivered ? TalkHandler::DELIVERY_SUCCESS : TalkHandler::DELIVERY_RETRYABLE, 'error' => $delivered ? null : 'Delivery failed', 'http_status' => null];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -527,13 +529,14 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(LoggerInterface::class),
 				$traceService,
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->exactly(2))
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): array {
 				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
-				return array_shift($deliveryResults);
+				$delivered = array_shift($deliveryResults);
+				return ['status' => $delivered ? TalkHandler::DELIVERY_SUCCESS : TalkHandler::DELIVERY_RETRYABLE, 'error' => $delivered ? null : 'Delivery failed', 'http_status' => null];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -593,13 +596,14 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(LoggerInterface::class),
 				$traceService,
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->exactly(2))
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$attempts, &$deliveryResults): array {
 				$attempts[] = ['message' => $message, 'reply_to' => $replyToId];
-				return array_shift($deliveryResults);
+				$delivered = array_shift($deliveryResults);
+				return ['status' => $delivered ? TalkHandler::DELIVERY_SUCCESS : TalkHandler::DELIVERY_RETRYABLE, 'error' => $delivered ? null : 'Delivery failed', 'http_status' => null];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [
@@ -670,13 +674,13 @@ class TalkHandlerTest extends TestCase {
 				$this->createMock(LoggerInterface::class),
 				$traceService,
 			])
-			->onlyMethods(['sendReplyToTalk'])
+			->onlyMethods(['sendReplyToTalkWithOutcome'])
 			->getMock();
 		$handler->expects($this->exactly(3))
-			->method('sendReplyToTalk')
-			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): bool {
+			->method('sendReplyToTalkWithOutcome')
+			->willReturnCallback(function (string $roomToken, string $message, int $replyToId = 0) use (&$sentMessages): array {
 				$sentMessages[] = $message;
-				return true;
+				return ['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201];
 			});
 
 		$this->invokePrivateMethod($handler, 'processNormalMessage', [

@@ -6,7 +6,6 @@ namespace OCA\EducAI\Webhook;
 
 use JsonException;
 use OCA\EducAI\Exception\InvalidWebhookException;
-use RuntimeException;
 
 /** Bounded transport input, separate from the conversation's model token budget. */
 class TalkWebhookPayload {
@@ -14,16 +13,6 @@ class TalkWebhookPayload {
 	// This also fits two maximum-length (32,000 character) emoji messages after
 	// both JSON-encoding layers, with room for their surrounding metadata.
 	public const MAX_BODY_BYTES = 1048576;
-
-	/** @param resource $stream */
-	public static function readBody($stream): string {
-		$body = stream_get_contents($stream, self::MAX_BODY_BYTES + 1);
-		if ($body === false) {
-			throw new RuntimeException('Could not read Talk webhook body');
-		}
-		self::assertBodySize($body);
-		return $body;
-	}
 
 	public static function assertBodySize(string $body): void {
 		if (strlen($body) > self::MAX_BODY_BYTES) {

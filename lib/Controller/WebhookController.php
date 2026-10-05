@@ -45,16 +45,11 @@ class WebhookController extends Controller {
 		}
 
 		try {
-			$stream = $this->openRequestBody();
-			if ($stream === false) {
-				throw new \RuntimeException('Could not open Talk webhook body');
+			$body = $this->readRequestBody();
+			if ($body === false) {
+				throw new \RuntimeException('Could not read Talk webhook body');
 			}
-			try {
-				// Do not trust Content-Length: chunked requests still get a bounded read.
-				$body = TalkWebhookPayload::readBody($stream);
-			} finally {
-				fclose($stream);
-			}
+			TalkWebhookPayload::assertBodySize($body);
 			$this->logger->info('========== Talk AI Webhook Received ==========', [
 				'body_length' => strlen($body),
 			]);
@@ -88,8 +83,8 @@ class WebhookController extends Controller {
 		}
 	}
 
-	/** @return resource|false */
-	protected function openRequestBody() {
-		return fopen('php://input', 'rb');
+	protected function readRequestBody(): string|false {
+		// Do not trust Content-Length: chunked requests still get a bounded read.
+		return file_get_contents('php://input', false, null, 0, TalkWebhookPayload::MAX_BODY_BYTES + 1);
 	}
 }

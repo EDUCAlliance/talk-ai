@@ -13,19 +13,19 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class WebhookControllerTest extends TestCase {
-	public function testMissingAuthenticationIsRejectedWithoutOpeningBody(): void {
+	public function testMissingAuthenticationIsRejectedWithoutReadingBody(): void {
 		$handler = $this->createMock(TalkHandler::class);
 		$handler->expects($this->never())->method('handleIncoming');
 		$controller = $this->controller([], $handler);
-		$controller->expects($this->never())->method('openRequestBody');
+		$controller->expects($this->never())->method('readRequestBody');
 		$this->assertSame(401, $controller->talk()->getStatus());
 	}
 
-	public function testDeclaredOversizedBodyIsRejectedWithoutOpeningBody(): void {
+	public function testDeclaredOversizedBodyIsRejectedWithoutReadingBody(): void {
 		$handler = $this->createMock(TalkHandler::class);
 		$handler->expects($this->never())->method('handleIncoming');
 		$controller = $this->controller($this->authHeaders() + ['Content-Length' => (string)(TalkWebhookPayload::MAX_BODY_BYTES + 1)], $handler);
-		$controller->expects($this->never())->method('openRequestBody');
+		$controller->expects($this->never())->method('readRequestBody');
 		$this->assertSame(413, $controller->talk()->getStatus());
 	}
 
@@ -33,7 +33,7 @@ class WebhookControllerTest extends TestCase {
 		$handler = $this->createMock(TalkHandler::class);
 		$handler->expects($this->never())->method('handleIncoming');
 		$controller = $this->controller($this->authHeaders() + ['Content-Length' => '1'], $handler);
-		$controller->method('openRequestBody')->willReturn($this->bodyStream(str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES + 1)));
+		$controller->method('readRequestBody')->willReturn(str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES + 1));
 		$this->assertSame(413, $controller->talk()->getStatus());
 	}
 
@@ -41,7 +41,7 @@ class WebhookControllerTest extends TestCase {
 		$handler = $this->createMock(TalkHandler::class);
 		$handler->expects($this->never())->method('handleIncoming');
 		$controller = $this->controller($this->authHeaders(), $handler);
-		$controller->method('openRequestBody')->willReturn($this->bodyStream(str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES + 1)));
+		$controller->method('readRequestBody')->willReturn(str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES + 1));
 		$this->assertSame(413, $controller->talk()->getStatus());
 	}
 
@@ -54,7 +54,7 @@ class WebhookControllerTest extends TestCase {
 			'random' => 'test-nonce',
 		]);
 		$controller = $this->controller($this->authHeaders(), $handler);
-		$controller->method('openRequestBody')->willReturn($this->bodyStream($body));
+		$controller->method('readRequestBody')->willReturn($body);
 		$this->assertSame(200, $controller->talk()->getStatus());
 	}
 
@@ -62,15 +62,23 @@ class WebhookControllerTest extends TestCase {
 		$handler = $this->createMock(TalkHandler::class);
 		$handler->method('handleIncoming')->willThrowException(new InvalidWebhookException('Invalid shape'));
 		$controller = $this->controller($this->authHeaders(), $handler);
-		$controller->method('openRequestBody')->willReturn($this->bodyStream('true'));
+		$controller->method('readRequestBody')->willReturn('true');
 		$this->assertSame(400, $controller->talk()->getStatus());
+	}
+
+	public function testBodyReadFailureDoesNotReachHandler(): void {
+		$handler = $this->createMock(TalkHandler::class);
+		$handler->expects($this->never())->method('handleIncoming');
+		$controller = $this->controller($this->authHeaders(), $handler);
+		$controller->method('readRequestBody')->willReturn(false);
+		$this->assertSame(200, $controller->talk()->getStatus());
 	}
 
 	public function testProcessingFailureRetainsAcknowledgementToAvoidRepeatedSideEffects(): void {
 		$handler = $this->createMock(TalkHandler::class);
 		$handler->method('handleIncoming')->willThrowException(new \RuntimeException('Processing failed'));
 		$controller = $this->controller($this->authHeaders(), $handler);
-		$controller->method('openRequestBody')->willReturn($this->bodyStream('{"object":{}}'));
+		$controller->method('readRequestBody')->willReturn('{"object":{}}');
 		$this->assertSame(200, $controller->talk()->getStatus());
 	}
 
@@ -78,20 +86,12 @@ class WebhookControllerTest extends TestCase {
 		return ['X-Nextcloud-Talk-Signature' => 'test-signature', 'X-Nextcloud-Talk-Random' => 'test-nonce'];
 	}
 
-	/** @return resource */
-	private function bodyStream(string $body) {
-		$stream = fopen('php://temp', 'w+b');
-		fwrite($stream, $body);
-		rewind($stream);
-		return $stream;
-	}
-
 	private function controller(array $headers, TalkHandler $handler): WebhookController {
 		$request = $this->createMock(IRequest::class);
 		$request->method('getHeader')->willReturnCallback(static fn (string $header): string => $headers[$header] ?? '');
 		return $this->getMockBuilder(WebhookController::class)
 			->setConstructorArgs(['educai', $request, $handler, $this->createMock(LoggerInterface::class)])
-			->onlyMethods(['openRequestBody'])
+			->onlyMethods(['readRequestBody'])
 			->getMock();
 	}
 }

@@ -12,33 +12,19 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class TalkWebhookPayloadTest extends TestCase {
-	public function testOversizedStreamIsRejectedWithoutReadingTheRemainingBody(): void {
-		$stream = fopen('php://temp', 'w+b');
-		fwrite($stream, str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES + 65536));
-		rewind($stream);
+	public function testOversizedBodyIsRejected(): void {
 		try {
-			TalkWebhookPayload::readBody($stream);
+			TalkWebhookPayload::assertBodySize(str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES + 1));
 			$this->fail('Expected an oversized webhook to be rejected');
 		} catch (InvalidWebhookException $e) {
 			$this->assertSame(413, $e->getStatusCode());
-			$this->assertSame(TalkWebhookPayload::MAX_BODY_BYTES + 1, ftell($stream));
-		} finally {
-			fclose($stream);
 		}
 	}
 
 	public function testExactBodyLimitIsAllowedAndPreserved(): void {
 		$body = '{"object":{},"padding":"' . str_repeat('x', TalkWebhookPayload::MAX_BODY_BYTES - 26) . '"}';
 		$this->assertSame(TalkWebhookPayload::MAX_BODY_BYTES, strlen($body));
-		$stream = fopen('php://temp', 'w+b');
-		fwrite($stream, $body);
-		rewind($stream);
-		try {
-			$this->assertSame($body, TalkWebhookPayload::readBody($stream));
-			$this->assertSame([], TalkWebhookPayload::decode($body)['object']);
-		} finally {
-			fclose($stream);
-		}
+		$this->assertSame([], TalkWebhookPayload::decode($body)['object']);
 	}
 
 	#[DataProvider('invalidPayloads')]
