@@ -305,11 +305,11 @@ class RagIngestionService {
             $this->updateProgress($source, 'extracting', $extractProgress, $fileIndex + 1, $totalFiles);
         }
 
+        if (count($extractionErrors) > 0) {
+            $lastExtractionError = $extractionErrors[count($extractionErrors) - 1];
+            throw new Exception('Unable to extract text content for ingestion. Last extraction error: ' . $lastExtractionError);
+        }
         if (count($chunks) === 0) {
-            if (count($extractionErrors) > 0) {
-                $lastExtractionError = $extractionErrors[count($extractionErrors) - 1];
-                throw new Exception('Unable to extract text content for ingestion. Last extraction error: ' . $lastExtractionError);
-            }
             throw new Exception('Unable to extract text content for ingestion');
         }
 

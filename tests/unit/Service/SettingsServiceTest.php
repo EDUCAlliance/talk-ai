@@ -637,12 +637,19 @@ class SettingsServiceTest extends TestCase {
 			defaultModel: 'model-a',
 			doclingEnabled: true,
 			doclingApiEndpoint: 'https://docling.example.invalid/v1/documents/convert',
-			doclingApiKey: 'docling-key'
+			doclingApiKey: 'docling-key',
+			doclingApiProfile: 'docling_serve',
+			doclingAuthMode: 'x_api_key',
 		);
 
 		$this->assertTrue($result->getDoclingEnabled());
 		$this->assertSame('https://docling.example.invalid/v1/documents/convert', $result->getDoclingApiEndpoint());
 		$this->assertSame('encrypted-docling-key', $result->getDoclingApiKey());
+		$this->assertSame('docling_serve', $result->getDoclingApiProfile());
+		$this->assertSame('x_api_key', $result->getDoclingAuthMode());
+		$this->assertSame('docling_serve', $result->jsonSerialize()['docling_api_profile']);
+		$this->assertSame('x_api_key', $result->jsonSerialize()['docling_auth_mode']);
+		$this->assertSame('***', $result->jsonSerialize()['docling_api_key']);
 	}
 
 	public function testDoclingConfigPrefersDedicatedApiKeyAndFallsBackToMainKey(): void {
@@ -676,5 +683,64 @@ class SettingsServiceTest extends TestCase {
 		$settings->setDoclingApiKey(null);
 		$config = $service->getDoclingConfig();
 		$this->assertSame('api-key', $config['api_key']);
+	}
+
+	public function testDoclingModeOverridesNeverLeakMainKeyOrChangeSavedChoices(): void {
+		$settings = new Settings();
+		$settings->setApiKey('encrypted-main');
+		$settings->setDoclingApiEndpoint('https://docling.example/proxy');
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->method('getSettings')->willReturn($settings);
+		$mapper->expects($this->never())->method('update');
+		$credentials = $this->createMock(CredentialService::class);
+		$decrypted = [];
+		$credentials->method('decrypt')->willReturnCallback(static function (string $value) use (&$decrypted): string {
+			$decrypted[] = $value;
+			return str_replace('encrypted-', '', $value);
+		});
+		$service = new SettingsService($mapper, $credentials,
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class));
+
+		foreach ([null, 'encrypted-dedicated'] as $key) {
+			$settings->setDoclingApiKey($key);
+			foreach (['legacy', 'docling_serve'] as $profile) {
+				foreach (['bearer', 'x_api_key', 'none'] as $auth) {
+					$decrypted = [];
+					$config = $service->getDoclingConfig($profile, $auth);
+					$expected = $auth === 'none' ? '' : ($key !== null ? 'dedicated' : ($profile === 'legacy' && $auth === 'bearer' ? 'main' : null));
+					$this->assertSame($expected, $config['api_key'], "$profile / $auth");
+					$this->assertSame($expected ? ['encrypted-' . $expected] : [], $decrypted);
+					$this->assertSame($profile, $config['docling_api_profile']);
+					$this->assertSame($auth, $config['docling_auth_mode']);
+					$this->assertSame('https://docling.example/proxy', $config['docling_api_endpoint']);
+				}
+			}
+		}
+		$this->assertSame('legacy', $settings->getDoclingApiProfile());
+		$this->assertSame('bearer', $settings->getDoclingAuthMode());
+		$settings->setDoclingApiProfile('docling_serve');
+		$settings->setDoclingAuthMode('none');
+		$this->assertSame('', $service->getDoclingConfig()['api_key']);
+	}
+
+	public function testInvalidDoclingOptionsFailBeforeAnySettingsOrCredentialMutation(): void {
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->expects($this->never())->method('getSettings');
+		$mapper->expects($this->never())->method('update');
+		$credentials = $this->createMock(CredentialService::class);
+		$credentials->expects($this->never())->method('encrypt');
+		$service = new SettingsService($mapper, $credentials,
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class));
+		foreach ([['auto', 'bearer'], ['', 'none'], ['docling_serve', 'automatic'], ['legacy', '']] as [$profile, $auth]) {
+			try {
+				$service->updateSettings('custom', 'new-key', 'https://new.example', 'new-model',
+					doclingApiProfile: $profile, doclingAuthMode: $auth);
+				$this->fail('Invalid Docling options accepted');
+			} catch (\InvalidArgumentException $e) {
+				$this->assertStringStartsWith('Invalid Docling', $e->getMessage());
+			}
+		}
 	}
 }

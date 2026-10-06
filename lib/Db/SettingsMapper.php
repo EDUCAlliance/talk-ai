@@ -41,9 +41,10 @@ class SettingsMapper extends QBMapper {
 			$settings->setApiProvider('custom');
 			$settings->setDefaultModel('llama-3.3-70b-instruct');
 			$settings->setDefaultTemperature(0.2);
+			$settings->setDoclingApiProfile('docling_serve');
+			$settings->setDoclingAuthMode('x_api_key');
 			$settings->setUpdatedAt(time());
 			return $this->insert($settings);
 		}
 	}
 }
-

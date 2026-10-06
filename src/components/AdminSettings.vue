@@ -722,8 +722,25 @@ step="1">
 					{{ t('educai', 'Enable Document Conversion') }}
 				</label>
 				<p class="hint">
-					{{ t('educai', 'When enabled, PDF and Office documents attached to bots will be automatically converted to text for indexing. Uses the dedicated Docling API key when configured, otherwise falls back to the main API key.') }}
+					{{ t('educai', 'When enabled, PDF and Office documents attached to bots will be converted to text for indexing.') }}
 				</p>
+			</div>
+
+			<div class="form-group">
+				<label for="docling-profile">{{ t('educai', 'Docling API profile') }}</label>
+				<select id="docling-profile" v-model="settings.doclingApiProfile" @change="changeDoclingProfile">
+					<option value="docling_serve">{{ t('educai', 'Docling Serve (official)') }}</option>
+					<option value="legacy">{{ t('educai', 'AcademicCloud / EDUC (compatibility)') }}</option>
+				</select>
+			</div>
+
+			<div class="form-group">
+				<label for="docling-auth">{{ t('educai', 'Docling authentication') }}</label>
+				<select id="docling-auth" v-model="settings.doclingAuthMode" @change="doclingTestResult = null">
+					<option value="x_api_key">X-Api-Key</option>
+					<option value="bearer">Bearer</option>
+					<option value="none">{{ t('educai', 'No authentication') }}</option>
+				</select>
 			</div>
 
 			<div class="form-group">
@@ -734,9 +751,12 @@ step="1">
 					type="url"
 					name="educai-docling-endpoint"
 					autocomplete="off"
-					placeholder="https://chat-ai.academiccloud.de/v1/documents/convert">
+					:placeholder="settings.doclingApiProfile === 'docling_serve' ? 'https://docling.example.com/v1/convert/file' : 'https://chat-ai.academiccloud.de/v1/documents/convert'"
+					@input="doclingTestResult = null">
 				<p class="hint">
-					{{ t('educai', 'Optional. Leave blank to use the default Academic Cloud endpoint.') }}
+					{{ settings.doclingApiProfile === 'docling_serve'
+						? t('educai', 'Enter the server base URL or its /v1/convert/file endpoint, including any reverse-proxy path prefix. The /v1/convert/source endpoint does not accept file uploads.')
+						: t('educai', 'Optional. Leave blank to use the default Academic Cloud endpoint.') }}
 				</p>
 			</div>
 
@@ -748,9 +768,9 @@ step="1">
 					type="password"
 					name="educai-docling-key"
 					autocomplete="new-password"
-					placeholder="sk-...">
+					:disabled="settings.doclingAuthMode === 'none'"
+					@input="doclingTestResult = null">
 				<p class="hint">
-					{{ t('educai', 'Optional. Provide only if Docling requires a different credential.') }}
 					{{ doclingKeyHint }}
 				</p>
 			</div>
@@ -761,10 +781,10 @@ step="1">
 					class="button"
 					:disabled="doclingTesting"
 					@click="testDoclingConnection">
-					{{ doclingTesting ? t('educai', 'Testing…') : t('educai', 'Test Connection') }}
+					{{ doclingTesting ? t('educai', 'Testing…') : t('educai', 'Test PDF conversion') }}
 				</button>
 				<span v-if="doclingTestResult" :class="doclingTestResult.success ? 'success-text' : 'error-text'">
-					{{ doclingTestResult.success ? t('educai', '✓ Connection successful') : t('educai', '✗ {error}', { error: doclingTestResult.error }) }}
+					{{ doclingTestResult.success ? t('educai', '✓ Test PDF converted successfully') : t('educai', '✗ {error}', { error: doclingTestResult.error }) }}
 				</span>
 			</div>
 
@@ -1457,6 +1477,8 @@ export default {
 				doclingEnabled: false,
 				doclingApiEndpoint: '',
 				doclingApiKey: '',
+				doclingApiProfile: 'docling_serve',
+				doclingAuthMode: 'x_api_key',
 				visionApiEndpoint: '',
 				visionApiKey: '',
 				visionModel: '',
@@ -1614,10 +1636,15 @@ export default {
 			return false
 		},
 		doclingKeyHint() {
+			if (this.settings.doclingAuthMode === 'none') {
+				return t('educai', 'No credential is sent. Any stored Docling key is kept for later use.')
+			}
 			if (this.doclingHasStoredApiKey) {
 				return t('educai', 'A stored Docling key is configured and kept unless you enter a new value.')
 			}
-			return t('educai', 'Leave blank to reuse the main API key.')
+			return this.settings.doclingApiProfile === 'legacy' && this.settings.doclingAuthMode === 'bearer'
+				? t('educai', 'Leave blank to reuse the main API key.')
+				: t('educai', 'Enter a dedicated Docling key, or select No authentication if your server does not require one. The main API key is not used.')
 		},
 		essentialsSummary() {
 			return t('educai', 'Temp {temperature}', { temperature: this.formatTemperature(this.settings.defaultTemperature) })
@@ -2026,6 +2053,8 @@ export default {
 				this.captureIndexSettingsBaseline()
 				this.settings.doclingEnabled = !!data.docling_enabled
 				this.settings.doclingApiEndpoint = data.docling_api_endpoint || ''
+				this.settings.doclingApiProfile = data.docling_api_profile || 'legacy'
+				this.settings.doclingAuthMode = data.docling_auth_mode || 'bearer'
 				this.doclingHasStoredApiKey = data.docling_api_key === '***'
 				this.settings.visionApiEndpoint = data.vision_api_endpoint || ''
 				this.settings.visionModel = data.vision_model || ''
@@ -2122,7 +2151,9 @@ export default {
 					catalogueReindexHours: Number.isFinite(this.settings.catalogueReindexHours) ? Number(this.settings.catalogueReindexHours) : 24,
 					doclingEnabled: this.settings.doclingEnabled,
 					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
-					doclingApiKey: this.settings.doclingApiKey ? this.settings.doclingApiKey : null,
+					doclingApiKey: this.settings.doclingAuthMode !== 'none' ? this.settings.doclingApiKey || null : null,
+					doclingApiProfile: this.settings.doclingApiProfile,
+					doclingAuthMode: this.settings.doclingAuthMode,
 					visionApiEndpoint: (this.settings.visionApiEndpoint || '').trim(),
 					visionApiKey: this.settings.visionApiKey ? this.settings.visionApiKey : null,
 					visionModel: (this.settings.visionModel || '').trim(),
@@ -2410,22 +2441,30 @@ export default {
 			const diffDays = Math.floor(diffHours / 24)
 			return relativeTime.format(-diffDays, 'day')
 		},
+		changeDoclingProfile() {
+			this.settings.doclingAuthMode = this.settings.doclingApiProfile === 'docling_serve' ? 'x_api_key' : 'bearer'
+			this.doclingTestResult = null
+		},
 		async testDoclingConnection() {
 			this.doclingTesting = true
 			this.doclingTestResult = null
 			try {
 				const resp = await axios.post(generateUrl('/apps/educai/api/v1/admin/docling/test'), {
-					doclingApiEndpoint: this.settings.doclingApiEndpoint || null,
-					doclingApiKey: this.settings.doclingApiKey
-						|| (!this.doclingHasStoredApiKey ? this.settings.apiKey : null)
-						|| null,
+					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
+					doclingApiProfile: this.settings.doclingApiProfile,
+					doclingAuthMode: this.settings.doclingAuthMode,
+					doclingApiKey: this.settings.doclingAuthMode === 'none'
+						? null
+						: (this.settings.doclingApiKey
+							|| (!this.doclingHasStoredApiKey && this.settings.doclingApiProfile === 'legacy' && this.settings.doclingAuthMode === 'bearer' ? this.settings.apiKey : null)
+							|| null),
 				})
 				this.doclingTestResult = {
 					success: resp.data?.success ?? false,
 					error: getApiErrorMessage(resp, t('educai', 'Connection test failed')),
 				}
 				if (this.doclingTestResult.success) {
-					showSuccess(t('educai', 'Docling connection successful'))
+					showSuccess(t('educai', 'Test PDF converted successfully'))
 				} else {
 					showError(this.doclingTestResult.error)
 				}

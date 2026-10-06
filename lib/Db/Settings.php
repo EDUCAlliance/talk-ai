@@ -86,6 +86,10 @@ use OCP\AppFramework\Db\Entity;
  * @method void setDoclingApiEndpoint(?string $doclingApiEndpoint)
  * @method ?string getDoclingApiKey()
  * @method void setDoclingApiKey(?string $doclingApiKey)
+ * @method string getDoclingApiProfile()
+ * @method void setDoclingApiProfile(string $doclingApiProfile)
+ * @method string getDoclingAuthMode()
+ * @method void setDoclingAuthMode(string $doclingAuthMode)
  * @method ?string getVisionApiEndpoint()
  * @method void setVisionApiEndpoint(?string $visionApiEndpoint)
  * @method ?string getVisionApiKey()
@@ -164,6 +168,8 @@ class Settings extends Entity implements JsonSerializable {
     protected bool $doclingEnabled = false;
     protected ?string $doclingApiEndpoint = null;
     protected ?string $doclingApiKey = null;
+    protected string $doclingApiProfile = 'legacy';
+    protected string $doclingAuthMode = 'bearer';
     protected ?string $visionApiEndpoint = null;
     protected ?string $visionApiKey = null;
     protected ?string $visionModel = null;
@@ -253,6 +259,8 @@ class Settings extends Entity implements JsonSerializable {
 			'docling_enabled' => (bool)$this->doclingEnabled,
 			'docling_api_endpoint' => $this->doclingApiEndpoint,
 			'docling_api_key' => $this->doclingApiKey ? '***' : '',
+			'docling_api_profile' => $this->doclingApiProfile,
+			'docling_auth_mode' => $this->doclingAuthMode,
 			'vision_api_endpoint' => $this->visionApiEndpoint,
 			'vision_api_key' => $this->visionApiKey ? '***' : '',
 			'vision_model' => $this->visionModel,

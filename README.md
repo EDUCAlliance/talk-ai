@@ -89,6 +89,7 @@ Talk AI speaks the OpenAI HTTP API, so it works with OpenAI, Azure OpenAI, self-
 - [Feature guide](docs/FEATURES.md) · [Architecture](docs/ARCHITECTURE.md) · [Bot setup](docs/BOT_SETUP_GUIDE.md)
 - [Quick start](docs/QUICK_START.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Development](docs/DEVELOPMENT.md)
 - [RAG tool guide](docs/RAG_TOOL_GUIDE.md) · [RAG background jobs](docs/RAG_BACKGROUND_JOBS_GUIDE.md)
+- [Docling setup](docs/DOCLING.md) — official Docling Serve and AcademicCloud / EDUC compatibility
 - [Tool-provider extension point](docs/TOOL_PROVIDERS.md) — how companion apps add their own bot tools
 
 ## Development

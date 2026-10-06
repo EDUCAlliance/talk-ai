@@ -149,8 +149,11 @@ class SettingsController extends Controller {
 		?string $appIconMode = null,
 		?string $appIconBlackUrl = null,
 		?string $appIconWhiteUrl = null,
+		?string $doclingApiProfile = null,
+		?string $doclingAuthMode = null,
 	): DataResponse {
 		try {
+			$this->settingsService->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 			$this->logger->info('EducAI Settings Update - catalogueApiEndpoint: ' . var_export($catalogueApiEndpoint, true) . ', catalogueEnabled: ' . var_export($catalogueEnabled, true));
 			$beforeRateLimitConfig = $this->extractRateLimitConfig($this->settingsService->getSettings());
 			$settings = $this->settingsService->updateSettings(
@@ -201,7 +204,9 @@ class SettingsController extends Controller {
 				$appIconUrl,
 				$appIconMode,
 				$appIconBlackUrl,
-				$appIconWhiteUrl
+				$appIconWhiteUrl,
+				$doclingApiProfile,
+				$doclingAuthMode,
 			);
 
 			$afterRateLimitConfig = $this->extractRateLimitConfig($settings);
