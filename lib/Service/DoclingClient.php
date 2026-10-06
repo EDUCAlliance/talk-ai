@@ -17,8 +17,6 @@ use Psr\Log\LoggerInterface;
  */
 class DoclingClient {
     private const DEFAULT_ENDPOINT = 'https://chat-ai.academiccloud.de/v1/documents/convert';
-    private const MAX_CONVERSION_ATTEMPTS = 3;
-    private const RETRY_BACKOFF_SECONDS = [1, 2];
     private const BASE_CONVERSION_TIMEOUT = 120;
     private const MAX_CONVERSION_TIMEOUT = 600;
     
@@ -77,7 +75,8 @@ class DoclingClient {
      */
     public function isEnabled(): bool {
         $config = $this->settingsService->getDoclingConfig();
-        return $config['docling_enabled'] && !empty($config['api_key']);
+        return $config['docling_enabled']
+            && (($config['docling_auth_mode'] ?? 'bearer') === 'none' || !empty($config['api_key']));
     }
 
     /**
@@ -124,16 +123,6 @@ class DoclingClient {
             throw new Exception('Docling document conversion is disabled');
         }
 
-        $apiKey = $config['api_key'];
-        if (empty($apiKey)) {
-            throw new Exception('API key not configured for Docling');
-        }
-
-        $endpoint = $config['docling_api_endpoint'];
-        if (empty($endpoint)) {
-            $endpoint = self::DEFAULT_ENDPOINT;
-        }
-
         $this->logger->info('Converting document via Docling', [
             'file' => $filename,
             'mimeType' => $mimeType,
@@ -141,8 +130,7 @@ class DoclingClient {
         ]);
 
         try {
-            $payload = $this->convertContent($endpoint, $apiKey, $filename, $content, $mimeType, $this->getConversionTimeout(strlen($content)));
-            $markdown = $this->extractMarkdown($payload, $filename);
+            $markdown = $this->convertContent($config, $filename, $content, $mimeType, $this->getConversionTimeout(strlen($content)));
 
             $this->logger->info('Document converted successfully', [
                 'file' => $filename,
@@ -154,7 +142,7 @@ class DoclingClient {
         } catch (Exception $e) {
             $this->logger->error('Docling conversion failed', [
                 'file' => $filename,
-                'exception' => $e,
+                'error' => $e->getMessage(),
             ]);
             throw new Exception('Failed to convert document: ' . $e->getMessage());
         }
@@ -176,151 +164,178 @@ class DoclingClient {
      * 
      * @param string|null $endpoint Optional custom endpoint to test
      * @param string|null $apiKey Optional API key to use
+     * @param string|null $profile Optional unsaved API profile
+     * @param string|null $authMode Optional unsaved authentication mode
      * @return array{success: bool, error?: string}
      */
-    public function testConnection(?string $endpoint = null, ?string $apiKey = null): array {
-        $config = $this->settingsService->getDoclingConfig();
-        
-        $testEndpoint = $endpoint ?? $config['docling_api_endpoint'] ?? self::DEFAULT_ENDPOINT;
-        $testApiKey = $apiKey ?? $config['api_key'];
-
-        if (empty($testApiKey)) {
-            return ['success' => false, 'error' => 'API key not configured'];
+    public function testConnection(?string $endpoint = null, ?string $apiKey = null, ?string $profile = null, ?string $authMode = null): array {
+        try {
+            $config = $this->settingsService->getDoclingConfig($profile, $authMode);
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => 'Unable to read Docling settings. Check the saved configuration.'];
         }
+        $config['docling_api_endpoint'] = $endpoint ?? $config['docling_api_endpoint'] ?? '';
+        $config['api_key'] = $apiKey ?? $config['api_key'] ?? '';
 
         try {
-            $payload = $this->convertContent(
-                $testEndpoint,
-                $testApiKey,
+            $this->convertContent(
+                $config,
                 'educai-docling-test.pdf',
                 $this->buildTestPdf(),
                 'application/pdf',
                 60
             );
-            $this->extractMarkdown($payload, 'educai-docling-test.pdf');
             return ['success' => true];
 
         } catch (Exception $e) {
-            $message = $e->getMessage();
-
-            // Auth failed or network error
-            if (strpos($message, '401') !== false || strpos($message, '403') !== false) {
-                return ['success' => false, 'error' => 'Authentication failed - check API key'];
-            }
-
-            return ['success' => false, 'error' => $message];
+            return ['success' => false, 'error' => $e->getMessage()];
         }
     }
 
     /**
-     * @return array<string,mixed>
+     * @param array<string,mixed> $config
      */
-    private function convertContent(string $endpoint, string $apiKey, string $filename, string $content, string $mimeType, int $timeout): array {
-        $attempt = 0;
-        $lastException = null;
-
-        while ($attempt < self::MAX_CONVERSION_ATTEMPTS) {
-            $attempt++;
-
-            try {
-                $client = $this->clientService->newClient();
-                $response = $client->post($endpoint, [
-                    'headers' => [
-                        'Authorization' => 'Bearer ' . $apiKey,
-                        'Accept' => 'application/json',
-                    ],
-                    'multipart' => [
-                        [
-                            'name' => 'document',
-                            'contents' => $content,
-                            'filename' => $filename,
-                            'headers' => [
-                                'Content-Type' => $mimeType,
-                            ],
-                        ],
-                    ],
-                    'timeout' => $timeout,
-                ]);
-
-                $payload = json_decode($response->getBody(), true);
-                if (!is_array($payload)) {
-                    throw new Exception('Invalid response from Docling API');
-                }
-
-                if (isset($payload['detail'])) {
-                    throw new Exception('Docling API error: ' . $this->stringifyDetail($payload['detail']));
-                }
-
-                return $payload;
-            } catch (Exception $e) {
-                $lastException = $e;
-
-                if (!$this->shouldRetry($e, $timeout) || $attempt >= self::MAX_CONVERSION_ATTEMPTS) {
-                    break;
-                }
-
-                $delay = self::RETRY_BACKOFF_SECONDS[$attempt - 1] ?? 2;
-                $this->logger->warning('Docling conversion failed, retrying', [
-                    'file' => $filename,
-                    'attempt' => $attempt,
-                    'nextAttempt' => $attempt + 1,
-                    'delaySeconds' => $delay,
-                    'error' => $e->getMessage(),
-                ]);
-                $this->sleepBeforeRetry($delay);
+    private function convertContent(array $config, string $filename, string $content, string $mimeType, int $timeout): string {
+        $profile = $config['docling_api_profile'] ?? 'legacy';
+        $authMode = $config['docling_auth_mode'] ?? 'bearer';
+        if (!in_array($profile, ['legacy', 'docling_serve'], true)
+            || !in_array($authMode, ['bearer', 'x_api_key', 'none'], true)) {
+            throw new Exception('Invalid Docling API profile or authentication mode. Check the Docling settings.');
+        }
+        $endpoint = $this->resolveEndpoint((string)($config['docling_api_endpoint'] ?? ''), $profile);
+        $headers = ['Accept' => 'application/json'];
+        if ($authMode !== 'none') {
+            $apiKey = trim((string)($config['api_key'] ?? ''));
+            if ($apiKey === '') {
+                throw new Exception('API key not configured for Docling. Supply a Docling key or select no authentication.');
             }
+            if (preg_match('/[\x00-\x1F\x7F]/', $apiKey)) {
+                throw new Exception('The Docling API key contains invalid control characters.');
+            }
+            $headers[$authMode === 'bearer' ? 'Authorization' : 'X-Api-Key'] = ($authMode === 'bearer' ? 'Bearer ' : '') . $apiKey;
+        }
+        $multipart = [[
+            'name' => $profile === 'docling_serve' ? 'files' : 'document',
+            'contents' => $content,
+            'filename' => $filename,
+            'headers' => ['Content-Type' => $mimeType],
+        ]];
+        if ($profile === 'docling_serve') {
+            $multipart[] = ['name' => 'to_formats', 'contents' => 'md'];
+            $multipart[] = ['name' => 'target_type', 'contents' => 'inbody'];
         }
 
-        throw $lastException ?? new Exception('Docling conversion failed');
-    }
-
-    /**
-     * @param array<string,mixed> $payload
-     */
-    private function extractMarkdown(array $payload, string $filename): string {
-        $markdown = $payload['markdown'] ?? null;
-        if (!is_string($markdown) || trim($markdown) === '') {
-            $this->logger->warning('Docling returned empty markdown', [
-                'file' => $filename,
-                'response' => $payload,
+        try {
+            // A timeout/5xx can leave a conversion running; never resubmit or follow redirects.
+            $response = $this->clientService->newClient()->post($endpoint, [
+                'headers' => $headers,
+                'multipart' => $multipart,
+                'timeout' => $timeout,
+                'allow_redirects' => false,
+                'http_errors' => false,
             ]);
-            throw new Exception('Docling returned empty content for document');
+            $status = $response->getStatusCode();
+            $body = (string)$response->getBody();
+        } catch (Exception $e) {
+            // HTTP-client exceptions can contain credentials, URLs and document content.
+            if (preg_match('/cURL error 28|timed out/i', $e->getMessage())) {
+                throw new Exception('Docling conversion timed out. The server may still be processing it; no automatic retry was made. Check its synchronous conversion limit.');
+            }
+            throw new Exception('Docling request failed. Check the server address, connectivity and TLS configuration. The conversion was not retried.');
+        }
+        if ($status < 200 || $status >= 300) {
+            throw new Exception(match (true) {
+                $status === 401 || $status === 403 => 'Docling authentication failed (HTTP ' . $status . '). Check the authentication mode and Docling API key.',
+                $status === 404 => 'Docling endpoint not found (HTTP 404). Check the API profile and conversion URL.',
+                $status === 422 => 'Docling rejected the upload (HTTP 422). Check the API profile and use the file-upload endpoint, not /v1/convert/source.',
+                $status === 408 || $status === 504 => 'Docling conversion timed out (HTTP ' . $status . '). The server may still be processing it; no automatic retry was made. Check its synchronous conversion limit.',
+                $status === 413 => 'Docling rejected the document size (HTTP 413). Check the server upload limit.',
+                $status >= 300 && $status < 400 => 'Docling returned a redirect. Configure the final conversion URL; redirects are not followed.',
+                default => 'Docling returned HTTP ' . $status . '. Check the server logs; the conversion was not retried.',
+            });
+        }
+
+        $payload = json_decode($body, true);
+        if (!is_array($payload) || array_is_list($payload)) {
+            throw new Exception('Docling did not return a JSON object. Check the API profile and inline output configuration.');
+        }
+        $conversionStatus = $payload['status'] ?? null;
+        if ($conversionStatus === 'partial_success') {
+            throw new Exception('Docling returned a partial conversion. Incomplete text was rejected; check the server logs.');
+        }
+        if (isset($payload['detail']) || isset($payload['error']) || ($payload['errors'] ?? []) !== []) {
+            throw new Exception('Docling reported conversion errors. Incomplete text was rejected; check the server logs.');
+        }
+        if (($profile === 'docling_serve' || isset($payload['status'])) && $conversionStatus !== 'success') {
+            throw new Exception('Docling did not report a successful conversion. Check the API profile and server logs.');
+        }
+        $markdown = $profile === 'docling_serve' ? ($payload['document']['md_content'] ?? null) : ($payload['markdown'] ?? null);
+        if (!is_string($markdown) || trim($markdown) === '') {
+            throw new Exception('Docling returned no Markdown content. Check the API profile and inline output configuration.');
+        }
+
+        // Legacy EDUC warnings include informational backend notices, not just failures.
+        $warnings = $payload['warnings'] ?? $payload['metadata']['warnings'] ?? [];
+        if (!empty($warnings)) {
+            $this->logger->warning('Docling conversion returned warnings; consult the conversion server logs', [
+                'warningCount' => is_array($warnings) ? count($warnings) : 1,
+            ]);
         }
 
         return $markdown;
     }
 
-    private function shouldRetry(Exception $e, int $timeout): bool {
-        $message = $e->getMessage();
-        if (preg_match('/\\b(500|502|503|504)\\b/', $message) === 1) {
-            return true;
+    private function resolveEndpoint(string $endpoint, string $profile): string {
+        $endpoint = trim($endpoint);
+        if ($endpoint === '') {
+            if ($profile === 'legacy') {
+                return self::DEFAULT_ENDPOINT;
+            }
+            throw new Exception('Configure the Docling Serve server URL or its /v1/convert/file endpoint.');
+        }
+        $parts = parse_url($endpoint);
+        if (filter_var($endpoint, FILTER_VALIDATE_URL) === false || !is_array($parts)
+            || !in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true)
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])) {
+            throw new Exception('Docling endpoint must be an HTTP(S) URL without embedded credentials or a fragment.');
+        }
+        $path = rtrim($parts['path'] ?? '', '/');
+        $decodedPath = rawurldecode($path);
+        if (preg_match('~/v1/convert/source(?:/(?:async|batch))?$~', $decodedPath)) {
+            throw new Exception('The Docling /source endpoint expects JSON. Select Docling Serve and use /v1/convert/file for file uploads.');
+        }
+        if (str_ends_with($decodedPath, '/async')) {
+            throw new Exception('Async Docling endpoints are not supported. Use the synchronous /v1/convert/file endpoint.');
+        }
+        if ($profile === 'docling_serve') {
+            if (str_ends_with($decodedPath, '/v1/documents/convert')) {
+                throw new Exception('This URL uses the legacy conversion endpoint. Select the AcademicCloud / EDUC profile or use /v1/convert/file.');
+            }
+            if (!str_ends_with($path, '/v1/convert/file')) {
+                $path .= str_ends_with($path, '/v1/convert') ? '/file'
+                    : (str_ends_with($path, '/v1') ? '/convert/file' : '/v1/convert/file');
+            }
+        } else {
+            if (str_ends_with($decodedPath, '/v1/convert/file')) {
+                throw new Exception('This URL uses Docling Serve. Select the Docling Serve API profile.');
+            }
+            // Preserve existing custom legacy routes; only expand an origin or /v1 base.
+            if ($path === '' || str_ends_with($path, '/v1')) {
+                $path .= $path === '' ? '/v1/documents/convert' : '/documents/convert';
+            } else {
+                $path = $parts['path'];
+            }
         }
 
-        if (strpos($message, 'cURL error 28') !== false || strpos($message, 'Operation timed out') !== false) {
-            return $timeout < 300;
-        }
-
-        return strpos($message, 'Connection refused') !== false
-            || strpos($message, 'Connection reset') !== false;
-    }
-
-    private function stringifyDetail(mixed $detail): string {
-        if (is_string($detail)) {
-            return $detail;
-        }
-
-        $encoded = json_encode($detail);
-        return $encoded !== false ? $encoded : 'unknown error';
+        return $parts['scheme'] . '://' . $parts['host']
+            . (isset($parts['port']) ? ':' . $parts['port'] : '') . $path
+            . (isset($parts['query']) ? '?' . $parts['query'] : '');
     }
 
     private function getConversionTimeout(int $contentSize): int {
         $megabytes = (int)ceil($contentSize / (1024 * 1024));
         $timeout = self::BASE_CONVERSION_TIMEOUT + max(0, $megabytes - 2) * 60;
         return min(self::MAX_CONVERSION_TIMEOUT, $timeout);
-    }
-
-    protected function sleepBeforeRetry(int $seconds): void {
-        sleep($seconds);
     }
 
     private function buildTestPdf(): string {

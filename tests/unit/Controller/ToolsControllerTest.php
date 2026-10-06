@@ -87,11 +87,35 @@ class ToolsControllerTest extends TestCase {
 		$this->assertSame('translated:Catalogue connection test failed', $response->getData()['error']);
 	}
 
+	public function testDoclingTestForwardsUnsavedProfileAndAuthAndKeepsSafeDiagnostic(): void {
+		$docling = $this->createMock(DoclingClient::class);
+		$docling->expects($this->once())->method('testConnection')
+			->with('https://docling.example/proxy/v1/convert/source', null, 'docling_serve', 'none')
+			->willReturn(['success' => false, 'error' => 'Use the file-upload endpoint /v1/convert/file.']);
+		$controller = $this->createController($this->createMock(ToolRegistry::class),
+			$this->createMock(ToolProviderRegistry::class), $this->createL10n(), doclingClient: $docling);
+		$response = $controller->testDocling('https://docling.example/proxy/v1/convert/source', null, 'docling_serve', 'none');
+		$this->assertSame(400, $response->getStatus());
+		$this->assertSame('docling_connection_failed', $response->getData()['errorCode']);
+		$this->assertSame('Use the file-upload endpoint /v1/convert/file.', $response->getData()['error']);
+	}
+
+	public function testDoclingTestStillHidesUnexpectedExceptionDetails(): void {
+		$docling = $this->createMock(DoclingClient::class);
+		$docling->method('testConnection')->willThrowException(new \RuntimeException('private credential'));
+		$controller = $this->createController($this->createMock(ToolRegistry::class),
+			$this->createMock(ToolProviderRegistry::class), $this->createL10n(), doclingClient: $docling);
+		$response = $controller->testDocling();
+		$this->assertSame(400, $response->getStatus());
+		$this->assertSame('translated:Docling connection test failed', $response->getData()['error']);
+	}
+
 	private function createController(
 		ToolRegistry $toolRegistry,
 		ToolProviderRegistry $providerRegistry,
 		IL10N $l10n,
 		?CatalogueClient $catalogueClient = null,
+		?DoclingClient $doclingClient = null,
 	): ToolsController {
 		return new ToolsController(
 			'educai',
@@ -99,7 +123,7 @@ class ToolsControllerTest extends TestCase {
 			$this->createMock(ToolMapper::class),
 			$toolRegistry,
 			$this->createMock(McpClient::class),
-			$this->createMock(DoclingClient::class),
+			$doclingClient ?? $this->createMock(DoclingClient::class),
 			$this->createMock(VisionClient::class),
 			$this->createMock(SpeechToTextClient::class),
 			$providerRegistry,

@@ -164,6 +164,8 @@ class SettingsService {
 	 * @param string|null $appIconMode
 	 * @param string|null $appIconBlackUrl
 	 * @param string|null $appIconWhiteUrl
+	 * @param string|null $doclingApiProfile
+	 * @param string|null $doclingAuthMode
 	 * @return Settings
 	 */
 	public function updateSettings(
@@ -214,8 +216,11 @@ class SettingsService {
 		?string $appIconUrl = null,
 		?string $appIconMode = null,
 		?string $appIconBlackUrl = null,
-		?string $appIconWhiteUrl = null
+		?string $appIconWhiteUrl = null,
+		?string $doclingApiProfile = null,
+		?string $doclingAuthMode = null,
 	): Settings {
+		$this->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 		$settings = $this->mapper->getSettings();
 		$previousSettings = clone $settings;
 		$shouldSyncTalkBot = false;
@@ -313,6 +318,12 @@ class SettingsService {
 		}
 		if ($doclingApiKey !== null && $doclingApiKey !== '') {
 			$settings->setDoclingApiKey($this->credentialService->encrypt($doclingApiKey));
+		}
+		if ($doclingApiProfile !== null) {
+			$settings->setDoclingApiProfile($doclingApiProfile);
+		}
+		if ($doclingAuthMode !== null) {
+			$settings->setDoclingAuthMode($doclingAuthMode);
 		}
 		if ($visionApiEndpoint !== null) {
 			$settings->setVisionApiEndpoint($visionApiEndpoint !== '' ? $visionApiEndpoint : null);
@@ -682,18 +693,40 @@ class SettingsService {
 	 * @return array{
 	 *     docling_enabled: bool,
 	 *     docling_api_endpoint: ?string,
+	 *     docling_api_profile: string,
+	 *     docling_auth_mode: string,
 	 *     api_key: ?string
 	 * }
 	 */
-	public function getDoclingConfig(): array {
+	public function getDoclingConfig(?string $profile = null, ?string $authMode = null): array {
 		$settings = $this->mapper->getSettings();
+		$profile ??= $settings->getDoclingApiProfile();
+		$authMode ??= $settings->getDoclingAuthMode();
+		$this->validateDoclingOptions($profile, $authMode);
+		$apiKey = '';
+		if ($authMode !== 'none') {
+			$apiKey = $this->decryptOptionalCredential($settings->getDoclingApiKey());
+			if ($apiKey === null && $profile === 'legacy' && $authMode === 'bearer') {
+				$apiKey = $this->credentialService->decrypt($settings->getApiKey() ?? '');
+			}
+		}
 
 		return [
 			'docling_enabled' => (bool)$settings->getDoclingEnabled(),
 			'docling_api_endpoint' => $settings->getDoclingApiEndpoint(),
-			'api_key' => $this->decryptOptionalCredential($settings->getDoclingApiKey())
-				?? $this->credentialService->decrypt($settings->getApiKey() ?? ''),
+			'docling_api_profile' => $profile,
+			'docling_auth_mode' => $authMode,
+			'api_key' => $apiKey,
 		];
+	}
+
+	public function validateDoclingOptions(?string $profile, ?string $authMode): void {
+		if ($profile !== null && !in_array($profile, ['legacy', 'docling_serve'], true)) {
+			throw new \InvalidArgumentException('Invalid Docling API profile');
+		}
+		if ($authMode !== null && !in_array($authMode, ['bearer', 'x_api_key', 'none'], true)) {
+			throw new \InvalidArgumentException('Invalid Docling authentication mode');
+		}
 	}
 
 	/**

@@ -361,13 +361,16 @@ class ToolsController extends Controller {
     public function testDocling(
         ?string $doclingApiEndpoint = null,
         ?string $doclingApiKey = null,
+        ?string $doclingApiProfile = null,
+        ?string $doclingAuthMode = null,
     ): DataResponse {
         return $this->runConnectionTest(
             'Docling',
             $doclingApiEndpoint,
-            fn (): array => $this->doclingClient->testConnection($doclingApiEndpoint, $doclingApiKey),
+            fn (): array => $this->doclingClient->testConnection($doclingApiEndpoint, $doclingApiKey, $doclingApiProfile, $doclingAuthMode),
             'docling_connection_failed',
             $this->l10n->t('Docling connection test failed'),
+            true, // DoclingClient returns only fixed, safe diagnostics, never upstream bodies.
         );
     }
 
@@ -414,6 +417,7 @@ class ToolsController extends Controller {
         callable $testConnection,
         string $errorCode,
         string $failureMessage,
+        bool $useSafeError = false,
     ): DataResponse {
         try {
             $result = $testConnection();
@@ -430,7 +434,7 @@ class ToolsController extends Controller {
             ]);
             return new DataResponse([
                 'success' => false,
-                'error' => $failureMessage,
+                'error' => $useSafeError ? ($result['error'] ?? $failureMessage) : $failureMessage,
                 'errorCode' => $errorCode,
             ], 400);
         } catch (Exception $e) {

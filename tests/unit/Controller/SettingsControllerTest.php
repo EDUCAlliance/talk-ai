@@ -9,6 +9,7 @@ use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\QueuedRequest;
+use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\LLMClient;
@@ -28,6 +29,41 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class SettingsControllerTest extends TestCase {
+	public function testUpdatePassesDoclingChoicesAndReturnsThemWithMaskedKey(): void {
+		$settings = new Settings();
+		$settings->setDoclingApiProfile('docling_serve');
+		$settings->setDoclingAuthMode('none');
+		$settings->setDoclingApiKey('encrypted-dedicated-key');
+		$service = $this->createMock(SettingsService::class);
+		$service->expects($this->once())->method('validateDoclingOptions')->with('docling_serve', 'none');
+		$service->method('getSettings')->willReturn($settings);
+		$service->expects($this->once())->method('updateSettings')->willReturnCallback(function (...$arguments) use ($settings): Settings {
+			$this->assertSame(['docling_serve', 'none'], array_slice($arguments, -2));
+			$this->assertSame('https://docling.example/proxy', $arguments[18]);
+			return $settings;
+		});
+		$controller = $this->createController($this->createMock(RateLimitService::class),
+			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service);
+		$response = $controller->update('', '', 'model', doclingApiEndpoint: 'https://docling.example/proxy',
+			doclingApiProfile: 'docling_serve', doclingAuthMode: 'none');
+		$this->assertSame(200, $response->getStatus());
+		$this->assertSame('docling_serve', $response->getData()['docling_api_profile']);
+		$this->assertSame('none', $response->getData()['docling_auth_mode']);
+		$this->assertSame('***', $response->getData()['docling_api_key']);
+	}
+
+	public function testInvalidDoclingOptionsDoNotEvenTriggerCredentialMigration(): void {
+		$service = $this->createMock(SettingsService::class);
+		$service->method('validateDoclingOptions')->willThrowException(new \InvalidArgumentException('Invalid Docling API profile'));
+		$service->expects($this->never())->method('getSettings');
+		$service->expects($this->never())->method('updateSettings');
+		$controller = $this->createController($this->createMock(RateLimitService::class),
+			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service);
+		$this->assertSame(400, $controller->update('new-key', '', 'model', doclingApiProfile: 'unknown')->getStatus());
+	}
+
 	public function testRateLimitStatusReturnsSafeLocalizedErrorCode(): void {
 		$rateLimitService = $this->createMock(RateLimitService::class);
 		$rateLimitService->method('getStatus')->willThrowException(new \RuntimeException('database password leaked'));
@@ -71,7 +107,6 @@ class SettingsControllerTest extends TestCase {
 			$this->createMock(TraceService::class),
 			$llmClient,
 			$l10n,
-			$this->createMock(\OCA\EducAI\Service\EmbeddingAdminService::class),
 		);
 
 		$data = $controller->models()->getData();
@@ -943,12 +978,13 @@ class SettingsControllerTest extends TestCase {
 		TraceService $traceService,
 		?LLMClient $llmClient = null,
 		?IL10N $l10n = null,
+		?SettingsService $settingsService = null,
 	): SettingsController {
 		$l10n ??= $this->createL10n();
 		return new SettingsController(
 			'educai',
 			$this->createMock(IRequest::class),
-			$this->createMock(SettingsService::class),
+			$settingsService ?? $this->createMock(SettingsService::class),
 			$llmClient ?? $this->createMock(LLMClient::class),
 			$rateLimitService,
 			$botService,
