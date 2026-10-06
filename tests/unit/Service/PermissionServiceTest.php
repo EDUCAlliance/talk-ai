@@ -7,13 +7,59 @@ namespace OCA\EducAI\Tests\Unit\Service;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Service\PermissionService;
 use OCP\App\IAppManager;
+use OCP\Group\ISubAdmin;
 use OCP\IGroupManager;
 use OCP\IL10N;
+use OCP\IUser;
 use OCP\IUserManager;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class PermissionServiceTest extends TestCase {
+	public function testInjectedSubAdminResolvesGroupPermissionsForMembersAndAdmins(): void {
+		$user = $this->createMock(IUser::class);
+		$group = new class {
+			public function getGID(): string { return 'managed-group'; }
+		};
+		foreach ([false, true] as $isSubAdmin) {
+			$subAdmin = $this->createSubAdmin();
+			$subAdmin->expects($this->once())->method('isSubAdmin')->with($user)->willReturn($isSubAdmin);
+			$subAdmin->expects($this->once())->method('getSubAdminsGroups')->with($user)->willReturn($isSubAdmin ? [$group] : []);
+			$service = $this->createGroupPermissionService($user, $subAdmin);
+
+			$this->assertSame($isSubAdmin, $service->isGroupAdmin('reviewer'));
+			$this->assertSame($isSubAdmin ? ['managed-group'] : [], $service->getAdminGroups('reviewer'));
+		}
+	}
+
+	public function testUnknownUserDoesNotConsultSubAdmin(): void {
+		$subAdmin = $this->createSubAdmin();
+		$subAdmin->expects($this->never())->method('isSubAdmin');
+		$subAdmin->expects($this->never())->method('getSubAdminsGroups');
+		$service = $this->createGroupPermissionService(null, $subAdmin);
+
+		$this->assertFalse($service->isGroupAdmin('reviewer'));
+		$this->assertSame([], $service->getAdminGroups('reviewer'));
+	}
+
+	public function testSubAdminFailuresDenyGroupPermissions(): void {
+		$user = $this->createMock(IUser::class);
+		$subAdmin = $this->createSubAdmin();
+		$subAdmin->expects($this->once())->method('isSubAdmin')->with($user)->willThrowException(new \RuntimeException('Lookup failed'));
+		$subAdmin->expects($this->once())->method('getSubAdminsGroups')->with($user)->willThrowException(new \RuntimeException('Lookup failed'));
+		$service = $this->createGroupPermissionService($user, $subAdmin);
+
+		$this->assertFalse($service->isGroupAdmin('reviewer'));
+		$this->assertSame([], $service->getAdminGroups('reviewer'));
+	}
+
+	public function testMissingSubAdminDependencyDeniesGroupPermissions(): void {
+		$service = $this->createGroupPermissionService($this->createMock(IUser::class));
+
+		$this->assertFalse($service->isGroupAdmin('reviewer'));
+		$this->assertSame([], $service->getAdminGroups('reviewer'));
+	}
+
 	public function testAvailableVisibilityLabelsUseRequestLocale(): void {
 		$l10nBuilder = $this->getMockBuilder(IL10N::class);
 		if (!method_exists(IL10N::class, 't')) {
@@ -95,6 +141,27 @@ class PermissionServiceTest extends TestCase {
 
 		$teamAdmin = $this->createPermissionService(true, [], ['team-1']);
 		$this->assertTrue($teamAdmin->canApproveBot('admin', $teamBot));
+	}
+
+	private function createSubAdmin(): ISubAdmin {
+		$builder = $this->getMockBuilder(ISubAdmin::class);
+		if (!method_exists(ISubAdmin::class, 'isSubAdmin')) {
+			$builder->addMethods(['isSubAdmin', 'getSubAdminsGroups']);
+		}
+		return $builder->getMock();
+	}
+
+	private function createGroupPermissionService(?IUser $user, ?ISubAdmin $subAdmin = null): PermissionService {
+		$userManager = $this->createMock(IUserManager::class);
+		$userManager->method('get')->with('reviewer')->willReturn($user);
+		return new PermissionService(
+			$this->createMock(IGroupManager::class),
+			$userManager,
+			$this->createMock(IAppManager::class),
+			$this->createMock(LoggerInterface::class),
+			$this->createL10n(),
+			$subAdmin,
+		);
 	}
 
 	private function createPermissionService(bool $isAdmin, array $adminGroups, array $adminTeams): PermissionService {

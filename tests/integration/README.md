@@ -97,6 +97,23 @@ leading/trailing whitespace, so splitting can discard whitespace at a boundary;
 exact formatting preservation is not claimed. Interrupted/ambiguous delivery
 retry handling is covered separately by the unit tests, not this smoke.
 
+## Migration compatibility
+
+`migration-compat-smoke.php` loads the installed Nextcloud core and builds
+in-memory schemas with its real schema wrapper. It checks credential conversion
+from VARCHAR to TEXT, repeat execution, missing tables/columns and preservation
+of unrelated columns. It also checks that the wiki registry follows Nextcloud's
+nullable-boolean constraint. It does not execute schema changes against the DB.
+
+Run on a disposable Nextcloud 30 and 35 instance with Talk AI installed:
+
+```sh
+docker exec --user www-data talk-ai-test \
+  php /var/www/html/custom_apps/educai/tests/integration/migration-compat-smoke.php
+```
+
+This complements a fresh `occ app:enable educai` test; it does not replace it.
+
 ## Browser regression
 
 `browser-smoke.cjs` drives the rendered admin controls and checks the save-in-flight

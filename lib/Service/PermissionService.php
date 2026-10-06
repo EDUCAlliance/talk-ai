@@ -6,6 +6,7 @@ namespace OCA\EducAI\Service;
 
 use OCA\EducAI\Db\Bot;
 use OCP\App\IAppManager;
+use OCP\Group\ISubAdmin;
 use OCP\IGroupManager;
 use OCP\IL10N;
 use OCP\IUserManager;
@@ -36,6 +37,7 @@ class PermissionService {
         IAppManager $appManager,
         LoggerInterface $logger,
         IL10N $l10n,
+        private ?ISubAdmin $subAdmin = null,
     ) {
         $this->groupManager = $groupManager;
         $this->userManager = $userManager;
@@ -61,9 +63,10 @@ class PermissionService {
         }
 
         try {
-            // Try to get the SubAdmin service
-            $subAdmin = \OC::$server->get(\OCP\Group\ISubAdmin::class);
-            return $subAdmin->isSubAdmin($user);
+            if ($this->subAdmin === null) {
+                return false;
+            }
+            return $this->subAdmin->isSubAdmin($user);
         } catch (\Throwable $e) {
             $this->logger->debug('SubAdmin service not available', ['exception' => $e]);
             return false;
@@ -82,8 +85,10 @@ class PermissionService {
         }
 
         try {
-            $subAdmin = \OC::$server->get(\OCP\Group\ISubAdmin::class);
-            $groups = $subAdmin->getSubAdminsGroups($user);
+            if ($this->subAdmin === null) {
+                return [];
+            }
+            $groups = $this->subAdmin->getSubAdminsGroups($user);
 
             return array_map(static function ($group) {
                 return $group->getGID();

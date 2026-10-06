@@ -48,7 +48,8 @@ class Version023701Date20260504010000 extends SimpleMigrationStep {
 				'unsigned' => true,
 			]);
 			$table->addColumn('active', Types::BOOLEAN, [
-				'notnull' => true,
+				// NC30's cross-database checks require nullable booleans (Oracle).
+				'notnull' => false,
 				'default' => true,
 			]);
 			$table->addColumn('last_synced_at', Types::BIGINT, [
@@ -92,7 +93,7 @@ class Version023701Date20260504010000 extends SimpleMigrationStep {
 				'length' => 64,
 			]);
 			$table->addColumn('active', Types::BOOLEAN, [
-				'notnull' => true,
+				'notnull' => false,
 				'default' => true,
 			]);
 			$table->addColumn('created_at', Types::BIGINT, [

@@ -483,7 +483,7 @@ class TraceService {
 			return $text;
 		}
 
-		return substr($text, 0, max(0, $limit - 3)) . '...';
+		return mb_strcut($text, 0, max(0, $limit - 3), 'UTF-8') . '...';
 	}
 
 	private function nullableString($value, int $limit): ?string {
