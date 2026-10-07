@@ -8,6 +8,7 @@ use OC\DB\SchemaWrapper;
 use OC\Migration\NullOutput;
 use OCA\EducAI\Migration\Version022700Date20260116000000;
 use OCA\EducAI\Migration\Version023701Date20260504010000;
+use OCA\EducAI\Migration\Version024202Date20261007000000;
 use OCP\DB\Types;
 use OCP\IDBConnection;
 
@@ -55,6 +56,18 @@ try {
 		$active = $empty->getTable($name)->getColumn('active');
 		$check(!$active->getNotnull() && (bool)$active->getDefault(), $name . ' follows Nextcloud nullable-boolean rules and defaults to active');
 	}
+	$align = new Version024202Date20261007000000();
+	$check($align->changeSchema($output, static fn () => $empty, []) === null, 'Fresh wiki tables need no nullability alignment');
+	$upgraded = new SchemaWrapper($db, new Schema());
+	foreach (['educai_wiki_roots', 'educai_wiki_root_bots'] as $name) {
+		$upgraded->createTable($name)->addColumn('active', Types::BOOLEAN, ['notnull' => true, 'default' => true]);
+	}
+	$check($align->changeSchema($output, static fn () => $upgraded, []) === $upgraded, 'NOT NULL wiki flags from earlier releases are migrated');
+	foreach (['educai_wiki_roots', 'educai_wiki_root_bots'] as $name) {
+		$active = $upgraded->getTable($name)->getColumn('active');
+		$check(!$active->getNotnull() && (bool)$active->getDefault(), $name . ' is aligned to a nullable boolean and still defaults to active');
+	}
+	$check($align->changeSchema($output, static fn () => $upgraded, []) === null, 'Nullability alignment is idempotent');
 } catch (Throwable $e) {
 	$error = get_class($e);
 }
