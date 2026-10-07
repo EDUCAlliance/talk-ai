@@ -496,6 +496,18 @@ PHP);
 			return;
 	}
 
+	if ($class === 'OCP\\DB\\ISchemaWrapper') {
+		eval(<<<'PHP'
+namespace OCP\DB;
+
+interface ISchemaWrapper {
+	public function getTable($tableName);
+	public function hasTable($tableName);
+}
+PHP);
+			return;
+	}
+
 	$parts = explode('\\', $class);
 	$shortName = array_pop($parts);
 	$namespace = implode('\\', $parts);
