@@ -27,6 +27,70 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class LLMClientTest extends TestCase {
+	public function testConfiguredBudgetsReachClassicAndReasoningPayloadsAndTrace(): void {
+		foreach ([false, true] as $stream) {
+			foreach (['primary:model-a' => 'max_tokens', 'secondary:gpt-5-mini' => 'max_completion_tokens'] as $model => $key) {
+				foreach ([[], ['max_tokens' => 128], ['max_tokens' => 4096, '_use_configured_output_budget' => true]] as $options) {
+					$settings = new Settings();
+					$settings->setApiProvider('custom');
+					$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+					$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+					$settingsService = $this->createMock(SettingsService::class);
+					$settingsService->method('getSettings')->willReturn($settings);
+					$settingsService->method('getApiKey')->willReturn('primary-key');
+					$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+					$settingsService->method('normalizePositiveInteger')->willReturn(90);
+					$settingsService->method('getMaxOutputTokens')->with($model)->willReturn(8192);
+					$expected = ($options['_use_configured_output_budget'] ?? false) ? 8192 : ($options['max_tokens'] ?? 8192);
+					$client = $this->createMock(IClient::class);
+					$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $request) use ($stream, $key, $expected): IResponse {
+						$this->assertSame($expected, $request['json'][$key]);
+						$this->assertArrayNotHasKey($key === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens', $request['json']);
+						$this->assertArrayNotHasKey('_use_configured_output_budget', $request['json']);
+						return $stream
+							? $this->rawResponse('data: {"choices":[{"delta":{"content":"Partial text"},"finish_reason":"length"}]}' . "\n\ndata: [DONE]\n\n")
+							: $this->jsonResponse(['choices' => [['message' => ['content' => 'Partial text'], 'finish_reason' => 'length']]]);
+					});
+					$llm = new LLMClient($this->clientService($client), $settingsService, $this->logger());
+					$trace = $llm->buildTraceChatCompletionPayload('system', [], $model, $options, $stream);
+					$this->assertSame($expected, $trace['payload'][$key]);
+					$result = $stream
+						? $llm->streamAgentTurn('system', [], [], static function (): void {}, $model, $options)
+						: $llm->sendAgentTurn('system', [], [], $model, $options);
+					$this->assertSame('length', $result->getStopReason());
+					$this->assertSame('Partial text', $result->getText());
+				}
+			}
+		}
+	}
+
+	public function testConfiguredBudgetIsResolvedForActualFallbackModel(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		$settings->setFallbackModel('secondary:gpt-5-mini');
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')->willReturn(90);
+		$settingsService->method('getMaxOutputTokens')->willReturnCallback(static fn (?string $reference): int => $reference === 'secondary:gpt-5-mini' ? 16384 : 4096);
+		$calls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url, array $request) use (&$calls): IResponse {
+			$calls[] = $request['json'];
+			if (count($calls) === 1) {
+				throw new \Exception('cURL error 28: Operation timed out');
+			}
+			return $this->jsonResponse(['choices' => [['message' => ['content' => 'Answer'], 'finish_reason' => 'stop']]]);
+		});
+		$llm = new LLMClient($this->clientService($client), $settingsService, $this->logger());
+		$llm->sendAgentTurn('system', [], [], 'primary:model-a', ['max_tokens' => 4096, '_use_configured_output_budget' => true]);
+		$this->assertSame(4096, $calls[0]['max_tokens']);
+		$this->assertSame(16384, $calls[1]['max_completion_tokens']);
+	}
+
 	#[DataProvider('contextLengthErrorResponses')]
 	public function testContextOverflowDoesNotRetryUnchangedRequest(
 		array|string $body,
@@ -143,6 +207,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmModelsTimeout(25);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -500,6 +565,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -552,6 +618,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -601,6 +668,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -651,6 +719,7 @@ class LLMClientTest extends TestCase {
 		$settings->setFallbackModel('secondary:model-b');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -684,6 +753,7 @@ class LLMClientTest extends TestCase {
 		$settings->setDefaultModel('primary:model-a');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -718,6 +788,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -777,6 +848,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -820,6 +892,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -833,7 +906,7 @@ class LLMClientTest extends TestCase {
 				$this->callback(function (array $options): bool {
 					$this->assertSame('up/minimax-m2-5', $options['json']['model'] ?? null);
 					$this->assertSame(0.2, $options['json']['temperature'] ?? null);
-					$this->assertSame(1000, $options['json']['max_tokens'] ?? null);
+					$this->assertSame(4096, $options['json']['max_tokens'] ?? null);
 					$this->assertArrayNotHasKey('max_completion_tokens', $options['json']);
 					return true;
 				})
@@ -869,6 +942,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -922,6 +996,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -977,6 +1052,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -1007,10 +1083,10 @@ class LLMClientTest extends TestCase {
 		$this->assertSame(['include_usage' => true], $calls[0]['stream_options'] ?? null);
 		$this->assertArrayNotHasKey('stream_options', $calls[1]);
 		$this->assertSame(0.7, $calls[0]['temperature'] ?? null);
-		$this->assertSame(1000, $calls[0]['max_tokens'] ?? null);
+		$this->assertSame(4096, $calls[0]['max_tokens'] ?? null);
 		$this->assertArrayNotHasKey('max_completion_tokens', $calls[0]);
 		$this->assertSame(0.7, $calls[1]['temperature'] ?? null);
-		$this->assertSame(1000, $calls[1]['max_tokens'] ?? null);
+		$this->assertSame(4096, $calls[1]['max_tokens'] ?? null);
 		$this->assertArrayNotHasKey('max_completion_tokens', $calls[1]);
 	}
 
@@ -1022,6 +1098,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -1078,6 +1155,7 @@ class LLMClientTest extends TestCase {
 			$settings->setLlmStreamTimeout(240);
 
 			$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 			$settingsService->method('getSettings')->willReturn($settings);
 			$settingsService->method('getApiKey')->willReturn('primary-key');
 			$settingsService->method('normalizePositiveInteger')
@@ -1134,6 +1212,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -1203,6 +1282,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -1300,6 +1380,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -1411,6 +1492,7 @@ class LLMClientTest extends TestCase {
 		$settings->setFallbackModel('secondary:model-b');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -1492,6 +1574,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -1554,6 +1637,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -1616,6 +1700,7 @@ class LLMClientTest extends TestCase {
 			$settings->setLlmChatTimeout(90);
 
 			$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 			$settingsService->method('getSettings')->willReturn($settings);
 			$settingsService->method('getApiKey')->willReturn('primary-key');
 			$settingsService->method('normalizePositiveInteger')
@@ -1654,12 +1739,12 @@ class LLMClientTest extends TestCase {
 			);
 
 			if ($usesReasoningTokenParameters) {
-				$this->assertSame(1000, $captured['max_completion_tokens'] ?? null, $model);
+				$this->assertSame(4096, $captured['max_completion_tokens'] ?? null, $model);
 				$this->assertArrayNotHasKey('temperature', $captured, $model);
 				$this->assertArrayNotHasKey('max_tokens', $captured, $model);
 			} else {
 				$this->assertSame(0.2, $captured['temperature'] ?? null, $model);
-				$this->assertSame(1000, $captured['max_tokens'] ?? null, $model);
+				$this->assertSame(4096, $captured['max_tokens'] ?? null, $model);
 				$this->assertArrayNotHasKey('max_completion_tokens', $captured, $model);
 			}
 			$this->assertArrayNotHasKey('top_p', $captured, $model);
@@ -1676,6 +1761,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -1724,6 +1810,7 @@ class LLMClientTest extends TestCase {
 			$settings->setLlmStreamTimeout(240);
 
 			$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 			$settingsService->method('getSettings')->willReturn($settings);
 			$settingsService->method('getApiKey')->willReturn('primary-key');
 			$settingsService->method('normalizePositiveInteger')
@@ -1774,6 +1861,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -1823,6 +1911,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -1870,6 +1959,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -2455,6 +2545,7 @@ class LLMClientTest extends TestCase {
 		$settings->setFallbackModel('secondary:model-b');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3125,6 +3216,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3293,6 +3385,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3347,6 +3440,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmStreamTimeout(240);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -3449,6 +3543,7 @@ class LLMClientTest extends TestCase {
 		$settings->setFallbackModel('secondary:model-b');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3523,6 +3618,7 @@ class LLMClientTest extends TestCase {
 		$settings->setFallbackModel('secondary:model-b');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3587,6 +3683,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3690,6 +3787,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -3761,6 +3859,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -3837,6 +3936,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmChatTimeout(90);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3918,6 +4018,7 @@ class LLMClientTest extends TestCase {
 		$settings->setLlmModelsTimeout(25);
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
@@ -3979,6 +4080,7 @@ class LLMClientTest extends TestCase {
 		$settings->setDefaultModel('model-a');
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		$settingsService->method('normalizePositiveInteger')
@@ -4098,6 +4200,7 @@ class LLMClientTest extends TestCase {
 		}
 
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
 		if ($withFallback) {

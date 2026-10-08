@@ -338,6 +338,7 @@ class LLMClient {
 				$fullMessages,
 				$this->withInitialModelParameterProfile($options, $modelConfig['model']),
 				$stream,
+				$modelConfig['id'],
 			),
 		];
 	}
@@ -853,7 +854,7 @@ class LLMClient {
 		string $reason,
 	): array {
 		$client = $this->clientService->newClient();
-		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, false);
+		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, false, $modelConfig['id']);
 
 		$this->logger->debug('Sending chat completion request', [
 			'model' => $modelConfig['id'],
@@ -906,7 +907,7 @@ class LLMClient {
 		string $reason,
 	): array {
 		$client = $this->clientService->newClient();
-		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, true);
+		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, true, $modelConfig['id']);
 
 		$this->logger->debug('Starting streaming chat completion', [
 			'model' => $modelConfig['id'],
@@ -1207,12 +1208,14 @@ class LLMClient {
 	 * @param array<string,mixed> $options
 	 * @return array<string,mixed>
 	 */
-	private function buildPayload(string $model, array $fullMessages, array $options, bool $stream): array {
+	private function buildPayload(string $model, array $fullMessages, array $options, bool $stream, ?string $modelReference = null): array {
 		$payload = [
 			'model' => $model,
 			'messages' => $fullMessages,
 		];
-		$maxTokens = $options['max_tokens'] ?? 1000;
+		$maxTokens = ($options['_use_configured_output_budget'] ?? false) === true || !isset($options['max_tokens'])
+			? $this->settingsService->getMaxOutputTokens($modelReference ?? $model)
+			: $options['max_tokens'];
 
 		// Default to classic OpenAI-compatible params. Known reasoning models
 		// and the bounded compatibility retry use max_completion_tokens.

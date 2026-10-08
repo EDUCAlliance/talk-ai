@@ -11,6 +11,9 @@ use Psr\Log\LoggerInterface;
 
 class SettingsService {
 	public const DEFAULT_TEMPERATURE = 0.2;
+	public const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+	/** Administrative ceiling, not a guarantee of any model's output capacity. */
+	public const MAX_OUTPUT_TOKENS = 131072;
 	public const DEFAULT_LLM_CHAT_TIMEOUT = 90;
 	public const DEFAULT_LLM_STREAM_TIMEOUT = 240;
 	public const DEFAULT_LLM_MODELS_TIMEOUT = 20;
@@ -166,6 +169,8 @@ class SettingsService {
 	 * @param string|null $appIconWhiteUrl
 	 * @param string|null $doclingApiProfile
 	 * @param string|null $doclingAuthMode
+	 * @param mixed $maxOutputTokens Integer or digit string; null preserves the saved value.
+	 * @param mixed $modelOutputTokenLimits Model reference => token limit; null preserves, [] clears.
 	 * @return Settings
 	 */
 	public function updateSettings(
@@ -219,8 +224,11 @@ class SettingsService {
 		?string $appIconWhiteUrl = null,
 		?string $doclingApiProfile = null,
 		?string $doclingAuthMode = null,
+		mixed $maxOutputTokens = null,
+		mixed $modelOutputTokenLimits = null,
 	): Settings {
 		$this->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
+		$this->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
 		$settings = $this->mapper->getSettings();
 		$previousSettings = clone $settings;
 		$shouldSyncTalkBot = false;
@@ -358,6 +366,15 @@ class SettingsService {
 		if ($conversationContextTokens !== null) {
 			$settings->setConversationContextTokens($conversationContextTokens > 0 ? $conversationContextTokens : 8000);
 		}
+		if ($maxOutputTokens !== null) {
+			$settings->setMaxOutputTokens((int)$maxOutputTokens);
+		}
+		if ($modelOutputTokenLimits !== null) {
+			$settings->setModelOutputTokenLimits(json_encode((object)array_map(
+				static fn ($limit): int => (int)$limit,
+				$modelOutputTokenLimits
+			), JSON_THROW_ON_ERROR));
+		}
 		if ($llmChatTimeout !== null) {
 			$settings->setLlmChatTimeout($this->normalizePositiveInteger($llmChatTimeout, self::DEFAULT_LLM_CHAT_TIMEOUT));
 		}
@@ -394,6 +411,56 @@ class SettingsService {
 			$this->mapper->getSettings()->getDefaultTemperature(),
 			self::DEFAULT_TEMPERATURE
 		);
+	}
+
+	/**
+	 * Resolve one model response's budget, independently of conversation memory.
+	 * Callers should pass the resolved endpoint-qualified reference. Unqualified
+	 * direct lookups retain a primary-endpoint fallback without model discovery.
+	 */
+	public function getMaxOutputTokens(?string $modelReference = null): int {
+		$settings = $this->mapper->getSettings();
+		$reference = trim((string)$modelReference);
+		if ($reference === '') {
+			$reference = trim($settings->getDefaultModel());
+		}
+		if ($reference !== '' && preg_match('/^(primary|secondary):/', $reference) !== 1) {
+			$reference = 'primary:' . $reference;
+		}
+		$overrides = $settings->getModelOutputTokenLimitsArray();
+		$limit = $overrides[$reference] ?? null;
+		if ($this->isValidOutputTokenLimit($limit)) {
+			return (int)$limit;
+		}
+		$global = $settings->getMaxOutputTokens();
+		return $this->isValidOutputTokenLimit($global) ? (int)$global : self::DEFAULT_MAX_OUTPUT_TOKENS;
+	}
+
+	/** Validate before any settings or encrypted credentials can be changed. */
+	public function validateOutputTokenOptions(mixed $maxOutputTokens, mixed $modelOutputTokenLimits): void {
+		if ($maxOutputTokens !== null && !$this->isValidOutputTokenLimit($maxOutputTokens)) {
+			throw new \InvalidArgumentException('Maximum output tokens must be an integer between 1 and 131072');
+		}
+		if ($modelOutputTokenLimits === null) {
+			return;
+		}
+		if (!is_array($modelOutputTokenLimits)) {
+			throw new \InvalidArgumentException('Model output token limits must be a model-to-limit map');
+		}
+		foreach ($modelOutputTokenLimits as $reference => $limit) {
+			if (!is_string($reference) || strlen($reference) > 512
+				|| preg_match('/^(primary|secondary):[^\s\x00-\x1f\x7f]+$/uD', $reference) !== 1) {
+				throw new \InvalidArgumentException('Each output limit needs an exact primary: or secondary: model reference');
+			}
+			if (!$this->isValidOutputTokenLimit($limit)) {
+				throw new \InvalidArgumentException('Model output tokens must be integers between 1 and 131072');
+			}
+		}
+	}
+
+	private function isValidOutputTokenLimit(mixed $value): bool {
+		return (is_int($value) || (is_string($value) && preg_match('/^[0-9]+$/D', $value) === 1))
+			&& (int)$value >= 1 && (int)$value <= self::MAX_OUTPUT_TOKENS;
 	}
 
 	/**

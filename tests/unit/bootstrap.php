@@ -496,6 +496,18 @@ PHP);
 			return;
 	}
 
+	if ($class === 'OCP\\DB\\Types') {
+		eval(<<<'PHP'
+namespace OCP\DB;
+
+class Types {
+	public const INTEGER = 'integer';
+	public const TEXT = 'text';
+}
+PHP);
+		return;
+	}
+
 	if ($class === 'OCP\\DB\\ISchemaWrapper') {
 		eval(<<<'PHP'
 namespace OCP\DB;

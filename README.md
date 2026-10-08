@@ -105,6 +105,15 @@ vendor/bin/phpunit --bootstrap tests/unit/bootstrap.php tests/unit
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local Nextcloud verification notes.
 
+### Response limits
+
+Under **Administration → Talk AI → Response Limits**, configure the output budget
+per model response (default **4096 tokens**), with optional exact model overrides.
+This is separate from the conversation-history budget. If a model reaches its output
+limit, Talk AI delivers available final text with an incomplete notice and records
+the run as **Incomplete**. It does not automatically continue or replay tool actions.
+See [docs/OUTPUT_LIMITS.md](docs/OUTPUT_LIMITS.md) for configuration and edge cases.
+
 ## EU funding
 
 <div align="center">

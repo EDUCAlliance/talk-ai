@@ -35,7 +35,9 @@ use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\IGroupManager;
+use OCP\IL10N;
 use OCP\IUserManager;
+use OCP\L10N\IFactory;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -1859,6 +1861,203 @@ class BotServiceTest extends TestCase {
 		$this->assertStringNotContainsString('Error:', $response);
 	}
 
+	#[DataProvider('incompleteAgentOutputs')]
+	public function testProcessMessageDeliversOnlySanitizedTerminalLengthContent(
+		bool $stream,
+		string $terminalContent,
+		?string $visibleContent,
+		bool $localized = false,
+	): void {
+		$bot = $this->createPersonalBot();
+		$bot->setModel('secondary:reasoning-model');
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$toolProviderRegistry = $this->createToolProviderRegistryMock();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$traceService = $this->createMock(TraceService::class);
+		$inserted = [];
+		$events = [];
+		$visiblePartials = [];
+		$toolProgress = [];
+		$incompleteReasons = [];
+		$executionErrors = [];
+		$userManager = $this->createUserManagerMock();
+		$l10nFactory = null;
+		$notice = 'Response incomplete: output limit reached.';
+		$emptyNotice = 'The model reached its output limit without a usable response. Ask for a shorter answer or contact your administrator to increase the output limit.';
+		if ($localized) {
+			$user = $this->createUserMock();
+			$userManager->expects($this->once())->method('get')->with('owner')->willReturn($user);
+			$factoryBuilder = $this->getMockBuilder(IFactory::class);
+			$missingMethods = array_values(array_filter(
+				['getUserLanguage', 'get'],
+				static fn (string $method): bool => !method_exists(IFactory::class, $method),
+			));
+			if ($missingMethods !== []) {
+				$factoryBuilder->addMethods($missingMethods);
+			}
+			$l10nFactory = $factoryBuilder->getMock();
+			$l10nFactory->expects($this->once())->method('getUserLanguage')->with($user)->willReturn('de');
+			$l10nBuilder = $this->getMockBuilder(IL10N::class);
+			if (!method_exists(IL10N::class, 't')) {
+				$l10nBuilder->addMethods(['t']);
+			}
+			$l10n = $l10nBuilder->getMock();
+			$l10nFactory->expects($this->once())->method('get')->with('educai', 'de')->willReturn($l10n);
+			$l10n->expects($this->once())->method('t')->with($visibleContent === null ? $emptyNotice : $notice)
+				->willReturn($visibleContent === null ? 'Keine nutzbare Antwort: Ausgabelimit erreicht.' : 'Antwort unvollständig: Ausgabelimit erreicht.');
+			$notice = 'Antwort unvollständig: Ausgabelimit erreicht.';
+			$emptyNotice = 'Keine nutzbare Antwort: Ausgabelimit erreicht.';
+		}
+		$expected = $visibleContent === null
+			? $emptyNotice
+			: $visibleContent . "\n\n_" . $notice . '_';
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn(new Settings());
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$settingsService->expects($this->once())
+			->method('getMaxOutputTokens')
+			->with('secondary:reasoning-model')
+			->willReturn(6144);
+		$conversationMapper->expects($this->exactly($visibleContent === null ? 1 : 2))
+			->method('insert')
+			->willReturnCallback(static function (Conversation $conversation) use (&$inserted): Conversation {
+				$inserted[] = $conversation;
+				return $conversation;
+			});
+		$conversationMapper->expects($this->once())
+			->method('findByBotRoomAndThread')
+			->willReturn([$this->createConversation('user', 'Write a long answer.')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+		$toolProviderRegistry->expects($this->exactly(2))->method('setInvocationContext');
+		$agentExecutor->expects($this->once())
+			->method('run')
+			->willReturnCallback(function (string $systemPrompt, array $messages, array $loadout, array $options) use ($stream, $terminalContent): array {
+				$this->assertSame('secondary:reasoning-model', $options['model']);
+				$this->assertSame(6144, $options['max_tokens']);
+				if ($stream) {
+					$emit = $options['on_partial_result'] ?? null;
+					$this->assertIsCallable($emit);
+					$emit("Discarded pre-tool paragraph.\n\n");
+					$options['on_tool_progress']('Saved exactly once.');
+					$emit('Discarded terminal draft.');
+					$emit($terminalContent);
+				} else {
+					$this->assertArrayNotHasKey('on_partial_result', $options);
+				}
+
+				return [
+					'status' => 'incomplete',
+					'terminalReason' => 'length',
+					'finishReason' => 'length',
+					'content' => $terminalContent,
+					'messages' => [['role' => 'assistant', 'content' => 'Discarded prior tool-turn text.']],
+					'toolInvocations' => [['toolCallId' => 'saved-once', 'tool' => BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE, 'status' => 'ok']],
+					'rateLimitHeaders' => [],
+				];
+			});
+		$traceService->method('recordEvent')
+			->willReturnCallback(static function (?int $runId, string $eventType, array $event = []) use (&$events): void {
+				$events[] = ['run_id' => $runId, 'event_type' => $eventType, 'event' => $event];
+			});
+		$traceService->expects($this->never())->method('finishRun');
+		$service = $this->createBotService(
+			botMapper: $this->createMock(BotMapper::class),
+			permissionService: $this->createMock(PermissionService::class),
+			userManager: $userManager,
+			toolRegistry: $toolRegistry,
+			conversationMapper: $conversationMapper,
+			agentExecutor: $agentExecutor,
+			toolProviderRegistry: $toolProviderRegistry,
+			rateLimitService: $rateLimitService,
+			settingsService: $settingsService,
+			traceService: $traceService,
+			l10nFactory: $l10nFactory,
+		);
+
+		$response = $service->processMessage(
+			bot: $bot,
+			message: 'Write a long answer.',
+			roomToken: 'room-token',
+			userId: $localized ? 'users/owner' : 'owner',
+			onProgress: $stream ? static function (string $partial) use (&$visiblePartials): void {
+				$visiblePartials[] = $partial;
+			} : null,
+			traceRunId: 72,
+			onExecutionError: static function (?string $reason = null) use (&$executionErrors): void {
+				$executionErrors[] = $reason;
+			},
+			onToolProgress: static function (string $progress) use (&$toolProgress): void {
+				$toolProgress[] = $progress;
+			},
+			onIncomplete: static function (string $reason) use (&$incompleteReasons): void {
+				$incompleteReasons[] = $reason;
+			},
+		);
+
+		$this->assertSame($expected, $response);
+		$this->assertSame($stream && $visibleContent !== null ? [$expected] : [], $visiblePartials);
+		$this->assertSame($stream ? ['Saved exactly once.'] : [], $toolProgress);
+		$this->assertSame(['length'], $incompleteReasons);
+		$this->assertSame([], $executionErrors);
+		$this->assertSame('user', $inserted[0]->getRole());
+		if ($visibleContent !== null) {
+			$this->assertSame('assistant', $inserted[1]->getRole());
+			$this->assertSame($response, $inserted[1]->getContent());
+		}
+		$assistantResponses = array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'assistant_response',
+		));
+		$this->assertCount(1, $assistantResponses);
+		$this->assertSame(72, $assistantResponses[0]['run_id']);
+		$this->assertSame('incomplete', $assistantResponses[0]['event']['status'] ?? null);
+		$this->assertSame('length', $assistantResponses[0]['event']['payload']['finish_reason'] ?? null);
+		if ($visibleContent !== null) {
+			$this->assertSame($response, $assistantResponses[0]['event']['result']['content'] ?? null);
+		} else {
+			$this->assertFalse($assistantResponses[0]['event']['payload']['visible_content'] ?? null);
+			$this->assertArrayNotHasKey('result', $assistantResponses[0]['event']);
+		}
+		$this->assertSame([], array_values(array_filter(
+			$events,
+			static fn (array $event): bool => $event['event_type'] === 'error',
+		)));
+		$serialized = json_encode([
+			$response, $visiblePartials, $events,
+			array_map(static fn (Conversation $conversation): string => $conversation->getContent(), $inserted),
+		], JSON_THROW_ON_ERROR);
+		$this->assertStringNotContainsString('<think>', $serialized);
+		$this->assertStringNotContainsString('private reasoning', $serialized);
+		$this->assertStringNotContainsString('Discarded', $serialized);
+	}
+
+	/** @return array<string,array{bool,string,?string,3?:bool}> */
+	public static function incompleteAgentOutputs(): array {
+		$cases = [
+			'visible text' => ['A 🧪 partial answer.', 'A 🧪 partial answer.'],
+			'closed reasoning then text' => ["<think>private reasoning</think>\nVisible answer.", 'Visible answer.'],
+			'visible prefix before truncated reasoning' => ['Visible prefix.<think>private reasoning cut off', 'Visible prefix.'],
+			'empty output' => ['', null],
+			'whitespace only' => [" \n\t", null],
+			'closed reasoning only' => ['<think>private reasoning only</think>', null],
+			'unclosed reasoning only' => ['<think>private reasoning cut off', null],
+		];
+		$outputs = [];
+		foreach ([false, true] as $stream) {
+			foreach ($cases as $label => [$raw, $visible]) {
+				$outputs[($stream ? 'stream ' : 'sync ') . $label] = [$stream, $raw, $visible];
+			}
+		}
+		$outputs['localized stream visible text'] = [true, 'Sichtbare Teilantwort.', 'Sichtbare Teilantwort.', true];
+		$outputs['localized sync empty output'] = [false, '', null, true];
+		return $outputs;
+	}
+
 	#[DataProvider('nonCompletedAgentResults')]
 	public function testProcessMessageMapsNonCompletedAgentResultToSafeResponse(
 		string $status,
@@ -1956,10 +2155,10 @@ class BotServiceTest extends TestCase {
 	/** @return array<string,array{string,string,2?:bool}> */
 	public static function nonCompletedAgentResults(): array {
 		return [
-			'length' => ['budget_exhausted', 'length'],
 			'content filter' => ['error', 'content_filter'],
 			'turn budget' => ['budget_exhausted', 'max_turns'],
 			'context overflow' => ['error', ContextLengthExceededException::REASON, true],
+			'incomplete with unrelated reason' => ['incomplete', 'provider_error'],
 		];
 	}
 
@@ -2185,6 +2384,7 @@ class BotServiceTest extends TestCase {
 		?WikiLocationService $wikiLocationService = null,
 		?EmbeddingMapper $embeddingMapper = null,
 		?TraceService $traceService = null,
+		?IFactory $l10nFactory = null,
 	): BotService {
 		return new BotService(
 			$botMapper,
@@ -2209,7 +2409,8 @@ class BotServiceTest extends TestCase {
 			$roomImageIngestionService ?? $this->createMock(RoomImageIngestionService::class),
 			$wikiRootRegistryService ?? $this->createMock(WikiRootRegistryService::class),
 			$wikiLocationService ?? $this->createMock(WikiLocationService::class),
-			$traceService
+			$traceService,
+			l10nFactory: $l10nFactory
 		);
 	}
 

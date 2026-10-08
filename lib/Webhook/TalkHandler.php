@@ -707,6 +707,12 @@ class TalkHandler {
 					}
 				},
 				$toolProgress,
+				static function (string $reason) use (&$traceStatus, &$traceErrorSummary): void {
+					if ($traceStatus === 'success') {
+						$traceStatus = 'incomplete';
+						$traceErrorSummary = 'Output limit reached (' . $reason . ')';
+					}
+				},
 			);
 
 			$this->logger->info('Got bot response', [

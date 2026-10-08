@@ -178,12 +178,12 @@ class AgentExecutor {
 			'top_p',
 			'stream_options',
 			'legacy_tool_call_compatibility',
+			'_use_configured_output_budget',
 		]));
 		$requestOptions['tools'] = $toolsForLlm;
 		$requestOptions['temperature'] = $this->resolveTemperatureOption(
 			$requestOptions['temperature'] ?? SettingsService::DEFAULT_TEMPERATURE
 		);
-		$requestOptions['max_tokens'] = $requestOptions['max_tokens'] ?? 800;
 		$requestOptions['provider_attempt_budget'] = $providerAttemptBudget;
 		$requestOptions['agent_run_control'] = $runControl;
 		if ($traceRunId !== null) {
@@ -373,22 +373,34 @@ class AgentExecutor {
 				);
 			}
 
-			if ($toolCalls === []) {
-				if ($finishReason === 'length') {
-					return $this->buildRunResult(
-						'budget_exhausted',
-						'length',
-						'',
-						$messages,
-						$toolInvocations,
-						$finishReason,
-						$compatibilitySource,
-						$logicalTurns,
-						$providerAttemptBudget,
-						$rateLimitHeaders
+			if ($finishReason === 'length') {
+				// Never repair or replay a truncated tool batch. A valid-looking
+				// argument object does not prove that the provider finished it.
+				foreach ($toolCalls as $toolCall) {
+					$rejection = $this->rejectToolCall(
+						$toolCall,
+						'incomplete_tool_call',
+						'The tool call was truncated by the provider and was not executed.',
+						$traceRunId
 					);
+					$messages[] = $rejection['message'];
+					$toolInvocations[] = $rejection['invocation'];
 				}
+				return $this->buildRunResult(
+					'incomplete',
+					'length',
+					$toolCalls === [] ? $text : '',
+					$messages,
+					$toolInvocations,
+					$finishReason,
+					$compatibilitySource,
+					$logicalTurns,
+					$providerAttemptBudget,
+					$rateLimitHeaders
+				);
+			}
 
+			if ($toolCalls === []) {
 				if ($turn->isEmpty()) {
 					return $this->buildRunResult(
 						'error',
@@ -438,20 +450,6 @@ class AgentExecutor {
 				);
 			}
 			$toolCallCount += $batchSize;
-
-			if ($finishReason === 'length') {
-				foreach ($toolCalls as $toolCall) {
-					$rejection = $this->rejectToolCall(
-						$toolCall,
-						'incomplete_tool_call',
-						'The tool call was truncated by the provider and was not executed.',
-						$traceRunId
-					);
-					$messages[] = $rejection['message'];
-					$toolInvocations[] = $rejection['invocation'];
-				}
-				continue;
-			}
 
 			$preparedToolCalls = array_map(
 				fn (array $toolCall): array => $this->prepareToolCall($toolCall, $toolMap),
