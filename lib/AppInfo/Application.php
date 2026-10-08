@@ -508,7 +508,8 @@ class Application extends App implements IBootstrap {
 				$c->get(WikiLocationService::class),
 				$c->get(TraceService::class),
 				$c->get(BrandingService::class),
-				$c->get(WikiPathService::class)
+				$c->get(WikiPathService::class),
+				$c->get(\OCP\L10N\IFactory::class)
 			);
 		});
 

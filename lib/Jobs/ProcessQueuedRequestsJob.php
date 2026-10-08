@@ -221,6 +221,10 @@ class ProcessQueuedRequestsJob extends TimedJob {
                 onExecutionError: static function (?string $errorSummary = null) use (&$executionFailed, &$executionError): void {
                     $executionFailed = true;
                     $executionError = $errorSummary;
+                },
+                onIncomplete: static function (string $reason) use (&$traceStatus, &$traceErrorSummary): void {
+                    $traceStatus = 'incomplete';
+                    $traceErrorSummary = 'Output limit reached (' . $reason . ')';
                 }
             );
             if ($executionFailed) {
@@ -268,7 +272,7 @@ class ProcessQueuedRequestsJob extends TimedJob {
                 'request_id' => $requestId,
                 'response_length' => strlen($response),
             ]);
-            $traceStatus = 'success';
+            $traceStatus ??= 'success';
 
         } catch (DoesNotExistException $e) {
             $error = 'Bot no longer exists';

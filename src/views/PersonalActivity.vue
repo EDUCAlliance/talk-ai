@@ -46,6 +46,7 @@
 					<option value="success">{{ t('educai', 'Success') }}</option>
 					<option value="error">{{ t('educai', 'Error') }}</option>
 					<option value="partial">{{ t('educai', 'Partial') }}</option>
+					<option value="incomplete">{{ t('educai', 'Incomplete') }}</option>
 				</select>
 			</label>
 			<label>
@@ -483,6 +484,7 @@ export default {
 				success: t('educai', 'Success'),
 				error: t('educai', 'Error'),
 				partial: t('educai', 'Partial'),
+				incomplete: t('educai', 'Incomplete'),
 				ok: t('educai', 'OK'),
 				started: t('educai', 'Started'),
 				used: t('educai', 'Used'),
@@ -713,6 +715,7 @@ export default {
 }
 
 .status-badge.partial,
+.status-badge.incomplete,
 .status-badge.running,
 .status-badge.started {
 	background: var(--color-warning);

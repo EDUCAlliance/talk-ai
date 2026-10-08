@@ -168,7 +168,7 @@
 							type="number"
 							min="0"
 							max="1"
-							step="0.05"
+							step="0.01"
 							placeholder="0.20">
 						<p class="hint">
 							{{ t('educai', 'Controls how deterministic or creative bots are by default. Lower values are better for agentic, tool-using, RAG, and workflow bots. Higher values can be useful for creative writing or brainstorming bots.') }}
@@ -368,6 +368,97 @@
 							</p>
 						</div>
 					</div>
+				</div>
+			</section>
+
+			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('outputLimits') }">
+				<button
+					type="button"
+					class="accordion-header"
+					:aria-expanded="String(isSectionOpen('outputLimits'))"
+					:aria-controls="sectionId('outputLimits')"
+					@click="toggleSection('outputLimits')">
+					<span class="accordion-heading">
+						<span class="accordion-title">{{ t('educai', 'Response Limits') }}</span>
+						<span class="accordion-description">{{ t('educai', 'Output budget per model response, separate from conversation memory.') }}</span>
+					</span>
+					<span class="accordion-meta">{{ formatNumber(settings.maxOutputTokens) }}</span>
+					<span class="accordion-chevron" aria-hidden="true">›</span>
+				</button>
+				<div
+					v-show="isSectionOpen('outputLimits')"
+					:id="sectionId('outputLimits')"
+					class="accordion-panel">
+					<div class="form-group">
+						<label for="max-output-tokens">{{ t('educai', 'Maximum output tokens') }}</label>
+						<input
+							id="max-output-tokens"
+							v-model.number="settings.maxOutputTokens"
+							type="number"
+							min="1"
+							max="131072"
+							step="1">
+						<p class="hint">
+							{{ t('educai', 'Default: 32768. Reasoning models share this budget. Higher limits may increase response time and cost. Reported model limits can reduce the effective budget. Reload models to refresh those limits; use an override for providers that do not report them.') }}
+						</p>
+					</div>
+					<div class="section-heading">
+						<h4>{{ t('educai', 'Model-specific output limits') }}</h4>
+						<p class="hint">
+							{{ t('educai', 'Optional overrides match the exact model reference, including primary: or secondary:. Other models use the default above.') }}
+						</p>
+					</div>
+					<button
+						type="button"
+						class="button"
+						:disabled="loadingModels"
+						@click="loadModels">
+						{{ t('educai', 'Reload models') }}
+					</button>
+					<p v-if="modelLoadError" class="hint" role="alert">{{ modelLoadError }}</p>
+					<datalist id="output-limit-models">
+						<option
+							v-for="option in availableModelOptionsWithCurrent([settings.defaultModel, settings.fallbackModel])"
+							:key="option.id"
+							:value="option.id">
+							{{ option.label }}
+						</option>
+					</datalist>
+					<div
+						v-for="(override, index) in outputTokenOverrides"
+						:key="index"
+						class="output-token-limit-row">
+						<div class="form-group">
+							<label :for="`output-limit-model-${index}`">{{ t('educai', 'Model reference') }}</label>
+							<input
+								:id="`output-limit-model-${index}`"
+								v-model="override.model"
+								type="text"
+								list="output-limit-models"
+								maxlength="512"
+								placeholder="primary:model-name">
+						</div>
+						<div class="form-group">
+							<label :for="`output-limit-tokens-${index}`">{{ t('educai', 'Maximum output tokens') }}</label>
+							<input
+								:id="`output-limit-tokens-${index}`"
+								v-model.number="override.tokens"
+								type="number"
+								min="1"
+								max="131072"
+								step="1">
+						</div>
+						<button
+							type="button"
+							class="button"
+							:aria-label="t('educai', 'Remove model override')"
+							@click="outputTokenOverrides.splice(index, 1)">
+							{{ t('educai', 'Remove') }}
+						</button>
+					</div>
+					<button type="button" class="button" @click="addOutputTokenOverride">
+						{{ t('educai', 'Add model override') }}
+					</button>
 				</div>
 			</section>
 
@@ -1172,7 +1263,7 @@ step="1">
 					v-model.number="settings.conversationContextTokens"
 					type="number"
 					min="1000"
-					step="500"
+					step="1"
 					placeholder="8000">
 				<p class="hint">
 					{{ t('educai', 'Maximum tokens of conversation history to include. Default: 8000 (safe for most models). Higher values provide more context but may exceed model limits. Common limits: Llama 3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: 32K-128K.') }}
@@ -1492,11 +1583,14 @@ export default {
 				rateLimitDay: 1000,
 				rateLimitQueueMessage: '',
 				conversationContextTokens: 8000,
+				maxOutputTokens: 32768,
 			},
+			outputTokenOverrides: [],
 			openSections: {
 				appearance: true,
 				essentials: true,
 				modelEndpoints: false,
+				outputLimits: false,
 				fallbackTimeouts: false,
 				rag: true,
 				catalogue: false,
@@ -1995,6 +2089,35 @@ export default {
 			const numeric = Number(value)
 			return Number.isFinite(numeric) && numeric > 0 ? numeric : null
 		},
+		addOutputTokenOverride() {
+			this.outputTokenOverrides.push({ model: '', tokens: this.settings.maxOutputTokens })
+		},
+		buildOutputTokenPayload() {
+			const validLimit = value => Number.isInteger(value) && value >= 1 && value <= 131072
+			if (!validLimit(this.settings.maxOutputTokens)) {
+				showError(t('educai', 'Output token limits must be whole numbers between 1 and 131072.'))
+				return null
+			}
+			const modelOutputTokenLimits = {}
+			for (const { model, tokens } of this.outputTokenOverrides) {
+				const reference = model.trim()
+				const hasControlCharacter = [...reference].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+				if (reference.length > 512 || hasControlCharacter || !/^(primary|secondary):\S+$/u.test(reference)) {
+					showError(t('educai', 'Each model override needs an exact primary: or secondary: model reference.'))
+					return null
+				}
+				if (Object.hasOwn(modelOutputTokenLimits, reference)) {
+					showError(t('educai', 'Each model may have only one output limit override.'))
+					return null
+				}
+				if (!validLimit(tokens)) {
+					showError(t('educai', 'Output token limits must be whole numbers between 1 and 131072.'))
+					return null
+				}
+				modelOutputTokenLimits[reference] = tokens
+			}
+			return { maxOutputTokens: this.settings.maxOutputTokens, modelOutputTokenLimits }
+		},
 		toPositiveInteger(value, fallback) {
 			const numeric = Number(value)
 			return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
@@ -2067,6 +2190,8 @@ export default {
 				this.settings.rateLimitDay = typeof data.rate_limit_day === 'number' && data.rate_limit_day > 0 ? data.rate_limit_day : 1000
 				this.settings.rateLimitQueueMessage = data.rate_limit_queue_message || ''
 				this.settings.conversationContextTokens = typeof data.conversation_context_tokens === 'number' ? data.conversation_context_tokens : 8000
+				this.settings.maxOutputTokens = data.max_output_tokens ?? 32768
+				this.outputTokenOverrides = Object.entries(data.model_output_token_limits || {}).map(([model, tokens]) => ({ model, tokens }))
 				if (this.settings.allowMultipleModels || this.settings.secondaryApiEndpoint) {
 					this.loadModels()
 				}
@@ -2118,6 +2243,11 @@ export default {
 				if (appIconPayload === null) {
 					return
 				}
+				const outputTokenPayload = this.buildOutputTokenPayload()
+				if (outputTokenPayload === null) {
+					this.openSections.outputLimits = true
+					return
+				}
 
 				// Build payload explicitly to avoid sending empty secret values
 				const payload = {
@@ -2129,6 +2259,7 @@ export default {
 					defaultTemperature,
 					fallbackModel: this.toEndpointModelId(this.settings.fallbackModel),
 					...appIconPayload,
+					...outputTokenPayload,
 					llmChatTimeout: this.toPositiveInteger(this.settings.llmChatTimeout, 90),
 					llmStreamTimeout: this.toPositiveInteger(this.settings.llmStreamTimeout, 240),
 					llmModelsTimeout: this.toPositiveInteger(this.settings.llmModelsTimeout, 20),
@@ -2998,6 +3129,17 @@ export default {
 
 .section-body {
 	padding: 0 0 20px;
+}
+
+.output-token-limit-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+
+	.form-group {
+		flex: 1 1 220px;
+	}
 }
 
 .tool-list {

@@ -25,6 +25,7 @@ use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\IGroupManager;
 use OCP\IUser;
 use OCP\IUserManager;
+use OCP\L10N\IFactory;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -65,6 +66,7 @@ class BotService {
 	private ?TraceService $traceService;
 	private BrandingService $brandingService;
 	private WikiPathService $wikiPathService;
+	private ?IFactory $l10nFactory;
 
 	public function __construct(
 		BotMapper $botMapper,
@@ -92,7 +94,9 @@ class BotService {
 		?TraceService $traceService = null,
 		?BrandingService $brandingService = null,
 		?WikiPathService $wikiPathService = null,
+		?IFactory $l10nFactory = null,
 	) {
+		$this->l10nFactory = $l10nFactory;
 		$this->botMapper = $botMapper;
 		$this->conversationMapper = $conversationMapper;
 		$this->chatRoomMapper = $chatRoomMapper;
@@ -779,6 +783,7 @@ class BotService {
 	 * @param callable(?string):void|null $onExecutionError Internal error propagation for the trace owner
 	 * @param callable():void|null $onStreamMismatch Internal warning propagation for the trace owner
 	 * @param callable(string):void|null $onToolProgress Callback for executor-owned tool progress
+	 * @param callable(string):void|null $onIncomplete Internal incomplete-result propagation for the trace owner
 	 * @return string
 	 * @throws Exception
 	 */
@@ -798,6 +803,7 @@ class BotService {
 		?callable $onExecutionError = null,
 		?callable $onStreamMismatch = null,
 		?callable $onToolProgress = null,
+		?callable $onIncomplete = null,
 	): string {
 		$effectiveBot = $this->resolveEffectiveBotForUser($bot, $userId);
 		$messageContext = $this->normalizeMessageContext($messageContext);
@@ -1084,7 +1090,7 @@ class BotService {
 			}
 
 			$agentStatus = $agentResult['status'] ?? null;
-			if (!is_string($agentStatus) || !in_array($agentStatus, ['completed', 'error', 'budget_exhausted'], true)) {
+			if (!is_string($agentStatus) || !in_array($agentStatus, ['completed', 'incomplete', 'error', 'budget_exhausted'], true)) {
 				throw new Exception('Agent execution returned an invalid status');
 			}
 
@@ -1110,7 +1116,38 @@ class BotService {
 			}
 			$this->rateLimitService->updateFromHeaders($rateLimitHeaders);
 
-			if ($agentStatus !== 'completed') {
+			$incomplete = $agentStatus === 'incomplete' && $terminalReason === 'length';
+			if ($incomplete) {
+				// Only terminal content is eligible: earlier streamed pre-tool text
+				// and reasoning are never promoted to a final partial answer.
+				$discardAssistantBuffer();
+				if ($onIncomplete !== null) {
+					try {
+						$onIncomplete('length');
+					} catch (\Throwable $statusCallbackError) {
+						$this->logger->warning('Failed to propagate incomplete response status', [
+							'trace_run_id' => $traceRunId,
+							'exception' => $statusCallbackError,
+						]);
+					}
+				}
+				if (trim($assistantMessage) === '') {
+					$this->traceService?->recordEvent($traceRunId, 'assistant_response', [
+						'status' => 'incomplete',
+						'payload' => ['finish_reason' => 'length', 'visible_content' => false],
+					]);
+					return $this->translateOutputLimitMessage(
+						'The model reached its output limit without a usable response. Ask for a shorter answer or contact your administrator to increase the output limit.',
+						$userId
+					);
+				}
+				$assistantMessage = rtrim($assistantMessage) . "\n\n_" . $this->translateOutputLimitMessage(
+					'Response incomplete: output limit reached.',
+					$userId
+				) . '_';
+			}
+
+			if ($agentStatus !== 'completed' && !$incomplete) {
 				$discardAssistantBuffer();
 				if ($terminalReason === ContextLengthExceededException::REASON) {
 					throw new ContextLengthExceededException();
@@ -1168,9 +1205,10 @@ class BotService {
 			]);
 
 			$this->traceService?->recordEvent($traceRunId, 'assistant_response', [
-				'status' => 'ok',
+				'status' => $incomplete ? 'incomplete' : 'ok',
 				'payload' => [
 					'bot_id' => $effectiveBot->getId(),
+					'finish_reason' => $agentResult['finishReason'] ?? null,
 					'tool_invocations' => count($toolInvocations),
 				],
 				'result' => [
@@ -1226,6 +1264,15 @@ class BotService {
 				? self::CONTEXT_LIMIT_MESSAGE
 				: self::AI_SERVICE_UNAVAILABLE_MESSAGE;
 		}
+	}
+
+	private function translateOutputLimitMessage(string $message, string $userId): string {
+		if ($this->l10nFactory === null) {
+			return $message;
+		}
+		$userId = str_starts_with($userId, 'users/') ? substr($userId, 6) : $userId;
+		$language = $this->l10nFactory->getUserLanguage($this->userManager->get($userId));
+		return (string)$this->l10nFactory->get('educai', $language)->t($message);
 	}
 
 	/**
@@ -2712,18 +2759,6 @@ class BotService {
 	}
 
 	/**
-	 * Estimate the number of tokens in a text string.
-	 * Uses a simple heuristic: ~4 characters = 1 token (industry standard for English/mixed content).
-	 * This is conservative and works well cross-model.
-	 *
-	 * @param string $text The text to estimate tokens for
-	 * @return int Estimated token count
-	 */
-	private function estimateTokens(string $text): int {
-		return (int) ceil(mb_strlen($text, 'UTF-8') / 4);
-	}
-
-	/**
 	 * Build conversation context array respecting a token limit.
 	 * Includes messages from newest to oldest until the token budget is exhausted.
 	 * Always includes at least the most recent user message even if it exceeds the limit.
@@ -2751,7 +2786,7 @@ class BotService {
 			if ($role === 'assistant' && trim($content) === '') {
 				continue;
 			}
-			$tokens = $this->estimateTokens($content);
+			$tokens = ModelOutputBudget::estimateTokens($content);
 
 			// Always include the most recent user message (it's the current query)
 			if (!$includedLatestUser && $role === 'user') {
