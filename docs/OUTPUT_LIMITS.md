@@ -88,6 +88,10 @@ When the provider reports `finish_reason: "length"`:
   added to the conversation history.
 - Tool calls in the truncated turn are rejected, even if their arguments happen
   to look complete. Previously executed actions are not replayed.
+- Recognized truncated legacy JSON/XML tool envelopes are not delivered as text
+  when the corresponding compatibility profile is enabled. JSON recognition
+  covers supported metadata and reversed field order; it does not reconstruct
+  or execute an incomplete call or classify arbitrary unfinished JSON as a tool.
 - The activity run is **Incomplete**, not Success or a connection error. This
   also applies to queued requests. Token budgets and numerical usage details
   remain visible in activity exports, while credential values remain redacted.

@@ -168,7 +168,7 @@
 							type="number"
 							min="0"
 							max="1"
-							step="0.05"
+							step="0.01"
 							placeholder="0.20">
 						<p class="hint">
 							{{ t('educai', 'Controls how deterministic or creative bots are by default. Lower values are better for agentic, tool-using, RAG, and workflow bots. Higher values can be useful for creative writing or brainstorming bots.') }}
@@ -1263,7 +1263,7 @@ step="1">
 					v-model.number="settings.conversationContextTokens"
 					type="number"
 					min="1000"
-					step="500"
+					step="1"
 					placeholder="8000">
 				<p class="hint">
 					{{ t('educai', 'Maximum tokens of conversation history to include. Default: 8000 (safe for most models). Higher values provide more context but may exceed model limits. Common limits: Llama 3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: 32K-128K.') }}

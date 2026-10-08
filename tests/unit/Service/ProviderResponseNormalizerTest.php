@@ -76,6 +76,46 @@ class ProviderResponseNormalizerTest extends TestCase {
 				'{"name":"wiki_\u0077rite_page","arguments":{"content":"unreleased-argument',
 				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
 			],
+			'JSON id between name and arguments' => [
+				'{"name":"wiki_write_page","id":"call-1","arguments":{"content":"unreleased-argument',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON type between name and arguments' => [
+				'{"name":"wiki_write_page","type":"function","arguments":{"content":"unreleased-argument',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON metadata around tool name' => [
+				'{"type":"function","tool":"wiki_write_page","id":"call-1","parameters":{"content":"unreleased-argument',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON arguments before name' => [
+				'{"arguments":{"content":"unreleased-argument"},"name":"wiki_write_page"',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON parameters before tool with metadata' => [
+				'{"parameters":{"content":"unreleased-argument"},"tool":"wiki_write_page","id":"call-1"',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON array with arguments before name' => [
+				'[{"id":"call-1","arguments":{"content":"unreleased-argument"},"name":"wiki_write_page"}',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON nested arguments before name' => [
+				'{"function":{"arguments":{"content":"unreleased-argument"},"name":"wiki_write_page"},"id":"call-1"',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON array with nested arguments before name' => [
+				'[{"type":"function","function":{"arguments":"{\\"content\\":\\"unreleased-argument\\"}","name":"wiki_write_page"',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON arguments before a truncated name' => [
+				'{"arguments":{"content":"unreleased-argument"},"name":"wiki_write_',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
+			'JSON arguments first with truncated id after name' => [
+				'{"arguments":{"content":"unreleased-argument"},"name":"wiki_write_page","id":"call-',
+				'json', AgentTurn::COMPATIBILITY_LEGACY_JSON,
+			],
 		];
 	}
 
@@ -107,6 +147,16 @@ class ProviderResponseNormalizerTest extends TestCase {
 			'JSON disabled' => ['{"name":"wiki_write_page","arguments":{', 'off', 'length'],
 			'XML wrong compatibility profile' => ['<tool_call><name>wiki_write_page</name>', 'json', 'length'],
 			'JSON wrong compatibility profile' => ['{"name":"wiki_write_page","arguments":{', 'xml', 'length'],
+			'arguments with a nested name only' => ['{"arguments":{"name":"wiki_write_page","content":"unreleased', 'json', 'length'],
+			'JSON data with arguments before name' => ['{"arguments":{"content":"data"},"name":"Alice","age":', 'json', 'length'],
+			'JSON incomplete example containing reversed call' => ['{"example":{"arguments":{"content":"data"},"name":"wiki_write_page"', 'json', 'length'],
+			'fenced reverse JSON example' => ["```json\n{\"arguments\":{},\"name\":\"wiki_write_page\"", 'json', 'length'],
+			'JSON name alone' => ['{"name":"Alice"', 'json', 'length'],
+			'JSON reverse shape disabled' => ['{"arguments":{},"name":"wiki_write_page"', 'off', 'length'],
+			'JSON reverse non-length termination' => ['{"arguments":{},"name":"wiki_write_page"', 'json', 'stop'],
+			'JSON name-only array' => ['[{"name":"Alice"', 'json', 'length'],
+			'JSON reverse extra field before name' => ['{"arguments":{},"description":"data","name":"wiki_write_page"', 'json', 'length'],
+			'JSON reverse unsupported type' => ['{"arguments":{},"type":"person","name":"Alice"', 'json', 'length'],
 		];
 	}
 
@@ -134,6 +184,9 @@ class ProviderResponseNormalizerTest extends TestCase {
 		return [
 			'complete XML' => ['<tool_call><name>wiki_write_page</name><arguments>{"content":"value"}</arguments></tool_call>', 'xml'],
 			'complete JSON' => ['{"name":"wiki_write_page","arguments":{"content":"value"}}', 'json'],
+			'complete JSON metadata between name and arguments' => ['{"name":"wiki_write_page","id":"call-1","type":"function","arguments":{"content":"value"}}', 'json'],
+			'complete JSON arguments before name' => ['{"arguments":{"content":"value"},"name":"wiki_write_page"}', 'json'],
+			'complete nested JSON arguments before name' => ['{"function":{"arguments":{"content":"value"},"name":"wiki_write_page"},"id":"call-1"}', 'json'],
 		];
 	}
 

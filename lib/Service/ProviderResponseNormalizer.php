@@ -242,6 +242,10 @@ final class ProviderResponseNormalizer {
 			}
 		}
 		if ($mode === self::COMPATIBILITY_JSON || $mode === self::COMPATIBILITY_JSON_XML) {
+			json_decode($content);
+			if (json_last_error() === JSON_ERROR_NONE) {
+				return null;
+			}
 			// Match only the leading name/arguments shape recognized by the
 			// compatibility parser, not arbitrary JSON, prose or fenced examples.
 			$jsonString = <<<'REGEX'
@@ -249,12 +253,25 @@ final class ProviderResponseNormalizer {
 REGEX;
 			$metadata = '(?:"id"\s*:\s*' . $jsonString . '|"type"\s*:\s*"function")';
 			$prefix = '~^\s*(?:\[\s*)?\{\s*(?:' . $metadata . '\s*,\s*)*';
-			$flat = '"(?:name|tool)"\s*:\s*' . $jsonString . '\s*,\s*"(?:arguments|parameters)"\s*:';
+			$flat = '"(?:name|tool)"\s*:\s*' . $jsonString . '\s*,\s*(?:' . $metadata . '\s*,\s*)*"(?:arguments|parameters)"\s*:';
 			$nested = '"function"\s*:\s*\{\s*"name"\s*:\s*' . $jsonString . '\s*,\s*"arguments"\s*:';
 			if (preg_match($prefix . '(?:' . $flat . '|' . $nested . ')~', $content) === 1) {
-				json_decode($content);
-				if (json_last_error() !== JSON_ERROR_NONE) {
-					return AgentTurn::COMPATIBILITY_LEGACY_JSON;
+				return AgentTurn::COMPATIBILITY_LEGACY_JSON;
+			}
+			// Arguments may precede the name. Complete only the envelope delimiters
+			// for shape recognition; never return a repaired call for execution.
+			foreach (['}', '}}', ']', '}]', '}}]'] as $ending) {
+				foreach (['', '"'] as $quote) {
+					$entries = $this->legacyJsonEntries(json_decode($content . $quote . $ending));
+					if ($entries === null) {
+						continue;
+					}
+					$last = $entries[count($entries) - 1];
+					$function = $last['function'] ?? $last;
+					if ((array_key_exists('arguments', $function) || array_key_exists('parameters', $function))
+						&& $this->normalizeCompatibilityEntries($entries) !== null) {
+						return AgentTurn::COMPATIBILITY_LEGACY_JSON;
+					}
 				}
 			}
 		}
