@@ -31,7 +31,7 @@ class Version024203Date20261008000000Test extends TestCase {
 		$migration = new Version024203Date20261008000000();
 		$this->assertSame($schema, $migration->changeSchema($this->createMock(IOutput::class), static fn () => $schema, []));
 		$this->assertSame(['max_output_tokens', 'model_output_token_limits'], $table->added);
-		$this->assertSame(['type' => Types::INTEGER, 'notnull' => false, 'default' => 4096], $table->columns['max_output_tokens']);
+		$this->assertSame(['type' => Types::INTEGER, 'notnull' => false, 'default' => 32768], $table->columns['max_output_tokens']);
 		$this->assertSame(['type' => Types::TEXT, 'notnull' => false], $table->columns['model_output_token_limits']);
 		$this->assertSame(['encrypted' => true], $table->columns['api_key']);
 		$this->assertSame(['default' => 8000], $table->columns['conversation_context_tokens']);

@@ -11,7 +11,7 @@ use Psr\Log\LoggerInterface;
 
 class SettingsService {
 	public const DEFAULT_TEMPERATURE = 0.2;
-	public const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+	public const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
 	/** Administrative ceiling, not a guarantee of any model's output capacity. */
 	public const MAX_OUTPUT_TOKENS = 131072;
 	public const DEFAULT_LLM_CHAT_TIMEOUT = 90;

@@ -21,7 +21,7 @@ class Version024203Date20261008000000 extends SimpleMigrationStep {
 		if (!$table->hasColumn('max_output_tokens')) {
 			$table->addColumn('max_output_tokens', Types::INTEGER, [
 				'notnull' => false,
-				'default' => 4096,
+				'default' => 32768,
 			]);
 			$changed = true;
 		}

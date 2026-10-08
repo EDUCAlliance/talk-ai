@@ -72,6 +72,14 @@ final class ProviderResponseNormalizer {
 			if ($compatibilityCalls !== null) {
 				$toolCalls = $compatibilityCalls;
 				$text = '';
+			} elseif (($response['finish_reason'] ?? null) === 'length') {
+				$truncatedSource = $this->truncatedLegacyEnvelopeSource($text, $compatibilityMode);
+				if ($truncatedSource !== null) {
+					// A cut-off compatibility envelope is not an answer. Do not
+					// repair it into an executable call or expose its arguments.
+					$text = '';
+					$compatibilitySource = $truncatedSource;
+				}
 			}
 		}
 
@@ -223,6 +231,35 @@ final class ProviderResponseNormalizer {
 			self::COMPATIBILITY_XML,
 			self::COMPATIBILITY_JSON_XML,
 		], true) ? $mode : self::COMPATIBILITY_OFF;
+	}
+
+	private function truncatedLegacyEnvelopeSource(string $content, string $mode): ?string {
+		$content = trim($content);
+		if ($mode === self::COMPATIBILITY_XML || $mode === self::COMPATIBILITY_JSON_XML) {
+			if (preg_match('/^<((?:[a-z0-9_-]+:)?(?:tool_call|function_call))\s*>/i', $content, $matches) === 1
+				&& preg_match('/<\/' . preg_quote($matches[1], '/') . '>\s*$/i', $content) !== 1) {
+				return AgentTurn::COMPATIBILITY_LEGACY_XML;
+			}
+		}
+		if ($mode === self::COMPATIBILITY_JSON || $mode === self::COMPATIBILITY_JSON_XML) {
+			// Match only the leading name/arguments shape recognized by the
+			// compatibility parser, not arbitrary JSON, prose or fenced examples.
+			$jsonString = <<<'REGEX'
+"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"
+REGEX;
+			$metadata = '(?:"id"\s*:\s*' . $jsonString . '|"type"\s*:\s*"function")';
+			$prefix = '~^\s*(?:\[\s*)?\{\s*(?:' . $metadata . '\s*,\s*)*';
+			$flat = '"(?:name|tool)"\s*:\s*' . $jsonString . '\s*,\s*"(?:arguments|parameters)"\s*:';
+			$nested = '"function"\s*:\s*\{\s*"name"\s*:\s*' . $jsonString . '\s*,\s*"arguments"\s*:';
+			if (preg_match($prefix . '(?:' . $flat . '|' . $nested . ')~', $content) === 1) {
+				json_decode($content);
+				if (json_last_error() !== JSON_ERROR_NONE) {
+					return AgentTurn::COMPATIBILITY_LEGACY_JSON;
+				}
+			}
+		}
+
+		return null;
 	}
 
 	/**

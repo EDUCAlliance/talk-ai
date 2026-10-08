@@ -17,7 +17,7 @@ class SettingsOutputTokensTest extends TestCase {
 	public function testDefaultAndOverridesAreIndependentOfConversationContext(): void {
 		$settings = new Settings();
 		$service = $this->service($settings);
-		$this->assertSame(4096, $service->getMaxOutputTokens());
+		$this->assertSame(32768, $service->getMaxOutputTokens());
 		$settings->setConversationContextTokens(20000);
 		$settings->setMaxOutputTokens(6000);
 		$settings->setDefaultModel('secondary:reasoning');
@@ -42,7 +42,7 @@ class SettingsOutputTokensTest extends TestCase {
 		}
 		foreach ([null, 0, -1, 131073] as $stored) {
 			$settings->setMaxOutputTokens($stored);
-			$this->assertSame(4096, $service->getMaxOutputTokens('primary:model'));
+			$this->assertSame(32768, $service->getMaxOutputTokens('primary:model'));
 		}
 	}
 
@@ -97,7 +97,7 @@ class SettingsOutputTokensTest extends TestCase {
 		$settings->setApiKey('encrypted-secret');
 		$settings->setModelOutputTokenLimits('{"primary:model":32768}');
 		$data = json_decode(json_encode($settings, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
-		$this->assertSame(4096, $data['max_output_tokens']);
+		$this->assertSame(32768, $data['max_output_tokens']);
 		$this->assertSame(['primary:model' => 32768], $data['model_output_token_limits']);
 		$this->assertSame('***', $data['api_key']);
 	}

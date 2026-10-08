@@ -42,8 +42,10 @@ class LLMClient {
 	private ?IConfig $config;
 	private ?TraceService $traceService;
 	private ProviderResponseNormalizer $responseNormalizer;
-	/** @var array<int,array{id:string,label:string,model:string,endpoint:string}>|null */
+	/** @var array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>|null */
 	private ?array $modelOptionsCache = null;
+	private ?string $modelOptionsCacheFingerprint = null;
+	private int $modelOptionsCacheExpiresAt = 0;
 	/** @var \WeakMap<ProviderAttemptBudget,bool> */
 	private \WeakMap $modelDiscoveryFailures;
 
@@ -1248,7 +1250,26 @@ class LLMClient {
 			}
 		}
 
+		$budgetKey = isset($payload['max_completion_tokens']) ? 'max_completion_tokens' : 'max_tokens';
+		$payload[$budgetKey] = ModelOutputBudget::constrain(
+			(int)$maxTokens,
+			$fullMessages,
+			$payload['tools'] ?? [],
+			$this->knownModelLimits($modelReference ?? 'primary:' . $model),
+		);
+
 		return $this->sanitizePayloadForJson($payload);
+	}
+
+	/** Last-known advertised limits are advisory; chat never depends on a new /models request. */
+	private function knownModelLimits(string $reference): array {
+		$options = $this->readModelOptionsCache($this->settingsService->getSettings(), false) ?? [];
+		foreach ($options as $option) {
+			if ($option['id'] === $reference) {
+				return $option['limits'] ?? [];
+			}
+		}
+		return [];
 	}
 
 	/**
@@ -1886,7 +1907,7 @@ class LLMClient {
 	}
 
 	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
+	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
 	 */
 	public function listModelOptions(): array {
 		$settings = $this->settingsService->getSettings();
@@ -1901,7 +1922,7 @@ class LLMClient {
 	}
 
 	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
+	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
 	 */
 	private function fetchConfiguredModelOptions(
 		$settings,
@@ -1946,7 +1967,7 @@ class LLMClient {
 	}
 
 	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
+	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
 	 */
 	private function getCachedModelOptions(
 		$settings,
@@ -1954,24 +1975,9 @@ class LLMClient {
 		?string $modelReference = null,
 		bool $streaming = false,
 	): array {
-		if ($this->modelOptionsCache !== null) {
-			return $this->modelOptionsCache;
-		}
-
-		$fingerprint = $this->modelEndpointFingerprint($settings);
-		if ($this->config !== null) {
-			$raw = $this->config->getAppValue(Application::APP_ID, self::MODEL_OPTIONS_CACHE_KEY, '');
-			$decoded = $raw !== '' ? json_decode($raw, true) : null;
-			if (
-				is_array($decoded)
-				&& ($decoded['fingerprint'] ?? '') === $fingerprint
-				&& (int)($decoded['expires_at'] ?? 0) >= time()
-				&& isset($decoded['options'])
-				&& is_array($decoded['options'])
-			) {
-				$this->modelOptionsCache = $this->normalizeCachedModelOptions($decoded['options']);
-				return $this->modelOptionsCache;
-			}
+		$cached = $this->readModelOptionsCache($settings, true);
+		if ($cached !== null) {
+			return $cached;
 		}
 
 		$timeout = $this->settingsService->normalizePositiveInteger(
@@ -1990,18 +1996,43 @@ class LLMClient {
 		return $options;
 	}
 
+	/** Routing needs fresh discovery; capacities retain last-known data until a refresh. */
+	private function readModelOptionsCache($settings, bool $requireFresh): ?array {
+		$fingerprint = $this->modelEndpointFingerprint($settings);
+		if ($this->modelOptionsCache !== null && $this->modelOptionsCacheFingerprint === $fingerprint
+			&& (!$requireFresh || $this->modelOptionsCacheExpiresAt >= time())) {
+			return $this->modelOptionsCache;
+		}
+		if ($this->config === null) {
+			return null;
+		}
+		$raw = $this->config->getAppValue(Application::APP_ID, self::MODEL_OPTIONS_CACHE_KEY, '');
+		$decoded = $raw !== '' ? json_decode($raw, true) : null;
+		if (!is_array($decoded) || ($decoded['fingerprint'] ?? '') !== $fingerprint
+			|| !is_array($decoded['options'] ?? null)
+			|| ($requireFresh && (int)($decoded['expires_at'] ?? 0) < time())) {
+			return null;
+		}
+		$this->modelOptionsCache = $this->normalizeCachedModelOptions($decoded['options']);
+		$this->modelOptionsCacheFingerprint = $fingerprint;
+		$this->modelOptionsCacheExpiresAt = (int)($decoded['expires_at'] ?? 0);
+		return $this->modelOptionsCache;
+	}
+
 	/**
-	 * @param array<int,array{id:string,label:string,model:string,endpoint:string}> $options
+	 * @param array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}> $options
 	 */
 	private function storeModelOptionsCache($settings, array $options): void {
 		$this->modelOptionsCache = $options;
+		$this->modelOptionsCacheFingerprint = $this->modelEndpointFingerprint($settings);
+		$this->modelOptionsCacheExpiresAt = time() + self::MODEL_OPTIONS_CACHE_TTL;
 		if ($this->config === null) {
 			return;
 		}
 
 		$this->config->setAppValue(Application::APP_ID, self::MODEL_OPTIONS_CACHE_KEY, json_encode([
-			'fingerprint' => $this->modelEndpointFingerprint($settings),
-			'expires_at' => time() + self::MODEL_OPTIONS_CACHE_TTL,
+			'fingerprint' => $this->modelOptionsCacheFingerprint,
+			'expires_at' => $this->modelOptionsCacheExpiresAt,
 			'options' => $options,
 		]) ?: '');
 	}
@@ -2016,7 +2047,7 @@ class LLMClient {
 
 	/**
 	 * @param array<mixed> $options
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
+	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
 	 */
 	private function normalizeCachedModelOptions(array $options): array {
 		$normalized = [];
@@ -2031,19 +2062,20 @@ class LLMClient {
 				continue;
 			}
 
+			$limits = ModelOutputBudget::normalize(is_array($option['limits'] ?? null) ? $option['limits'] : []);
 			$normalized[] = [
-				'id' => (string)$option['id'],
+				'id' => $endpoint . ':' . $model,
 				'label' => (string)($option['label'] ?? (($endpoint === 'secondary' ? 'Secondary' : 'Primary') . ' · ' . $model)),
 				'model' => $model,
 				'endpoint' => $endpoint,
-			];
+			] + ($limits === [] ? [] : ['limits' => $limits]);
 		}
 
 		return $normalized;
 	}
 
 	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string}>
+	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
 	 */
 	private function fetchModelOptionsForEndpoint(
 		string $endpointKey,
@@ -2078,6 +2110,20 @@ class LLMClient {
 			$body = json_decode($response->getBody(), true);
 			$models = $this->extractModelIds($body);
 			sort($models);
+			$limitsByModel = [];
+			$entries = $body['data'] ?? $body['models'] ?? [];
+			foreach (is_array($entries) ? $entries : [] as $item) {
+				if (!is_array($item)) {
+					continue;
+				}
+				$id = $item['id'] ?? $item['name'] ?? null;
+				if (!is_string($id)) {
+					continue;
+				}
+				foreach (ModelOutputBudget::fromModel($item) as $key => $value) {
+					$limitsByModel[$id][$key] = min($limitsByModel[$id][$key] ?? $value, $value);
+				}
+			}
 
 			return array_values(array_map(
 				static fn (string $model): array => [
@@ -2085,7 +2131,7 @@ class LLMClient {
 					'label' => $labelPrefix . ' · ' . $model,
 					'model' => $model,
 					'endpoint' => $endpointKey,
-				],
+				] + (empty($limitsByModel[$model]) ? [] : ['limits' => $limitsByModel[$model]]),
 				array_values(array_unique($models))
 			));
 		} catch (\Exception $e) {

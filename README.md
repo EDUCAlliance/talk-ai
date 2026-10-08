@@ -108,7 +108,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local Nextcloud verification 
 ### Response limits
 
 Under **Administration → Talk AI → Response Limits**, configure the output budget
-per model response (default **4096 tokens**), with optional exact model overrides.
+per model response (default **32768 tokens**), with optional exact model overrides.
 This is separate from the conversation-history budget. If a model reaches its output
 limit, Talk AI delivers available final text with an incomplete notice and records
 the run as **Incomplete**. It does not automatically continue or replay tool actions.

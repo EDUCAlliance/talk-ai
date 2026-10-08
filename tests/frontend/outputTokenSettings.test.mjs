@@ -26,11 +26,11 @@ test('output limits save and reload independently of conversation memory', async
 	let saved = {}
 	const state = admin({ get: async () => ({ data: {
 		conversation_context_tokens: 8000, default_model: 'primary:model',
-		max_output_tokens: saved.maxOutputTokens ?? 4096,
+		max_output_tokens: saved.maxOutputTokens ?? 32768,
 		model_output_token_limits: saved.modelOutputTokenLimits ?? {},
 	} }), put: async (_url, payload) => { saved = payload; return { data: {} } } })
 	await state.loadSettings()
-	assert.equal(state.settings.maxOutputTokens, 4096)
+	assert.equal(state.settings.maxOutputTokens, 32768)
 	state.settings.maxOutputTokens = 8192
 	state.addOutputTokenOverride()
 	Object.assign(state.outputTokenOverrides[0], { model: 'secondary:reasoning', tokens: 32768 })

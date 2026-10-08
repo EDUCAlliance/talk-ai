@@ -399,7 +399,7 @@
 							max="131072"
 							step="1">
 						<p class="hint">
-							{{ t('educai', 'Default: 4096. Reasoning models may use part of this budget for internal reasoning. Higher limits may increase response time and cost. The range 1–131072 is an administrative limit; your model may support less.') }}
+							{{ t('educai', 'Default: 32768. Reasoning models share this budget. Higher limits may increase response time and cost. Reported model limits can reduce the effective budget. Reload models to refresh those limits; use an override for providers that do not report them.') }}
 						</p>
 					</div>
 					<div class="section-heading">
@@ -408,6 +408,14 @@
 							{{ t('educai', 'Optional overrides match the exact model reference, including primary: or secondary:. Other models use the default above.') }}
 						</p>
 					</div>
+					<button
+						type="button"
+						class="button"
+						:disabled="loadingModels"
+						@click="loadModels">
+						{{ t('educai', 'Reload models') }}
+					</button>
+					<p v-if="modelLoadError" class="hint" role="alert">{{ modelLoadError }}</p>
 					<datalist id="output-limit-models">
 						<option
 							v-for="option in availableModelOptionsWithCurrent([settings.defaultModel, settings.fallbackModel])"
@@ -1575,7 +1583,7 @@ export default {
 				rateLimitDay: 1000,
 				rateLimitQueueMessage: '',
 				conversationContextTokens: 8000,
-				maxOutputTokens: 4096,
+				maxOutputTokens: 32768,
 			},
 			outputTokenOverrides: [],
 			openSections: {
@@ -2182,7 +2190,7 @@ export default {
 				this.settings.rateLimitDay = typeof data.rate_limit_day === 'number' && data.rate_limit_day > 0 ? data.rate_limit_day : 1000
 				this.settings.rateLimitQueueMessage = data.rate_limit_queue_message || ''
 				this.settings.conversationContextTokens = typeof data.conversation_context_tokens === 'number' ? data.conversation_context_tokens : 8000
-				this.settings.maxOutputTokens = data.max_output_tokens ?? 4096
+				this.settings.maxOutputTokens = data.max_output_tokens ?? 32768
 				this.outputTokenOverrides = Object.entries(data.model_output_token_limits || {}).map(([model, tokens]) => ({ model, tokens }))
 				if (this.settings.allowMultipleModels || this.settings.secondaryApiEndpoint) {
 					this.loadModels()

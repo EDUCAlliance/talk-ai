@@ -187,7 +187,7 @@ class Settings extends Entity implements JsonSerializable {
 	protected ?int $rateLimitDay = 1000;
 	protected ?string $rateLimitQueueMessage = null;
 	protected ?int $conversationContextTokens = 8000;
-	protected ?int $maxOutputTokens = 4096;
+	protected ?int $maxOutputTokens = 32768;
 	/** JSON object keyed by exact endpoint-qualified model reference. */
 	protected ?string $modelOutputTokenLimits = null;
 	protected ?int $llmChatTimeout = 90;
@@ -282,7 +282,7 @@ class Settings extends Entity implements JsonSerializable {
 			'rate_limit_day' => $this->rateLimitDay,
 			'rate_limit_queue_message' => $this->rateLimitQueueMessage,
 			'conversation_context_tokens' => $this->conversationContextTokens ?? 8000,
-			'max_output_tokens' => $this->maxOutputTokens ?? 4096,
+			'max_output_tokens' => $this->maxOutputTokens ?? 32768,
 			'model_output_token_limits' => (object)$this->getModelOutputTokenLimitsArray(),
 			'llm_chat_timeout' => $this->llmChatTimeout ?? 90,
 			'llm_stream_timeout' => $this->llmStreamTimeout ?? 240,
