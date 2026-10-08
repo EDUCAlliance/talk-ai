@@ -178,7 +178,6 @@ class AgentExecutor {
 			'top_p',
 			'stream_options',
 			'legacy_tool_call_compatibility',
-			'_use_configured_output_budget',
 		]));
 		$requestOptions['tools'] = $toolsForLlm;
 		$requestOptions['temperature'] = $this->resolveTemperatureOption(

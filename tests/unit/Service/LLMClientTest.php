@@ -30,7 +30,7 @@ class LLMClientTest extends TestCase {
 	public function testConfiguredBudgetsReachClassicAndReasoningPayloadsAndTrace(): void {
 		foreach ([false, true] as $stream) {
 			foreach (['primary:model-a' => 'max_tokens', 'secondary:gpt-5-mini' => 'max_completion_tokens'] as $model => $key) {
-				foreach ([[], ['max_tokens' => 128], ['max_tokens' => 4096, '_use_configured_output_budget' => true]] as $options) {
+				foreach ([[], ['max_tokens' => 128]] as $options) {
 					$settings = new Settings();
 					$settings->setApiProvider('custom');
 					$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
@@ -41,12 +41,11 @@ class LLMClientTest extends TestCase {
 					$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
 					$settingsService->method('normalizePositiveInteger')->willReturn(90);
 					$settingsService->method('getMaxOutputTokens')->with($model)->willReturn(8192);
-					$expected = ($options['_use_configured_output_budget'] ?? false) ? 8192 : ($options['max_tokens'] ?? 8192);
+					$expected = $options['max_tokens'] ?? 8192;
 					$client = $this->createMock(IClient::class);
 					$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $request) use ($stream, $key, $expected): IResponse {
 						$this->assertSame($expected, $request['json'][$key]);
 						$this->assertArrayNotHasKey($key === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens', $request['json']);
-						$this->assertArrayNotHasKey('_use_configured_output_budget', $request['json']);
 						return $stream
 							? $this->rawResponse('data: {"choices":[{"delta":{"content":"Partial text"},"finish_reason":"length"}]}' . "\n\ndata: [DONE]\n\n")
 							: $this->jsonResponse(['choices' => [['message' => ['content' => 'Partial text'], 'finish_reason' => 'length']]]);
@@ -86,7 +85,7 @@ class LLMClientTest extends TestCase {
 			return $this->jsonResponse(['choices' => [['message' => ['content' => 'Answer'], 'finish_reason' => 'stop']]]);
 		});
 		$llm = new LLMClient($this->clientService($client), $settingsService, $this->logger());
-		$llm->sendAgentTurn('system', [], [], 'primary:model-a', ['max_tokens' => 4096, '_use_configured_output_budget' => true]);
+		$llm->sendAgentTurn('system', [], [], 'primary:model-a');
 		$this->assertSame(4096, $calls[0]['max_tokens']);
 		$this->assertSame(16384, $calls[1]['max_completion_tokens']);
 	}

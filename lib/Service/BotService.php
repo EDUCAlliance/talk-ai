@@ -1071,8 +1071,6 @@ class BotService {
 				$agentOptions = array_filter([
 					'model' => $effectiveBot->getModel(),
 					'temperature' => $resolvedTemperature,
-					'max_tokens' => $this->settingsService->getMaxOutputTokens($effectiveBot->getModel()),
-					'_use_configured_output_budget' => true,
 					'initial_tool_choice' => $initialToolChoice,
 					'on_partial_result' => $assistantProgress,
 					'bot_id' => $effectiveBot->getId(),
@@ -2761,18 +2759,6 @@ class BotService {
 	}
 
 	/**
-	 * Estimate the number of tokens in a text string.
-	 * Uses a simple heuristic: ~4 characters = 1 token (industry standard for English/mixed content).
-	 * This is conservative and works well cross-model.
-	 *
-	 * @param string $text The text to estimate tokens for
-	 * @return int Estimated token count
-	 */
-	private function estimateTokens(string $text): int {
-		return (int) ceil(mb_strlen($text, 'UTF-8') / 4);
-	}
-
-	/**
 	 * Build conversation context array respecting a token limit.
 	 * Includes messages from newest to oldest until the token budget is exhausted.
 	 * Always includes at least the most recent user message even if it exceeds the limit.
@@ -2800,7 +2786,7 @@ class BotService {
 			if ($role === 'assistant' && trim($content) === '') {
 				continue;
 			}
-			$tokens = $this->estimateTokens($content);
+			$tokens = ModelOutputBudget::estimateTokens($content);
 
 			// Always include the most recent user message (it's the current query)
 			if (!$includedLatestUser && $role === 'user') {

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace OCA\EducAI\Tests\Unit\Service;
 
 use OCA\EducAI\AppInfo\Application;
+use OCA\EducAI\Db\Conversation;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Service\AgentTurn;
+use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\ProviderAttemptBudget;
 use OCA\EducAI\Service\SettingsService;
@@ -50,6 +52,59 @@ class LLMOutputBudgetTest extends TestCase {
 				yield ($stream ? 'stream ' : 'sync ') . $model => [$stream, $model, $parameter];
 			}
 		}
+	}
+
+	#[DataProvider('requestModes')]
+	public function testFittingRetainedHistoryStillReachesProviderAfterDiscovery(bool $stream, string $model, string $parameter): void {
+		$old = new Conversation();
+		$old->setRole('assistant');
+		$old->setContent(str_repeat('The library opens every morning at nine. ', 390));
+		$latest = new Conversation();
+		$latest->setRole('user');
+		$latest->setContent('Summarize this in one sentence.');
+		$bot = (new \ReflectionClass(BotService::class))->newInstanceWithoutConstructor();
+		$messages = (new \ReflectionMethod(BotService::class, 'buildContextWithinTokenLimit'))->invoke($bot, [$old, $latest], 8000);
+		$this->assertCount(2, $messages);
+
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))->method('get')->willReturnCallback(function (string $url): IResponse {
+			return $this->jsonResponse(['data' => [[
+				'id' => str_contains($url, 'primary.') ? 'model-a' : 'gpt-5-mini',
+				'context_length' => 16384, 'max_output_tokens' => 8192,
+			]]]);
+		});
+		$sent = [];
+		$client->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url, array $request) use ($stream, $parameter, &$sent): IResponse {
+			$sent[] = $request['json'];
+			$this->assertSame(4096, $request['json'][$parameter]);
+			return $this->answer($stream);
+		});
+		$llm = $this->llm($client, $this->settings(), budgets: [$model => 4096]);
+		$system = 'You are a helpful assistant.';
+		$this->assertSame('ok', $this->turn($llm, $stream, $model, $system, $messages)->getText());
+		$llm->listModelOptions();
+		$this->assertSame('ok', $this->turn($llm, $stream, $model, $system, $messages)->getText());
+		$this->assertSame($sent[0], $sent[1], 'Discovery must not break a fitting conversation.');
+		$this->assertSame($messages, array_slice($sent[1]['messages'], -count($messages)), 'History must not be discarded.');
+	}
+
+	#[DataProvider('requestModes')]
+	public function testAdvisoryEstimateCannotRejectRequestBeforeProvider(bool $stream, string $model, string $parameter): void {
+		$settings = $this->settings();
+		[$endpoint, $name] = explode(':', $model, 2);
+		$cache = $this->cacheData($settings, [['id' => $model, 'model' => $name, 'endpoint' => $endpoint,
+			'limits' => ['context_tokens' => 4096]]]);
+		// Repeated text can fit even when the character-based estimate plus reserve does not.
+		$messages = [['role' => 'user', 'content' => str_repeat('a', 16000)]];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->never())->method('get');
+		$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $request) use ($stream, $parameter, $messages): IResponse {
+			$this->assertSame(1, $request['json'][$parameter]);
+			$this->assertSame($messages, array_slice($request['json']['messages'], 1));
+			return $this->answer($stream);
+		});
+		$llm = $this->llm($client, $settings, $this->config($cache));
+		$this->assertSame('ok', $this->turn($llm, $stream, $model, 'system', $messages)->getText());
 	}
 
 	public function testProviderMetadataRoundTripsThroughPersistentCacheAndExpiredRoutingTtl(): void {
@@ -204,7 +259,6 @@ class LLMOutputBudgetTest extends TestCase {
 		$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $request) use ($stream, $parameter, $expected, &$sent): IResponse {
 			$sent = $request['json'];
 			$this->assertSame($expected, $sent[$parameter]);
-			$this->assertArrayNotHasKey('_use_configured_output_budget', $sent);
 			return $this->answer($stream);
 		});
 		$llm = $this->llm($client, $settings, $this->config($cache), [$model => $configured]);
@@ -221,7 +275,7 @@ class LLMOutputBudgetTest extends TestCase {
 				'explicit smaller budget' => [32768, ['max_tokens' => 128], 8192, 128],
 				'explicit larger budget' => [32768, ['max_tokens' => 65536], 8192, 8192],
 				'configured smaller budget' => [512, [], 8192, 512],
-				'configured reasoning headroom' => [65536, ['max_tokens' => 128, '_use_configured_output_budget' => true], 49152, 49152],
+				'configured reasoning headroom' => [65536, [], 49152, 49152],
 			] as $case => $args) {
 				yield $mode . ' ' . $case => [$stream, $model, $parameter, ...$args];
 			}
@@ -255,21 +309,24 @@ class LLMOutputBudgetTest extends TestCase {
 		$this->turn($llm, $stream, $model, $system, $history, ['tools' => $tools]);
 		$this->assertSame(json_encode($sent, JSON_THROW_ON_ERROR), json_encode($trace['payload'], JSON_THROW_ON_ERROR));
 		$this->assertIsObject($sent['tools'][0]['function']['parameters']['properties']);
-		$inputBytes = strlen(json_encode(['messages' => $sent['messages'], 'tools' => $sent['tools']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
-		$this->assertSame(6000 - $inputBytes - 1024, $sent[$parameter]);
+		$inputCharacters = mb_strlen(json_encode(['messages' => $sent['messages'], 'tools' => $sent['tools']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), 'UTF-8');
+		$this->assertSame(6000 - (int)ceil($inputCharacters / 4) - 1024, $sent[$parameter]);
 		$this->assertGreaterThan(0, $sent[$parameter]);
 		$this->assertLessThan($baseline, $sent[$parameter]);
 	}
 
 	#[DataProvider('oversizedRequests')]
-	public function testExhaustedContextStopsBeforeAnyRequestOrFallback(bool $stream, string $part): void {
+	public function testProviderConfirmedContextOverflowStopsWithoutRetryOrFallback(bool $stream, string $part): void {
 		$settings = $this->settings();
 		$settings->setFallbackModel('secondary:gpt-5-mini');
 		$cache = $this->cacheData($settings, [['id' => 'primary:model-a', 'model' => 'model-a', 'endpoint' => 'primary',
 			'limits' => ['context_tokens' => 2048]]]);
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->never())->method('get');
-		$client->expects($this->never())->method('post');
+		$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $request): IResponse {
+			$this->assertSame(1, $request['json']['max_tokens']);
+			return $this->jsonResponse(['error' => ['code' => 'context_length_exceeded', 'message' => 'Maximum context length exceeded']], 400);
+		});
 		$budget = new ProviderAttemptBudget();
 		$options = ['provider_attempt_budget' => $budget];
 		$system = $part === 'system' ? str_repeat('rules ', 1000) : 'system';
@@ -281,13 +338,13 @@ class LLMOutputBudgetTest extends TestCase {
 		$llm = $this->llm($client, $settings, $this->config($cache));
 		try {
 			$this->turn($llm, $stream, 'primary:model-a', $system, $messages, $options);
-			$this->fail('Expected the known context limit to reject the request before network access.');
+			$this->fail('Expected a typed provider context-limit error.');
 		} catch (ContextLengthExceededException $e) {
 			$this->assertSame(ContextLengthExceededException::MESSAGE, $e->getMessage());
-			$this->assertSame(0, $e->getCode());
+			$this->assertSame(400, $e->getCode());
 			$this->assertNull($e->getPrevious());
 		}
-		$this->assertSame(0, $budget->getConsumed());
+		$this->assertSame(1, $budget->getConsumed());
 	}
 
 	public static function oversizedRequests(): iterable {
@@ -318,7 +375,7 @@ class LLMOutputBudgetTest extends TestCase {
 		});
 		$llm = $this->llm($client, $settings, $this->config($cache), ['primary:model-a' => 32768, 'secondary:gpt-5-mini' => 65536]);
 		$budget = new ProviderAttemptBudget();
-		$options = ['max_tokens' => 32768, '_use_configured_output_budget' => true, 'provider_attempt_budget' => $budget];
+		$options = ['provider_attempt_budget' => $budget];
 		$turn = $this->turn($llm, $stream, 'primary:model-a', 'system', [['role' => 'user', 'content' => 'Hi']], $options);
 		$this->assertSame('secondary:gpt-5-mini', $turn->getModelReference());
 		$this->assertSame(8192, $sent[0]['payload']['max_tokens']);
@@ -391,14 +448,14 @@ class LLMOutputBudgetTest extends TestCase {
 			: $this->jsonResponse(['choices' => [['message' => ['content' => 'ok'], 'finish_reason' => 'stop']]]);
 	}
 
-	private function jsonResponse(array $body): IResponse {
-		return $this->rawResponse(json_encode($body, JSON_THROW_ON_ERROR));
+	private function jsonResponse(array $body, int $status = 200): IResponse {
+		return $this->rawResponse(json_encode($body, JSON_THROW_ON_ERROR), $status);
 	}
 
-	private function rawResponse(string $body): IResponse {
+	private function rawResponse(string $body, int $status = 200): IResponse {
 		$response = $this->createMock(IResponse::class);
 		$response->method('getBody')->willReturn($body);
-		$response->method('getStatusCode')->willReturn(200);
+		$response->method('getStatusCode')->willReturn($status);
 		$response->method('getHeader')->willReturn('');
 		return $response;
 	}

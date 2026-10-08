@@ -1918,10 +1918,7 @@ class BotServiceTest extends TestCase {
 		$rateLimitService->method('isEnabled')->willReturn(false);
 		$settingsService->method('getSettings')->willReturn(new Settings());
 		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
-		$settingsService->expects($this->once())
-			->method('getMaxOutputTokens')
-			->with('secondary:reasoning-model')
-			->willReturn(6144);
+		$settingsService->expects($this->never())->method('getMaxOutputTokens');
 		$conversationMapper->expects($this->exactly($visibleContent === null ? 1 : 2))
 			->method('insert')
 			->willReturnCallback(static function (Conversation $conversation) use (&$inserted): Conversation {
@@ -1938,7 +1935,7 @@ class BotServiceTest extends TestCase {
 			->method('run')
 			->willReturnCallback(function (string $systemPrompt, array $messages, array $loadout, array $options) use ($stream, $terminalContent): array {
 				$this->assertSame('secondary:reasoning-model', $options['model']);
-				$this->assertSame(6144, $options['max_tokens']);
+				$this->assertArrayNotHasKey('max_tokens', $options, 'Budget is resolved for the actual provider route.');
 				if ($stream) {
 					$emit = $options['on_partial_result'] ?? null;
 					$this->assertIsCallable($emit);

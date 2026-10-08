@@ -52,12 +52,15 @@ ignored. These are optional extensions, not required OpenAI `/models` fields.
 
 When context capacity is known, the budget also reserves space for **all** prepared
 messages (including system prompt and tool results), tool schemas, and 1024 tokens
-of framing headroom. The input estimate deliberately counts one token per UTF-8
-byte of serialized input. This cautious estimate can underuse a small context;
-it is not a provider tokenizer, and multimodal token costs are not reliably known.
-If even the estimated input and reserve do not fit, the request fails with the
-existing context-limit status before any provider call. No history is silently
-discarded and no automatic whole-run replay is added.
+of framing headroom. Input and conversation history share a rough estimate of
+one token per four Unicode characters, applied to the full serialized input for
+output budgeting. This is not a provider tokenizer: it can overestimate or
+underestimate usage, especially for non-English text and multimodal content.
+When the estimate leaves no room, Talk AI sends the unchanged input with a minimal
+one-token output allowance instead of declaring a context overflow locally. This
+may produce an incomplete response; only a provider-confirmed overflow triggers
+the existing context-limit error. No history is silently discarded and no
+automatic whole-run replay is added.
 
 Capacity data stays bound to the configured endpoints. Last-known capacities
 remain usable after the five-minute **routing** cache TTL; reload models to refresh

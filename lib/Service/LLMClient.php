@@ -1215,9 +1215,7 @@ class LLMClient {
 			'model' => $model,
 			'messages' => $fullMessages,
 		];
-		$maxTokens = ($options['_use_configured_output_budget'] ?? false) === true || !isset($options['max_tokens'])
-			? $this->settingsService->getMaxOutputTokens($modelReference ?? $model)
-			: $options['max_tokens'];
+		$maxTokens = $options['max_tokens'] ?? $this->settingsService->getMaxOutputTokens($modelReference ?? $model);
 
 		// Default to classic OpenAI-compatible params. Known reasoning models
 		// and the bounded compatibility retry use max_completion_tokens.

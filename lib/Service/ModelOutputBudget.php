@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Service;
 
-use OCA\EducAI\Exception\ContextLengthExceededException;
-
 /** Optional provider capacities; never guess them from a model's name. */
 final class ModelOutputBudget {
 	private const CONTEXT_RESERVE = 1024;
+
+	/** ponytail: rough text estimate shared with history; use a provider tokenizer if exact counts are needed. */
+	public static function estimateTokens(string $text): int {
+		return (int)ceil(mb_strlen($text, 'UTF-8') / 4);
+	}
 
 	/** @return array{output_tokens?:int,context_tokens?:int} */
 	public static function fromModel(array $model): array {
@@ -43,16 +46,11 @@ final class ModelOutputBudget {
 		$limits = self::normalize($limits);
 		$budget = min($requested, $limits['output_tokens'] ?? $requested);
 		if (isset($limits['context_tokens'])) {
-			// Deliberately cautious text estimate: one token per UTF-8 byte of
-			// the entire input, plus headroom for provider-side framing. This is
-			// not a tokenizer or a guarantee for arbitrary multimodal providers.
 			$input = json_encode(['messages' => $messages, 'tools' => $tools],
 				JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
-			$available = $limits['context_tokens'] - strlen($input) - self::CONTEXT_RESERVE;
-			if ($available < 1) {
-				throw new ContextLengthExceededException();
-			}
-			$budget = min($budget, $available);
+			$available = $limits['context_tokens'] - self::estimateTokens($input) - self::CONTEXT_RESERVE;
+			// A heuristic can size output, but only the provider can confirm an overflow.
+			$budget = min($budget, max(1, $available));
 		}
 		return $budget;
 	}
