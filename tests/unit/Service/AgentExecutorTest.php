@@ -505,23 +505,136 @@ class AgentExecutorTest extends TestCase {
 		$this->assertSame(['search_one', 'search_two'], array_column($result['toolInvocations'], 'tool'));
 	}
 
-	public function testLengthTruncatedToolCallIsNotExecutedAndPreservesFinishReason(): void {
+	#[DataProvider('lengthTruncatedToolCalls')]
+	public function testLengthTruncatedToolCallIsNotExecutedOrRetried(bool $stream, string $arguments): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
 		$toolProvider->expects($this->never())->method('executeTool');
-		$this->expectSyncTurns($llmClient, [
-			$this->turn('', [$this->toolCall('cut-off', 'search_test', '{"query":"Ber')], 'length'),
-		]);
+		$turn = $this->turn('I will search now.', [$this->toolCall('cut-off', 'search_test', $arguments)], 'length');
+		$options = $this->builtInOptions(['search_test']);
+		if ($stream) {
+			$this->expectStreamTurns($llmClient, [$turn], [['I will search now.']]);
+			$llmClient->expects($this->never())->method('sendAgentTurn');
+			$options['on_partial_result'] = static function (): void {};
+		} else {
+			$this->expectSyncTurns($llmClient, [$turn]);
+			$llmClient->expects($this->never())->method('streamAgentTurn');
+		}
 
 		$result = $executor->run(
 			'system',
 			[['role' => 'user', 'content' => 'Search']],
 			[],
-			$this->builtInOptions(['search_test']) + ['max_turns' => 1]
+			$options
 		);
-		$this->assertSame('budget_exhausted', $result['status']);
-		$this->assertSame('max_turns', $result['terminalReason']);
+		$this->assertSame('incomplete', $result['status']);
+		$this->assertSame('length', $result['terminalReason']);
 		$this->assertSame('length', $result['finishReason']);
+		$this->assertSame('', $result['content']);
+		$this->assertSame(1, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
+		$this->assertCount(1, $result['toolInvocations']);
+		$this->assertSame('cut-off', $result['toolInvocations'][0]['toolCallId']);
+		$this->assertSame('error', $result['toolInvocations'][0]['status']);
 		$this->assertSame('incomplete_tool_call', $this->decodeToolError($result['messages'][2]['content'])['code']);
+	}
+
+	/** @return array<string,array{bool,string}> */
+	public static function lengthTruncatedToolCalls(): array {
+		return [
+			'sync truncated JSON' => [false, '{"query":"Ber'],
+			'sync valid JSON still truncated' => [false, '{"query":"Berlin"}'],
+			'stream truncated JSON' => [true, '{"query":"Ber'],
+			'stream valid JSON still truncated' => [true, '{"query":"Berlin"}'],
+		];
+	}
+
+	#[DataProvider('lengthTerminalText')]
+	public function testLengthReturnsSameIncompleteResultInSyncAndStream(string $text, array $chunks): void {
+		[$syncExecutor, $syncLlm, , $syncTools] = $this->createHarness();
+		[$streamExecutor, $streamLlm, , $streamTools] = $this->createHarness();
+		$syncTools->expects($this->never())->method('executeTool');
+		$streamTools->expects($this->never())->method('executeTool');
+		$turn = $this->turn($text, [], 'length', ['remaining' => '3']);
+		$this->expectSyncTurns($syncLlm, [$turn]);
+		$this->expectStreamTurns($streamLlm, [$turn], [$chunks]);
+		$syncLlm->expects($this->never())->method('streamAgentTurn');
+		$streamLlm->expects($this->never())->method('sendAgentTurn');
+		$messages = [['role' => 'user', 'content' => 'Write a long response.']];
+
+		$sync = $syncExecutor->run('system', $messages, []);
+		$stream = $streamExecutor->run('system', $messages, [], [
+			'on_partial_result' => static function (): void {},
+		]);
+
+		$this->assertSame($sync, $stream);
+		$this->assertSame('incomplete', $sync['status']);
+		$this->assertSame('length', $sync['terminalReason']);
+		$this->assertSame('length', $sync['finishReason']);
+		$this->assertSame($text, $sync['content']);
+		$this->assertSame(1, $sync['logicalTurns']);
+		$this->assertSame(1, $sync['providerAttempts']);
+		$this->assertSame([], $sync['toolInvocations']);
+		$this->assertSame(['remaining' => '3'], $sync['rateLimitHeaders']);
+	}
+
+	/** @return array<string,array{string,array<int,string>}> */
+	public static function lengthTerminalText(): array {
+		return [
+			'visible truncated Unicode text' => ["A 🧪 response that ends mid", ['A 🧪 response ', 'that ends mid']],
+			'visible terminal text without deltas' => ['Terminal partial answer.', []],
+			'no visible output' => ['', []],
+		];
+	}
+
+	#[DataProvider('lengthAfterCompletedMutation')]
+	public function testLengthPreservesCompletedMutationWithoutReplayingIt(bool $stream, bool $terminalToolCall): void {
+		$toolName = BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE;
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($toolName)]);
+		$toolProvider->expects($this->once())
+			->method('executeTool')
+			->with($toolName, [])
+			->willReturn(['text' => 'Saved exactly once.']);
+		$turns = [
+			$this->turn('', [$this->toolCall('write-once', $toolName, '{}')], 'tool_calls'),
+			$this->turn('The note was saved, but', $terminalToolCall ? [$this->toolCall('never-write', $toolName, '{}')] : [], 'length'),
+		];
+		$options = $this->builtInOptions([$toolName]);
+		if ($stream) {
+			$this->expectStreamTurns($llmClient, $turns, [[], ['The note was saved, but']]);
+			$llmClient->expects($this->never())->method('sendAgentTurn');
+			$options['on_partial_result'] = static function (): void {};
+			$options['on_tool_progress'] = static function (): void {};
+		} else {
+			$this->expectSyncTurns($llmClient, $turns);
+			$llmClient->expects($this->never())->method('streamAgentTurn');
+		}
+
+		$result = $executor->run('system', [['role' => 'user', 'content' => 'Save my note.']], [], $options);
+
+		$this->assertSame('incomplete', $result['status']);
+		$this->assertSame('length', $result['terminalReason']);
+		$this->assertSame($terminalToolCall ? '' : 'The note was saved, but', $result['content']);
+		$this->assertSame(2, $result['logicalTurns']);
+		$this->assertSame(2, $result['providerAttempts']);
+		$this->assertCount($terminalToolCall ? 2 : 1, $result['toolInvocations']);
+		$this->assertSame('write-once', $result['toolInvocations'][0]['toolCallId']);
+		$this->assertSame('ok', $result['toolInvocations'][0]['status']);
+		$this->assertSame('Saved exactly once.', $result['messages'][2]['content']);
+		if ($terminalToolCall) {
+			$this->assertSame('never-write', $result['toolInvocations'][1]['toolCallId']);
+			$this->assertSame('error', $result['toolInvocations'][1]['status']);
+			$this->assertSame('incomplete_tool_call', $this->decodeToolError($result['messages'][4]['content'])['code']);
+		}
+	}
+
+	/** @return array<string,array{bool,bool}> */
+	public static function lengthAfterCompletedMutation(): array {
+		return [
+			'sync partial text after write' => [false, false],
+			'sync truncated next write' => [false, true],
+			'stream partial text after write' => [true, false],
+			'stream truncated next write' => [true, true],
+		];
 	}
 
 	public function testSyncAndStreamingHaveSameTerminalSemanticState(): void {
@@ -654,7 +767,7 @@ class AgentExecutorTest extends TestCase {
 	public function testTerminalFinishReasonsRemainDistinguishable(): void {
 		$cases = [
 			'stop' => ['completed', 'final_response', 'Text stop'],
-			'length' => ['budget_exhausted', 'length', ''],
+			'length' => ['incomplete', 'length', 'Text length'],
 			'content_filter' => ['error', 'content_filter', ''],
 		];
 		foreach ($cases as $finishReason => [$expectedStatus, $expectedTerminalReason, $expectedContent]) {

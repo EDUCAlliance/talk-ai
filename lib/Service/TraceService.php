@@ -18,6 +18,14 @@ class TraceService {
 	private const ARGUMENT_JSON_LIMIT = 16384;
 	private const RESULT_JSON_LIMIT = 65536;
 	private const UNLIMITED_JSON_EVENTS = ['llm_request'];
+	private const TOKEN_COUNT_KEYS = [
+		'max_tokens', 'max_completion_tokens', 'prompt_tokens', 'completion_tokens', 'total_tokens',
+		'cached_tokens', 'reasoning_tokens', 'audio_tokens', 'prediction_tokens', 'accepted_prediction_tokens',
+		'rejected_prediction_tokens', 'input_tokens', 'output_tokens', 'token_limit',
+	];
+	private const TOKEN_DETAIL_KEYS = [
+		'prompt_tokens_details', 'completion_tokens_details', 'input_tokens_details', 'output_tokens_details',
+	];
 
 	/** @var array<int,int> */
 	private array $sequenceCounters = [];
@@ -403,7 +411,7 @@ class TraceService {
 			$redacted = [];
 			foreach ($value as $key => $item) {
 				$keyString = is_string($key) ? $key : (string)$key;
-				if ($this->isSensitiveKey($keyString)) {
+				if ($this->isSensitiveKey($keyString, $item)) {
 					$redacted[$key] = '[redacted]';
 					continue;
 				}
@@ -419,10 +427,15 @@ class TraceService {
 		return $value;
 	}
 
-	private function isSensitiveKey(string $key): bool {
+	private function isSensitiveKey(string $key, mixed $value): bool {
 		$normalized = strtolower(str_replace(['-', ' '], '_', $key));
-		if (in_array($normalized, ['max_tokens', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'cached_tokens', 'token_limit'], true)) {
-			return false;
+		if (in_array($normalized, self::TOKEN_COUNT_KEYS, true)) {
+			// A familiar metric name must not exempt arbitrary credential strings or objects.
+			return $value !== null && !is_int($value) && !is_float($value);
+		}
+		if (in_array($normalized, self::TOKEN_DETAIL_KEYS, true)) {
+			// Only allow structured usage details, whose children still undergo normal redaction.
+			return $value !== null && !is_array($value);
 		}
 
 		foreach (self::SENSITIVE_KEYS as $sensitiveKey) {

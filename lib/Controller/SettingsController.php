@@ -151,9 +151,12 @@ class SettingsController extends Controller {
 		?string $appIconWhiteUrl = null,
 		?string $doclingApiProfile = null,
 		?string $doclingAuthMode = null,
+		mixed $maxOutputTokens = null,
+		mixed $modelOutputTokenLimits = null,
 	): DataResponse {
 		try {
 			$this->settingsService->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
+			$this->settingsService->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
 			$this->logger->info('EducAI Settings Update - catalogueApiEndpoint: ' . var_export($catalogueApiEndpoint, true) . ', catalogueEnabled: ' . var_export($catalogueEnabled, true));
 			$beforeRateLimitConfig = $this->extractRateLimitConfig($this->settingsService->getSettings());
 			$settings = $this->settingsService->updateSettings(
@@ -207,6 +210,8 @@ class SettingsController extends Controller {
 				$appIconWhiteUrl,
 				$doclingApiProfile,
 				$doclingAuthMode,
+				$maxOutputTokens,
+				$modelOutputTokenLimits,
 			);
 
 			$afterRateLimitConfig = $this->extractRateLimitConfig($settings);
@@ -577,6 +582,10 @@ class SettingsController extends Controller {
 				onExecutionError: static function (?string $errorSummary = null) use (&$executionFailed, &$executionError): void {
 					$executionFailed = true;
 					$executionError = $errorSummary;
+				},
+				onIncomplete: static function (string $reason) use (&$traceStatus, &$traceErrorSummary): void {
+					$traceStatus = 'incomplete';
+					$traceErrorSummary = 'Output limit reached (' . $reason . ')';
 				}
 			);
 			if ($executionFailed) {
@@ -620,7 +629,7 @@ class SettingsController extends Controller {
 
 				return ['success' => false, 'error' => $traceErrorSummary];
 			}
-			$traceStatus = 'success';
+			$traceStatus ??= 'success';
 
 			return ['success' => true];
 

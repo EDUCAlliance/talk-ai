@@ -24,6 +24,46 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class TalkHandlerTest extends TestCase {
+	public function testIncompleteResponsesKeepStatusWithoutDuplicateDelivery(): void {
+		foreach ([true, false] as $streamed) {
+			$bot = new \OCA\EducAI\Db\Bot();
+			$bot->setId(7);
+			$room = new \OCA\EducAI\Db\ChatRoom();
+			$room->setOnboardingStatus('completed');
+			$answer = $streamed ? 'Partial answer. Output limit reached.' : 'No usable response. Output limit reached.';
+			$botService = $this->createMock(BotService::class);
+			$botService->expects($this->once())->method('processMessage')->willReturnCallback(function (...$arguments) use ($streamed, $answer): string {
+				$this->assertIsCallable($arguments[15]);
+				$arguments[15]('length');
+				if ($streamed) {
+					$arguments[5]($answer);
+				}
+				return $answer;
+			});
+			$onboarding = $this->createMock(OnboardingService::class);
+			$onboarding->method('buildOnboardingContext')->willReturn('');
+			$trace = $this->createMock(TraceService::class);
+			$trace->method('startRun')->willReturn(90);
+			$trace->expects($this->once())->method('finishRun')->with(90, 'incomplete', 'Output limit reached (length)');
+			$handler = $this->getMockBuilder(TalkHandler::class)->setConstructorArgs([
+				$botService,
+				$this->createMock(SettingsService::class),
+				$onboarding,
+				$this->createMock(TalkMessageParser::class),
+				$this->createMock(RoomDocumentIngestionService::class),
+				$this->createMock(RoomImageIngestionService::class),
+				$this->createMock(IClientService::class),
+				$this->createMock(IDBConnection::class),
+				$this->createMock(IURLGenerator::class),
+				$this->createMock(LoggerInterface::class),
+				$trace,
+			])->onlyMethods(['sendReplyToTalkWithOutcome'])->getMock();
+			$handler->expects($this->once())->method('sendReplyToTalkWithOutcome')->with('room-a', $answer, 1234)
+				->willReturn(['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201]);
+			$this->invokePrivateMethod($handler, 'processNormalMessage', [$bot, $room, 'room-a', 'alice', 'Question', 1234]);
+		}
+	}
+
 	public function testCallerSuppliedReferenceIdIsStableWhileSigningNonceRemainsValid(): void {
 		$settingsService = $this->createMock(SettingsService::class);
 		$settingsService->method('getWebhookSecret')->willReturn('talk-secret');

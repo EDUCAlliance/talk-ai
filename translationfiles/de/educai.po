@@ -3976,3 +3976,67 @@ msgid ""
 msgstr ""
 "⏳ Deine Anfrage wurde in die Warteschlange gestellt. Position: {position}, "
 "geschätzte Wartezeit: ~{wait} Sekunden."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Incomplete"
+msgstr "Unvollständig"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Response incomplete: output limit reached."
+msgstr "Antwort unvollständig: Ausgabelimit erreicht."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "The model reached its output limit without a usable response. Ask for a shorter answer or contact your administrator to increase the output limit."
+msgstr "Das Modell hat sein Ausgabelimit ohne nutzbare Antwort erreicht. Bitte um eine kürzere Antwort oder kontaktiere die Administration, um das Ausgabelimit zu erhöhen."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Response Limits"
+msgstr "Antwortlimits"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Output budget per model response, separate from conversation memory."
+msgstr "Ausgabebudget pro Modellantwort, getrennt vom Gesprächsverlauf."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Maximum output tokens"
+msgstr "Maximale Ausgabetokens"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Default: 32768. Reasoning models share this budget. Higher limits may increase response time and cost. Reported model limits can reduce the effective budget. Reload models to refresh those limits; use an override for providers that do not report them."
+msgstr "Standard: 32768. Reasoning-Modelle teilen sich dieses Budget mit der sichtbaren Ausgabe. Höhere Limits können Antwortzeit und Kosten erhöhen. Gemeldete Modellgrenzen können das tatsächlich verwendete Budget reduzieren. Lade die Modelle neu, um diese Grenzen zu aktualisieren; nutze eine Ausnahme für Anbieter ohne solche Angaben."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Model-specific output limits"
+msgstr "Modellspezifische Ausgabelimits"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Optional overrides match the exact model reference, including primary: or secondary:. Other models use the default above."
+msgstr "Optionale Ausnahmen gelten für die genaue Modellreferenz einschließlich primary: oder secondary:. Andere Modelle verwenden den Standardwert oben."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Model reference"
+msgstr "Modellreferenz"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Remove model override"
+msgstr "Modellausnahme entfernen"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Add model override"
+msgstr "Modellausnahme hinzufügen"
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Output token limits must be whole numbers between 1 and 131072."
+msgstr "Ausgabetokenlimits müssen ganze Zahlen zwischen 1 und 131072 sein."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Each model override needs an exact primary: or secondary: model reference."
+msgstr "Jede Modellausnahme benötigt eine genaue Modellreferenz mit primary: oder secondary:."
+
+#: src/components/AdminSettings.vue lib/Service/BotService.php src/views/PersonalActivity.vue
+msgid "Each model may have only one output limit override."
+msgstr "Für jedes Modell darf es nur eine Ausgabelimit-Ausnahme geben."
+
+#: src/components/AdminSettings.vue
+msgid "Reload models"
+msgstr "Modelle neu laden"

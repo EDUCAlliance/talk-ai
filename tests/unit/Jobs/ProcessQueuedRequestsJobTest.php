@@ -156,6 +156,45 @@ class ProcessQueuedRequestsJobTest extends TestCase {
 		$this->createJob($rateLimitService, $botService, $botMapper, $talkHandler, $traceService)->runNow();
 	}
 
+	public function testIncompleteQueuedExecutionKeepsTraceStatusWithoutRetry(): void {
+		$request = $this->createRequest(1);
+		$bot = $this->createActiveBot();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectSinglePendingRequest($rateLimitService, $request);
+		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
+		$rateLimitService->expects($this->once())->method('recordUsage');
+		$this->expectResponseReady($rateLimitService, $request, 'Queued answer.');
+		$this->expectDeliveryAttempt($rateLimitService, $request);
+		$rateLimitService->expects($this->once())->method('markCompleted')->with($request, 'Queued answer.');
+		$rateLimitService->expects($this->never())->method('markForRetry');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments): string {
+				$this->assertSame(92, $arguments[11] ?? null);
+				$this->assertIsCallable($arguments[15] ?? null);
+				$arguments[15]('length');
+				return 'Queued answer.';
+			});
+
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->once())
+			->method('sendReplyToTalkWithOutcome')
+			->with('room-token', 'Queued answer.', 123, $request->getDeliveryReferenceId())
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_SUCCESS));
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())
+			->method('startRun')
+			->with($this->callback(static fn (array $context): bool => $context['source'] === 'queue'))
+			->willReturn(92);
+		$traceService->expects($this->once())->method('finishRun')->with(92, 'incomplete', 'Output limit reached (length)');
+
+		$this->createJob($rateLimitService, $botService, $botMapper, $talkHandler, $traceService)->runNow();
+	}
+
 	#[DataProvider('retryableDeliveryOutcomeProvider')]
 	public function testRetryableOrAmbiguousTalkDeliveryKeepsStoredResponseForRetry(
 		string $outcomeStatus,

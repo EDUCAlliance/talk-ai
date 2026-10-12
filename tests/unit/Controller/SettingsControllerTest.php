@@ -29,6 +29,40 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class SettingsControllerTest extends TestCase {
+	public function testUpdatePassesOutputLimitsAndReturnsTheSavedMap(): void {
+		$settings = new Settings();
+		$settings->setMaxOutputTokens(8192);
+		$settings->setModelOutputTokenLimits('{"secondary:reasoning":32768}');
+		$service = $this->createMock(SettingsService::class);
+		$service->expects($this->once())->method('validateOutputTokenOptions')
+			->with(8192, ['secondary:reasoning' => 32768]);
+		$service->method('getSettings')->willReturn($settings);
+		$service->expects($this->once())->method('updateSettings')->willReturnCallback(function (...$arguments) use ($settings): Settings {
+			$this->assertSame([8192, ['secondary:reasoning' => 32768]], array_slice($arguments, -2));
+			return $settings;
+		});
+		$controller = $this->createController($this->createMock(RateLimitService::class),
+			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service);
+		$response = $controller->update('', '', 'primary:model', maxOutputTokens: 8192,
+			modelOutputTokenLimits: ['secondary:reasoning' => 32768]);
+		$this->assertSame(200, $response->getStatus());
+		$this->assertSame(8192, $response->getData()['max_output_tokens']);
+		$this->assertEquals((object)['secondary:reasoning' => 32768], $response->getData()['model_output_token_limits']);
+	}
+
+	public function testInvalidOutputLimitsDoNotTriggerCredentialMigration(): void {
+		$service = $this->createMock(SettingsService::class);
+		$service->expects($this->once())->method('validateOutputTokenOptions')->with(1.5, null)
+			->willThrowException(new \InvalidArgumentException('Maximum output tokens must be an integer'));
+		$service->expects($this->never())->method('getSettings');
+		$service->expects($this->never())->method('updateSettings');
+		$controller = $this->createController($this->createMock(RateLimitService::class),
+			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service);
+		$this->assertSame(400, $controller->update('new-key', '', 'model', maxOutputTokens: 1.5)->getStatus());
+	}
+
 	public function testUpdatePassesDoclingChoicesAndReturnsThemWithMaskedKey(): void {
 		$settings = new Settings();
 		$settings->setDoclingApiProfile('docling_serve');
@@ -38,7 +72,7 @@ class SettingsControllerTest extends TestCase {
 		$service->expects($this->once())->method('validateDoclingOptions')->with('docling_serve', 'none');
 		$service->method('getSettings')->willReturn($settings);
 		$service->expects($this->once())->method('updateSettings')->willReturnCallback(function (...$arguments) use ($settings): Settings {
-			$this->assertSame(['docling_serve', 'none'], array_slice($arguments, -2));
+			$this->assertSame(['docling_serve', 'none'], array_slice($arguments, -4, 2));
 			$this->assertSame('https://docling.example/proxy', $arguments[18]);
 			return $settings;
 		});
@@ -287,6 +321,82 @@ class SettingsControllerTest extends TestCase {
 			->with($this->callback(static fn (array $context): bool => $context['source'] === 'queue'))
 			->willReturn(82);
 		$traceService->expects($this->once())->method('finishRun')->with(82, 'success', null);
+
+		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
+
+		$this->assertSame([
+			'success' => true,
+			'processed' => 1,
+			'remaining' => 0,
+			'errors' => [],
+			'errorCodes' => [],
+		], $controller->processQueue()->getData());
+	}
+
+	public function testIncompleteQueuedRequestKeepsTraceStatusWithoutRetry(): void {
+		$request = new QueuedRequest();
+		$request->setId(99);
+		$request->setBotId(7);
+		$request->setRoomToken('room-token');
+		$request->setUserId('owner');
+		$request->setMessage('Hello');
+		$request->setOriginalMessage('@bot Hello');
+		$request->setReplyToMessageId(123);
+		$request->setThreadRootMessageId(42);
+		$request->setAttempts(1);
+		$request->setCreatedAt(time());
+
+		$bot = new Bot();
+		$bot->setId(7);
+		$bot->setIsActive(true);
+		$bot->setMentionName('@bot');
+
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
+		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
+		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
+		$rateLimitService->expects($this->exactly(2))
+			->method('getQueueStats')
+			->willReturnOnConsecutiveCalls(
+				['pending' => 1, 'processing' => 0, 'completed' => 0, 'failed' => 0, 'total' => 1],
+				['pending' => 0, 'processing' => 0, 'completed' => 1, 'failed' => 0, 'total' => 1]
+			);
+		$rateLimitService->expects($this->once())->method('canProcess')->willReturn(true);
+		$rateLimitService->expects($this->once())->method('getNextPending')->willReturn($request);
+		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
+		$rateLimitService->expects($this->once())->method('recordUsage');
+		$this->expectResponseReady($rateLimitService, $request, 'Queued answer.');
+		$this->expectDeliveryAttempt($rateLimitService, $request);
+		$rateLimitService->expects($this->once())->method('markCompleted')->with($request, 'Queued answer.');
+		$rateLimitService->expects($this->never())->method('markForRetry');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
+
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())
+			->method('processMessage')
+			->willReturnCallback(function (...$arguments): string {
+				$this->assertSame(42, $arguments[9] ?? null);
+				$this->assertSame(123, $arguments[10] ?? null);
+				$this->assertSame(82, $arguments[11] ?? null);
+				$this->assertIsCallable($arguments[15] ?? null);
+				$arguments[15]('length');
+				return 'Queued answer.';
+			});
+
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->once())
+			->method('sendReplyToTalkWithOutcome')
+			->with('room-token', 'Queued answer.', 123, $request->getDeliveryReferenceId())
+			->willReturn($this->deliveryOutcome(TalkHandler::DELIVERY_SUCCESS));
+
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->once())
+			->method('startRun')
+			->with($this->callback(static fn (array $context): bool => $context['source'] === 'queue'))
+			->willReturn(82);
+		$traceService->expects($this->once())->method('finishRun')->with(82, 'incomplete', 'Output limit reached (length)');
 
 		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
 
