@@ -223,7 +223,7 @@
 					<div class="section-heading">
 						<h4>{{ t('educai', 'Primary Endpoint') }}</h4>
 						<p class="hint">
-							{{ t('educai', 'Used for existing raw model names and as the default provider.') }}
+							{{ t('educai', 'Models are bound to an explicit provider. Existing saved choices are preserved during catalogue updates.') }}
 						</p>
 					</div>
 
@@ -289,36 +289,50 @@
 					</div>
 
 					<div class="section-heading">
+						<h4>{{ t('educai', 'Provider catalogues') }}</h4>
+						<p class="hint">{{ t('educai', 'Model lists refresh automatically. Discovery does not release new models to users or change existing selections.') }}</p>
+					</div>
+					<p v-if="hasUnsavedProviderSettings" class="model-catalogue-warning" role="status">{{ t('educai', 'Save provider settings first. The catalogue and test use saved endpoints and credentials.') }}</p>
+					<div class="button-row">
+						<button
+							type="button"
+							class="button"
+							:disabled="loadingModels || hasUnsavedProviderSettings || !modelSettingsLoaded"
+							@click="loadModels(true)">
+							{{ loadingModels ? t('educai', 'Updating catalogues…') : t('educai', 'Refresh model lists') }}
+						</button>
+					</div>
+					<p v-if="modelLoadError" class="model-catalogue-warning" role="alert">{{ modelLoadError }}</p>
+					<div class="model-provider-grid" aria-live="polite">
+						<div
+							v-for="provider in modelProviders"
+							:key="provider.id"
+							class="model-provider-card"
+							:class="`model-provider-card--${provider.status}`">
+							<strong>{{ provider.id === 'secondary' ? t('educai', 'Secondary') : t('educai', 'Primary') }}</strong>
+							<span class="model-provider-status">{{ providerStatusLabel(provider.status) }}</span>
+							<p>{{ n('educai', '{count} model', '{count} models', provider.model_count || 0, { count: formatNumber(provider.model_count || 0) }) }}</p>
+							<p class="hint">{{ t('educai', 'Last successful update: {time}', { time: formatModelTimestamp(provider.last_success_at) }) }}</p>
+							<p v-if="provider.next_refresh_at && provider.status !== 'unconfigured'" class="hint">{{ t('educai', 'Next update due: {time}', { time: formatModelTimestamp(provider.next_refresh_at) }) }}</p>
+							<p v-if="provider.error" class="model-catalogue-warning">{{ provider.error }}</p>
+							<p v-if="provider.status === 'stale'" class="hint">{{ t('educai', 'Last known models remain selectable. The other provider is unaffected.') }}</p>
+						</div>
+					</div>
+					<p class="hint">{{ t('educai', 'A retrieved model list does not verify inference access, model availability, or account credit.') }}</p>
+
+					<div class="section-heading">
 						<h4>{{ t('educai', 'Model Selection') }}</h4>
 					</div>
 
 					<div class="form-group">
 						<label for="default-model">{{ t('educai', 'Default Model') }}</label>
-						<select
-							v-if="availableModelOptions.length > 0"
+						<ModelSelector
 							id="default-model"
 							v-model="settings.defaultModel"
-							:disabled="settings.allowMultipleModels">
-							<option
-								v-for="option in availableModelOptionsWithCurrent(settings.defaultModel)"
-								:key="option.id"
-								:value="option.id">
-								{{ option.label }}
-							</option>
-						</select>
-						<input
-							v-else
-							id="default-model"
-							v-model="settings.defaultModel"
-							type="text"
-							:disabled="settings.allowMultipleModels"
-							placeholder="primary:llama-3.3-70b-instruct">
-						<p v-if="settings.allowMultipleModels" class="hint">
-							{{ t('educai', 'Disabled because Multiple Models mode is enabled.') }}
-						</p>
-						<p v-else class="hint">
-							{{ t('educai', 'Legacy unprefixed model names continue to use the primary endpoint.') }}
-						</p>
+							:options="availableModelOptions"
+							:empty-label="t('educai', 'Choose a default model')"
+							allow-manual />
+						<p class="hint">{{ t('educai', 'Used by bots that inherit the administrator default, including when per-bot selection is enabled.') }}</p>
 					</div>
 
 					<div class="form-group">
@@ -330,29 +344,15 @@
 							{{ t('educai', 'Allow Multiple Models (per-bot selection)') }}
 						</label>
 						<p class="hint">
-							{{ t('educai', 'If enabled, choose which models are available for bots. Users will select one when creating a bot.') }}
+							{{ t('educai', 'If enabled, explicitly release models for per-bot selection. Otherwise bots inherit the default; existing explicit selections are preserved.') }}
 						</p>
 					</div>
 
 					<div v-if="settings.allowMultipleModels" class="form-group">
-						<label>{{ t('educai', 'Allowed Models') }}</label>
-						<div v-if="loadingModels" class="hint">
-							{{ t('educai', 'Loading models…') }}
-						</div>
-						<div v-else>
-							<div v-if="modelLoadError" class="hint" style="color:var(--color-error)">
-								{{ modelLoadError }}
-							</div>
-							<div v-if="availableModelOptions.length === 0" class="hint">
-								{{ t('educai', 'No models loaded.') }}
-								<button
-									type="button"
-									class="button"
-									@click="loadModels">
-									{{ t('educai', 'Load models') }}
-								</button>
-							</div>
+						<label for="allowed-models">{{ t('educai', 'Allowed Models') }}</label>
+						<div>
 							<select
+								id="allowed-models"
 								v-model="settings.allowedModels"
 								multiple
 								:size="modelSelectSize">
@@ -364,9 +364,41 @@
 								</option>
 							</select>
 							<p class="hint">
-								{{ t('educai', 'Hold Cmd/Ctrl to select multiple. Save after selection.') }}
+								{{ t('educai', 'Hold Cmd/Ctrl to select multiple. Save after selection. New catalogue models are never selected automatically.') }}
 							</p>
+							<label for="manual-allowed-model">{{ t('educai', 'Add an unlisted model to the allowed selection') }}</label>
+							<ModelSelector
+								id="manual-allowed-model"
+								:value="manualAllowedModel"
+								:options="availableModelOptions"
+								:empty-label="t('educai', 'Choose a model to add')"
+								allow-manual
+								@input="addAllowedModel" />
 						</div>
+					</div>
+
+					<div class="model-inference-test">
+						<h4>{{ t('educai', 'Test a model response') }}</h4>
+						<p class="hint">{{ t('educai', 'Optional: send a short real request using saved provider settings. This may incur a small provider charge. No request is sent automatically.') }}</p>
+						<label for="test-model">{{ t('educai', 'Model to test') }}</label>
+						<ModelSelector
+							id="test-model"
+							v-model="modelTestSelection"
+							:options="availableModelOptions"
+							:empty-label="t('educai', 'Choose a model to test')"
+							allow-manual
+							:disabled="modelTesting" />
+						<button
+							type="button"
+							class="button"
+							:disabled="!canTestModel"
+							@click="testModelResponse">
+							{{ modelTesting ? t('educai', 'Testing response…') : t('educai', 'Send test request') }}
+						</button>
+						<p v-if="!modelTestResult" class="hint" role="status">{{ t('educai', 'Inference not tested in this session.') }}</p>
+						<p v-else :class="{ 'model-catalogue-warning': !modelTestResult.success }" role="status">
+							{{ modelTestResult.success ? t('educai', 'Test response received from {model} at {time} ({latency} ms).', { model: formatModelLabel(modelTestResult.model), time: formatModelTimestamp(modelTestResult.checked_at), latency: formatNumber(modelTestResult.latency_ms || 0) }) : modelTestResult.error }}
+						</p>
 					</div>
 				</div>
 			</section>
@@ -411,32 +443,24 @@
 					<button
 						type="button"
 						class="button"
-						:disabled="loadingModels"
-						@click="loadModels">
+						:disabled="loadingModels || hasUnsavedProviderSettings || !modelSettingsLoaded"
+						@click="loadModels(true)">
 						{{ t('educai', 'Reload models') }}
 					</button>
 					<p v-if="modelLoadError" class="hint" role="alert">{{ modelLoadError }}</p>
-					<datalist id="output-limit-models">
-						<option
-							v-for="option in availableModelOptionsWithCurrent([settings.defaultModel, settings.fallbackModel])"
-							:key="option.id"
-							:value="option.id">
-							{{ option.label }}
-						</option>
-					</datalist>
+					<p v-if="hasUnsavedProviderSettings" class="model-catalogue-warning">{{ t('educai', 'Save provider settings first. The catalogue and test use saved endpoints and credentials.') }}</p>
 					<div
 						v-for="(override, index) in outputTokenOverrides"
 						:key="index"
 						class="output-token-limit-row">
 						<div class="form-group">
 							<label :for="`output-limit-model-${index}`">{{ t('educai', 'Model reference') }}</label>
-							<input
+							<ModelSelector
 								:id="`output-limit-model-${index}`"
 								v-model="override.model"
-								type="text"
-								list="output-limit-models"
-								maxlength="512"
-								placeholder="primary:model-name">
+								:options="availableModelOptions"
+								:empty-label="t('educai', 'Choose a model')"
+								allow-manual />
 						</div>
 						<div class="form-group">
 							<label :for="`output-limit-tokens-${index}`">{{ t('educai', 'Maximum output tokens') }}</label>
@@ -482,24 +506,12 @@
 					class="accordion-panel">
 					<div class="form-group">
 						<label for="fallback-model">{{ t('educai', 'Fallback Model') }}</label>
-						<select
-							v-if="availableModelOptions.length > 0"
-							id="fallback-model"
-							v-model="settings.fallbackModel">
-							<option value="">{{ t('educai', 'No fallback') }}</option>
-							<option
-								v-for="option in availableModelOptionsWithCurrent(settings.fallbackModel)"
-								:key="option.id"
-								:value="option.id">
-								{{ option.label }}
-							</option>
-						</select>
-						<input
-							v-else
+						<ModelSelector
 							id="fallback-model"
 							v-model="settings.fallbackModel"
-							type="text"
-							placeholder="secondary:qwen3-coder-next">
+							:options="availableModelOptions"
+							:empty-label="t('educai', 'No fallback')"
+							allow-manual />
 						<p class="hint">
 							{{ t('educai', 'Used once after timeout or connection failures before the request fails finally.') }}
 						</p>
@@ -1521,12 +1533,15 @@ import { getApiErrorMessage } from '../utils/apiError.js'
 import BotForm from './BotForm.vue'
 import EmbeddingMaintenance from './EmbeddingMaintenance.vue'
 import { applyEducAiRuntimeIconPayload } from '../utils/appIconRuntime.js'
+import * as modelSelection from '../utils/modelSelection.js'
+import ModelSelector from './ModelSelector.vue'
 
 export default {
 	name: 'AdminSettings',
 	components: {
 		BotForm,
 		EmbeddingMaintenance,
+		ModelSelector,
 	},
 	data() {
 		return {
@@ -1606,6 +1621,19 @@ export default {
 			loadingModels: false,
 			modelLoadError: '',
 			modelSelectSize: 12,
+			modelProviders: [],
+			modelRefreshInterval: 300,
+			modelRefreshTimer: null,
+			modelReloadPending: false,
+			modelPollingActive: false,
+			modelSettingsLoaded: false,
+			providerSettingsBaseline: null,
+			modelProviderRevision: 0,
+			modelSettingsBaseline: null,
+			modelTestSelection: '',
+			modelTesting: false,
+			modelTestResult: null,
+			manualAllowedModel: '',
 			loadingTools: false,
 			toolSaving: false,
 			toolTesting: false,
@@ -1663,6 +1691,14 @@ export default {
 		}
 	},
 	computed: {
+		hasUnsavedProviderSettings() {
+			if (!this.providerSettingsBaseline) return false
+			return ['apiProvider', 'apiEndpoint', 'secondaryApiEndpoint', 'llmModelsTimeout'].some(key => String(this.settings[key] || '').trim() !== String(this.providerSettingsBaseline[key] || '').trim())
+				|| !!(this.settings.apiKey || '').trim() || !!(this.settings.secondaryApiKey || '').trim()
+		},
+		canTestModel() {
+			return this.modelSettingsLoaded && !this.hasUnsavedProviderSettings && !this.modelTesting && !this.saving && !!modelSelection.splitModelReference(this.modelTestSelection)
+		},
 		hasPendingIndexSettings() {
 			return this.hasPendingEmbeddingConfigChange || Object.keys(this.indexSettingsBaseline).some(key => String(this.settings[key]).trim() !== String(this.indexSettingsBaseline[key]).trim())
 		},
@@ -1812,10 +1848,23 @@ export default {
 			return n('educai', '{count} bot', '{count} bots', count, { count: this.formatNumber(count) })
 		},
 	},
+	watch: {
+		hasUnsavedProviderSettings(changed) {
+			if (changed) this.modelTestResult = null
+		},
+		modelTestSelection() {
+			this.modelTestResult = null
+		},
+	},
 	mounted() {
+		this.modelPollingActive = true
 		this.loadSettings()
 		this.loadTools()
 		this.loadAllBots()
+	},
+	beforeDestroy() {
+		this.modelPollingActive = false
+		clearTimeout(this.modelRefreshTimer)
 	},
 	methods: {
 		t,
@@ -2019,68 +2068,95 @@ export default {
 			return new Intl.NumberFormat(getCanonicalLocale()).format(value)
 		},
 		toEndpointModelId(model) {
-			const value = (model || '').trim()
-			if (value === '') {
-				return ''
-			}
-			return /^(primary|secondary):/.test(value) ? value : `primary:${value}`
+			return modelSelection.modelReference(model)
 		},
 		formatModelLabel(model) {
-			const id = this.toEndpointModelId(model)
-			if (id === '') {
-				return ''
-			}
-			if (this.modelOptionMap[id]?.label) {
-				return this.modelOptionMap[id].label
-			}
-			if (id.startsWith('primary:')) {
-				return t('educai', 'Primary · {model}', { model: id.slice('primary:'.length) })
-			}
-			if (id.startsWith('secondary:')) {
-				return t('educai', 'Secondary · {model}', { model: id.slice('secondary:'.length) })
-			}
-			return id
-		},
-		normalizeModelOptions(rawOptions, rawModels) {
-			if (Array.isArray(rawOptions) && rawOptions.length > 0) {
-				return rawOptions
-					.filter((option) => option && option.id && option.model)
-					.map((option) => ({
-						id: String(option.id),
-						label: option.label || this.formatModelLabel(option.id),
-						model: String(option.model),
-						endpoint: option.endpoint === 'secondary' ? 'secondary' : 'primary',
-					}))
-			}
-
-			return Array.isArray(rawModels)
-				? rawModels.map((model) => ({
-					id: this.toEndpointModelId(String(model)),
-					label: this.formatModelLabel(String(model)),
-					model: String(model).replace(/^(primary|secondary):/, ''),
-					endpoint: String(model).startsWith('secondary:') ? 'secondary' : 'primary',
-				}))
-				: []
+			return modelSelection.modelLabel(model)
 		},
 		availableModelOptionsWithCurrent(current) {
-			const values = Array.isArray(current) ? current : [current]
-			const options = [...this.availableModelOptions]
-			const existing = new Set(options.map((option) => option.id))
-			values
-				.map((value) => this.toEndpointModelId(value))
-				.filter((id) => id !== '' && !existing.has(id))
-				.forEach((id) => {
-					const endpoint = id.startsWith('secondary:') ? 'secondary' : 'primary'
-					const model = id.replace(/^(primary|secondary):/, '')
-					options.push({
-						id,
-						label: this.formatModelLabel(id),
-						model,
-						endpoint,
-					})
-					existing.add(id)
-				})
-			return options
+			return modelSelection.modelOptionsWithCurrent(this.availableModelOptions, current)
+		},
+		providerStatusLabel(status) {
+			return {
+				ready: t('educai', 'Catalogue up to date'),
+				stale: t('educai', 'Using last known catalogue'),
+				error: t('educai', 'Catalogue unavailable'),
+				unconfigured: t('educai', 'Not configured'),
+			}[status] || t('educai', 'Not checked')
+		},
+		formatModelTimestamp(value) {
+			if (!value) return t('educai', 'Never')
+			const date = new Date(typeof value === 'number' ? value * 1000 : value)
+			return Number.isNaN(date.getTime()) ? t('educai', 'Unknown') : date.toLocaleString(getCanonicalLocale())
+		},
+		captureProviderSettingsBaseline(saved = this.settings) {
+			this.modelProviderRevision++
+			this.providerSettingsBaseline = Object.fromEntries(['apiProvider', 'apiEndpoint', 'secondaryApiEndpoint', 'llmModelsTimeout'].map(key => [key, saved[key]]))
+		},
+		captureModelSettingsBaseline(saved = this.settings) {
+			this.modelSettingsBaseline = { defaultModel: saved.defaultModel, fallbackModel: saved.fallbackModel, allowedModels: [...saved.allowedModels] }
+		},
+		adoptSavedModelBindings(saved) {
+			if (!this.modelSettingsBaseline || this.hasUnsavedProviderSettings) return
+			for (const [key, apiKey] of [['defaultModel', 'default_model'], ['fallbackModel', 'fallback_model']]) {
+				if (this.settings[key] !== this.modelSettingsBaseline[key]) continue
+				const previous = this.settings[key]
+				this.settings[key] = modelSelection.adoptSavedModelBinding(previous, saved[apiKey])
+				this.modelSettingsBaseline[key] = this.settings[key]
+				if (key === 'defaultModel' && this.embeddingConfigBaseline.defaultModel === previous) this.embeddingConfigBaseline.defaultModel = this.settings[key]
+			}
+			if (JSON.stringify(this.settings.allowedModels) === JSON.stringify(this.modelSettingsBaseline.allowedModels)) {
+				this.settings.allowedModels = modelSelection.adoptSavedModelBindings(this.settings.allowedModels, saved.allowed_models)
+				this.modelSettingsBaseline.allowedModels = [...this.settings.allowedModels]
+			}
+		},
+		async refreshSavedModelBindings() {
+			if (!this.modelSettingsBaseline || this.hasUnsavedProviderSettings) return
+			const references = [this.settings.defaultModel, this.settings.fallbackModel, ...this.settings.allowedModels]
+			if (!references.some(value => value && !modelSelection.splitModelReference(value))) return
+			const baseline = this.modelProviderRevision
+			try {
+				const response = await axios.get(generateUrl('/apps/educai/api/v1/settings'))
+				if (baseline === this.modelProviderRevision) this.adoptSavedModelBindings(response.data)
+			} catch (error) {
+				// This optional reconciliation must not hide a successfully loaded catalogue.
+			}
+		},
+		addAllowedModel(reference) {
+			this.manualAllowedModel = reference
+			if (modelSelection.splitModelReference(reference) && !this.settings.allowedModels.includes(reference)) {
+				this.settings.allowedModels = [...this.settings.allowedModels, reference]
+			}
+		},
+		scheduleModelRefresh() {
+			if (!this.modelPollingActive) return
+			clearTimeout(this.modelRefreshTimer)
+			this.modelRefreshTimer = setTimeout(() => {
+				if (typeof document !== 'undefined' && document.hidden) {
+					this.scheduleModelRefresh()
+					return
+				}
+				this.loadModels()
+			}, modelSelection.catalogueRefreshDelay(this.modelRefreshInterval))
+		},
+		async testModelResponse() {
+			if (!this.canTestModel) return
+			this.modelTesting = true
+			this.modelTestResult = null
+			const model = this.modelTestSelection
+			const baseline = this.modelProviderRevision
+			try {
+				const response = await axios.post(generateUrl('/apps/educai/api/v1/models/test'), { model })
+				if (!this.hasUnsavedProviderSettings && baseline === this.modelProviderRevision && model === this.modelTestSelection) {
+					this.modelTestResult = response.data
+				}
+			} catch (error) {
+				if (!this.hasUnsavedProviderSettings && baseline === this.modelProviderRevision && model === this.modelTestSelection) {
+					this.modelTestResult = { success: false, model, error: getApiErrorMessage(error, t('educai', 'No test response received. Check model access, provider settings, and account credit.')) }
+				}
+			} finally {
+				this.modelTesting = false
+			}
 		},
 		applyDefaultTemperaturePreset(value) {
 			this.settings.defaultTemperature = value
@@ -2192,9 +2268,10 @@ export default {
 				this.settings.conversationContextTokens = typeof data.conversation_context_tokens === 'number' ? data.conversation_context_tokens : 8000
 				this.settings.maxOutputTokens = data.max_output_tokens ?? 32768
 				this.outputTokenOverrides = Object.entries(data.model_output_token_limits || {}).map(([model, tokens]) => ({ model, tokens }))
-				if (this.settings.allowMultipleModels || this.settings.secondaryApiEndpoint) {
-					this.loadModels()
-				}
+				this.captureProviderSettingsBaseline()
+				this.captureModelSettingsBaseline()
+				this.modelSettingsLoaded = true
+				await this.loadModels()
 				if (this.settings.rateLimitEnabled) {
 					this.loadRateLimitStatus()
 				}
@@ -2204,36 +2281,56 @@ export default {
 			}
 		},
 		onToggleMultiple() {
-			if (this.settings.allowMultipleModels && this.availableModelOptions.length === 0) {
-				this.loadModels()
-			}
+			// Releasing models is an explicit administrator decision, never a discovery side effect.
 		},
-		async loadModels() {
+		async loadModels(force = false) {
+			if (this.loadingModels) {
+				if (force === true) this.modelReloadPending = true
+				return
+			}
+			if (this.hasUnsavedProviderSettings || !this.modelSettingsLoaded) {
+				this.scheduleModelRefresh()
+				return
+			}
 			this.loadingModels = true
 			this.modelLoadError = ''
+			const baseline = this.modelProviderRevision
 			try {
-				const resp = await axios.get(generateUrl('/apps/educai/api/v1/models'))
-				this.availableModelOptions = this.normalizeModelOptions(resp.data?.model_options, resp.data?.models)
-				this.availableModels = this.availableModelOptions.map((option) => option.id)
-				// Adjust visible rows between 12 and 18 depending on list length
-				const n = this.availableModelOptions.length
-				this.modelSelectSize = Math.max(12, Math.min(18, n || 12))
-				// If no selection yet, preselect the default model if present
-				if (this.settings.allowedModels.length === 0 && this.settings.defaultModel) {
-					if (this.availableModels.includes(this.settings.defaultModel)) {
-						this.settings.allowedModels = [this.settings.defaultModel]
-					}
-				}
-			} catch (e) {
-				console.error('Failed to load models', e)
-				this.modelLoadError = getApiErrorMessage(e, t('educai', 'Failed to load models from provider. Check API key and endpoint.'))
+				const response = force === true
+					? await axios.post(generateUrl('/apps/educai/api/v1/models/refresh'))
+					: await axios.get(generateUrl('/apps/educai/api/v1/models'))
+				if (baseline !== this.modelProviderRevision) return
+				this.availableModelOptions = modelSelection.normalizeModelOptions(response.data?.model_options, response.data?.models)
+				this.availableModels = this.availableModelOptions.map(option => option.id)
+				this.modelProviders = Array.isArray(response.data?.providers) ? response.data.providers : []
+				this.modelRefreshInterval = response.data?.refresh_interval_seconds || 300
+				this.modelSelectSize = Math.max(4, Math.min(12, this.availableModelOptions.length || 4))
+				await this.refreshSavedModelBindings()
+			} catch (error) {
+				if (baseline !== this.modelProviderRevision) return
+				// Keep previous options: an HTTP failure must not erase a user's current selection.
+				this.availableModelOptions = this.availableModelOptions.map(option => ({ ...option, availability: 'stale' }))
+				this.modelProviders = this.modelProviders.map(provider => ({ ...provider, status: provider.status === 'ready' ? 'stale' : provider.status }))
+				this.modelLoadError = getApiErrorMessage(error, t('educai', 'Could not update model lists. Previous choices have been preserved.'))
 			} finally {
 				this.loadingModels = false
+				if (this.modelReloadPending) {
+					this.modelReloadPending = false
+					await this.loadModels(true)
+				} else {
+					this.scheduleModelRefresh()
+				}
 			}
 		},
 		async saveSettings() {
+			const providerSettingsChanged = this.hasUnsavedProviderSettings
 			this.saving = true
 			try {
+				if (!this.toEndpointModelId(this.settings.defaultModel)) {
+					showError(t('educai', 'Choose a default model before saving.'))
+					this.openSections.modelEndpoints = true
+					return
+				}
 				const defaultTemperature = this.normalizeTemperatureValue(this.settings.defaultTemperature)
 				if (defaultTemperature === null) {
 					showError(t('educai', 'Default temperature must be between 0.0 and 1.0'))
@@ -2265,7 +2362,7 @@ export default {
 					llmModelsTimeout: this.toPositiveInteger(this.settings.llmModelsTimeout, 20),
 					apiProvider: this.settings.apiProvider || 'custom',
 					allowMultipleModels: this.settings.allowMultipleModels,
-					allowedModels: this.settings.allowMultipleModels ? this.settings.allowedModels.map((model) => this.toEndpointModelId(model)) : null,
+					allowedModels: this.settings.allowedModels.map((model) => this.toEndpointModelId(model)),
 					embeddingApiEndpoint: (this.settings.embeddingApiEndpoint || '').trim(),
 					embeddingApiKey: this.settings.embeddingApiKey ? this.settings.embeddingApiKey : null,
 					embeddingModel: (this.settings.embeddingModel || '').trim(),
@@ -2342,6 +2439,16 @@ export default {
 					defaultModel: payload.defaultModel,
 					hasApiKey: this.embeddingConfigBaseline.hasApiKey || apiKeyUpdated,
 					hasEmbeddingApiKey: this.embeddingConfigBaseline.hasEmbeddingApiKey || embeddingKeyUpdated,
+				}
+				this.captureProviderSettingsBaseline(payload)
+				this.captureModelSettingsBaseline(payload)
+				this.adoptSavedModelBindings(response.data)
+				this.modelSettingsLoaded = true
+				if (providerSettingsChanged) {
+					this.modelTestResult = null
+					this.availableModelOptions = []
+					this.modelProviders = []
+					await this.loadModels(true)
 				}
 			} catch (error) {
 				console.error('Failed to save settings:', error)
@@ -2502,16 +2609,17 @@ export default {
 			}
 		},
 		hasEmbeddingConfigChange(payload) {
+			const inheritedModel = reference => (reference || '').trim().replace(/^(primary|secondary):/, '')
 			const nextProvider = (payload.apiProvider || 'custom').trim()
 			const nextApiEndpoint = (payload.apiEndpoint || '').trim()
 			const nextEmbeddingEndpoint = (payload.embeddingApiEndpoint || '').trim()
-			const nextEmbeddingModel = (payload.embeddingModel || payload.defaultModel || '').trim()
+			const nextEmbeddingModel = payload.embeddingModel ? payload.embeddingModel.trim() : inheritedModel(payload.defaultModel)
 			const nextEffectiveEndpoint = this.resolveEffectiveEmbeddingEndpoint(nextApiEndpoint, nextEmbeddingEndpoint)
 
 			const baseProvider = (this.embeddingConfigBaseline.apiProvider || 'custom').trim()
 			const baseApiEndpoint = (this.embeddingConfigBaseline.apiEndpoint || '').trim()
 			const baseEmbeddingEndpoint = (this.embeddingConfigBaseline.embeddingApiEndpoint || '').trim()
-			const baseEmbeddingModel = (this.embeddingConfigBaseline.embeddingModel || this.embeddingConfigBaseline.defaultModel || '').trim()
+			const baseEmbeddingModel = this.embeddingConfigBaseline.embeddingModel ? this.embeddingConfigBaseline.embeddingModel.trim() : inheritedModel(this.embeddingConfigBaseline.defaultModel)
 			const baseEffectiveEndpoint = this.resolveEffectiveEmbeddingEndpoint(baseApiEndpoint, baseEmbeddingEndpoint)
 
 			const embeddingKeyUpdated = !!(payload.embeddingApiKey && payload.embeddingApiKey.trim() !== '')
@@ -3413,6 +3521,48 @@ code {
 .status-pill.status-personal {
 	background: var(--color-primary-element-light);
 	color: var(--color-primary-element-dark);
+}
+
+.model-provider-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+	gap: 12px;
+	margin: 12px 0;
+}
+
+.model-provider-card {
+	padding: 14px;
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large);
+	background: var(--color-background-dark);
+	overflow-wrap: anywhere;
+}
+
+.model-provider-status {
+	display: block;
+	margin-top: 6px;
+}
+
+.model-provider-card--stale,
+.model-provider-card--error {
+	border-color: var(--color-warning);
+}
+
+.model-catalogue-warning {
+	color: var(--color-text-maxcontrast);
+	border-inline-start: 3px solid var(--color-warning);
+	padding-inline-start: 10px;
+	margin: 10px 0;
+}
+
+.model-inference-test {
+	border-top: 1px solid var(--color-border);
+	margin-top: 24px;
+	padding-top: 16px;
+}
+
+.model-inference-test > button {
+	margin-top: 12px;
 }
 
 @media (max-width: 700px) {

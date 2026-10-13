@@ -227,6 +227,14 @@ class SettingsService {
 		mixed $maxOutputTokens = null,
 		mixed $modelOutputTokenLimits = null,
 	): Settings {
+		LLMClient::validateModelReference($defaultModel);
+		LLMClient::validateModelReference($fallbackModel);
+		foreach ($allowedModels ?? [] as $reference) {
+			if (!is_string($reference)) {
+				throw new \InvalidArgumentException('Allowed models must contain model references.');
+			}
+			LLMClient::validateModelReference($reference);
+		}
 		$this->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 		$this->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
 		$settings = $this->mapper->getSettings();

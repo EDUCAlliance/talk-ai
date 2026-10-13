@@ -36,7 +36,7 @@ class EmbeddingConfigurationService {
 		// Match EmbeddingClient::getActiveModel: a missing/empty embedding model
 		// inherits the chat default, so changing that default changes vector space.
 		if ($model === null || $model === '') {
-			$model = $settings->getDefaultModel();
+			$model = EmbeddingClient::inheritedModelName((string)$settings->getDefaultModel());
 		}
 		$sourceConfiguration = $scope === 'catalogue'
 			? [rtrim(trim((string)$settings->getCatalogueApiEndpoint()), '/')]

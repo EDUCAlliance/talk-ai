@@ -4,12 +4,13 @@ import test from 'node:test'
 import vm from 'node:vm'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
+import * as modelSelection from '../../src/utils/modelSelection.js'
 
 function admin(axios) {
 	const source = readFileSync(new URL('../../src/components/AdminSettings.vue', import.meta.url), 'utf8')
 	const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .+$/gm, '').replace('export default', 'globalThis.component =')
 	const errors = []
-	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', BotForm: {}, EmbeddingMaintenance: {},
+	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', BotForm: {}, EmbeddingMaintenance: {}, ModelSelector: {}, modelSelection,
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage,
 		applyEducAiRuntimeIconPayload() {}, showSuccess() {}, showError: error => errors.push(error), confirm: () => true,
 		console: { ...console, error: (...args) => errors.push(args) } }

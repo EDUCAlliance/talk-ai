@@ -79,7 +79,7 @@ class SettingsControllerTest extends TestCase {
 		$controller = $this->createController($this->createMock(RateLimitService::class),
 			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
 			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service);
-		$response = $controller->update('', '', 'model', doclingApiEndpoint: 'https://docling.example/proxy',
+		$response = $controller->update('', '', 'primary:model', doclingApiEndpoint: 'https://docling.example/proxy',
 			doclingApiProfile: 'docling_serve', doclingAuthMode: 'none');
 		$this->assertSame(200, $response->getStatus());
 		$this->assertSame('docling_serve', $response->getData()['docling_api_profile']);
@@ -119,10 +119,10 @@ class SettingsControllerTest extends TestCase {
 
 	public function testModelsLocalizesEndpointLabelsWithoutChangingModelIds(): void {
 		$llmClient = $this->createMock(LLMClient::class);
-		$llmClient->method('listModelOptions')->willReturn([
+		$llmClient->method('getModelCatalogue')->willReturn(['model_options' => [
 			['id' => 'primary:model-a', 'label' => 'Primary · model-a', 'model' => 'model-a', 'endpoint' => 'primary'],
 			['id' => 'secondary:model-b', 'label' => 'Secondary · model-b', 'model' => 'model-b', 'endpoint' => 'secondary'],
-		]);
+		]]);
 		$l10nBuilder = $this->getMockBuilder(IL10N::class);
 		if (!method_exists(IL10N::class, 't')) {
 			$l10nBuilder->addMethods(['t']);
@@ -148,6 +148,106 @@ class SettingsControllerTest extends TestCase {
 		$this->assertSame(['primary:model-a', 'secondary:model-b'], $data['models']);
 		$this->assertSame('Primär · model-a', $data['model_options'][0]['label']);
 		$this->assertSame('Sekundär · model-b', $data['model_options'][1]['label']);
+	}
+
+	public function testEmptyGlobalDefaultCannotDisableInheritedBots(): void {
+		$service = $this->createMock(SettingsService::class);
+		$service->expects($this->never())->method('updateSettings');
+		$response = $this->modelController($this->createMock(LLMClient::class), $service)->update('', '', '');
+		$this->assertSame(400, $response->getStatus());
+		$this->assertSame('default_model_required', $response->getData()['errorCode']);
+	}
+
+	public function testPartialDiscoveryFailureKeepsHealthyOptionsAndStatus(): void {
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->once())->method('getModelCatalogue')->with(false)->willReturn([
+			'model_options' => [['id' => 'primary:ok', 'model' => 'ok', 'endpoint' => 'primary']],
+			'providers' => [['id' => 'primary', 'status' => 'ready'], ['id' => 'secondary', 'status' => 'error']],
+			'refresh_interval_seconds' => 300,
+		]);
+		$controller = $this->modelController($llm);
+		$response = $controller->models();
+		$this->assertSame(200, $response->getStatus());
+		$this->assertSame(['primary:ok'], $response->getData()['models']);
+		$this->assertSame('error', $response->getData()['providers'][1]['status']);
+		$this->assertSame(300, $response->getData()['refresh_interval_seconds']);
+	}
+
+	public function testManualRefreshForcesDiscoveryWithoutInference(): void {
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->once())->method('getModelCatalogue')->with(true)->willReturn(['model_options' => []]);
+		$llm->expects($this->never())->method('testModelConnection');
+		$this->assertSame(200, $this->modelController($llm)->refreshModels()->getStatus());
+	}
+
+	public function testModelProbeRequiresExplicitProviderAndNeverTestsAPlainName(): void {
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->never())->method('testModelConnection');
+		$controller = $this->modelController($llm);
+		foreach (['model', 'secondary:', 'primary:model with spaces', "primary:model\n"] as $reference) {
+			$this->assertSame(400, $controller->testModel($reference)->getStatus());
+		}
+	}
+
+	public function testModelProbeUsesSelectedReferenceAndReturnsSeparateSuccess(): void {
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->never())->method('getModelCatalogue');
+		$llm->expects($this->once())->method('testModelConnection')->with('secondary:manual/id')->willReturn([
+			'success' => true, 'model' => 'secondary:manual/id', 'latency_ms' => 12, 'checked_at' => 123,
+		]);
+		$response = $this->modelController($llm)->testModel('secondary:manual/id');
+		$this->assertSame(200, $response->getStatus());
+		$this->assertTrue($response->getData()['success']);
+		$this->assertSame('secondary:manual/id', $response->getData()['model']);
+	}
+
+	public function testModelProbeDoesNotExposeProviderErrors(): void {
+		$llm = $this->createMock(LLMClient::class);
+		$llm->method('testModelConnection')->willThrowException(new \RuntimeException('Bearer secret-key credit_balance_exhausted'));
+		$response = $this->modelController($llm)->testModel('primary:unfunded');
+		$this->assertSame(502, $response->getStatus());
+		$this->assertFalse($response->getData()['success']);
+		$this->assertSame('model_test_failed', $response->getData()['errorCode']);
+		$this->assertStringNotContainsString('secret-key', json_encode($response->getData()));
+	}
+
+	public function testUnchangedLegacyReferencesSurviveUnrelatedSettingsSave(): void {
+		$settings = new Settings();
+		$settings->setDefaultModel('legacy');
+		$settings->setFallbackModel('legacy-fallback');
+		$settings->setAllowedModels('["legacy"]');
+		$settings->setModelOutputTokenLimits('{"primary:legacy":2048}');
+		$service = $this->createMock(SettingsService::class);
+		$service->method('getSettings')->willReturn($settings);
+		$service->expects($this->once())->method('updateSettings')->willReturnCallback(function (...$args) use ($settings): Settings {
+			$this->assertSame('legacy', $args[3]);
+			$this->assertSame(['legacy'], $args[7]);
+			$this->assertSame(['primary:legacy' => 2048], $args[count($args) - 1]);
+			return $settings;
+		});
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->never())->method('canonicalizeModelReference');
+		$response = $this->modelController($llm, $service)->update('', '', 'legacy', allowedModels: ['legacy'],
+			fallbackModel: 'legacy-fallback', modelOutputTokenLimits: ['primary:legacy' => 2048]);
+		$this->assertSame(200, $response->getStatus());
+	}
+
+	public function testChangedConnectionRequiresExplicitNewModelBeforeAnySettingsWrite(): void {
+		$service = $this->createMock(SettingsService::class);
+		$service->method('getSettings')->willReturn(new Settings());
+		$service->expects($this->never())->method('updateSettings');
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->never())->method('canonicalizeModelReference');
+		$response = $this->modelController($llm, $service)->update('new-key', 'https://new.invalid/v1/chat/completions', 'new-raw-name');
+		$this->assertSame(400, $response->getStatus());
+	}
+
+	private function modelController(LLMClient $llm, ?SettingsService $settings = null): SettingsController {
+		return $this->createController(
+			$this->createMock(RateLimitService::class), $this->createMock(BotService::class),
+			$this->createMock(BotMapper::class), $this->createMock(TalkHandler::class),
+			$this->createMock(TraceService::class), llmClient: $llm, settingsService: $settings,
+		);
 	}
 
 	public function testTypedAgentFailureTerminatesQueueAndSendsOnlySafeReply(): void {

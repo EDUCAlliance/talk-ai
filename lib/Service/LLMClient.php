@@ -15,10 +15,13 @@ use OCP\IConfig;
 use Psr\Log\LoggerInterface;
 
 class LLMClient {
+	public const MAX_MODEL_REFERENCE_LENGTH = 512;
 	private const GWDG_CHAT_COMPLETIONS_ENDPOINT = 'https://chat-ai.academiccloud.de/v1/chat/completions';
 	private const GWDG_MODELS_ENDPOINT = 'https://chat-ai.academiccloud.de/v1/models';
-	private const MODEL_OPTIONS_CACHE_KEY = 'llm_model_options_cache';
 	private const MODEL_OPTIONS_CACHE_TTL = 300;
+	private const MODEL_DISCOVERY_RETRY_SECONDS = 60;
+	private const MODEL_CATALOGUE_CACHE_PREFIX = 'llm_model_catalogue_';
+	private const MODEL_BINDINGS_CACHE_KEY = 'llm_model_reference_bindings';
 	private const CHAT_FAILURE_MESSAGE = 'Failed to get response from AI';
 	private const STREAM_FAILURE_MESSAGE = 'Failed to stream response from AI';
 	private const CONTINUED_USER_PLACEHOLDER = '(continued)';
@@ -42,12 +45,10 @@ class LLMClient {
 	private ?IConfig $config;
 	private ?TraceService $traceService;
 	private ProviderResponseNormalizer $responseNormalizer;
-	/** @var array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>|null */
-	private ?array $modelOptionsCache = null;
-	private ?string $modelOptionsCacheFingerprint = null;
-	private int $modelOptionsCacheExpiresAt = 0;
-	/** @var \WeakMap<ProviderAttemptBudget,bool> */
-	private \WeakMap $modelDiscoveryFailures;
+	/** @var array<string,array<string,mixed>> */
+	private array $providerCatalogueCache = [];
+	/** @var array<string,array{endpoint:string,fingerprint:string}>|null */
+	private ?array $modelReferenceBindings = null;
 
 	public function __construct(
 		IClientService $clientService,
@@ -62,7 +63,6 @@ class LLMClient {
 		$this->config = $config;
 		$this->traceService = $traceService;
 		$this->responseNormalizer = new ProviderResponseNormalizer(new ToolCallIdGenerator());
-		$this->modelDiscoveryFailures = new \WeakMap();
 	}
 
 	/**
@@ -536,7 +536,9 @@ class LLMClient {
 		array $requestOptions = [],
 		bool $streaming = false,
 	): array {
-		$reference = trim((string)($modelReference ?: $settings->getDefaultModel()));
+		$reference = (string)($modelReference ?: $settings->getDefaultModel());
+		self::validateModelReference($reference);
+		$reference = trim($reference);
 		if ($reference === '') {
 			throw new \Exception('Model is not configured');
 		}
@@ -559,6 +561,7 @@ class LLMClient {
 		if ($model === '') {
 			throw new \Exception('Model is not configured');
 		}
+		self::validateModelReference($endpointKey . ':' . $model);
 
 		if ($endpointKey === 'secondary') {
 			$endpoint = trim((string)$settings->getSecondaryApiEndpoint());
@@ -600,53 +603,116 @@ class LLMClient {
 		array $requestOptions,
 		bool $streaming,
 	): string {
-		$model = trim($model);
-		if ($model === '') {
-			return 'primary';
+		$providers = $this->configuredModelProviders($settings);
+		$binding = $this->readModelReferenceBindings()[$model] ?? null;
+		// A proven selection belongs to its provider slot, just like an explicit
+		// reference. Credential/URL changes invalidate discovery, not that choice.
+		if (is_array($binding) && isset($providers[$binding['endpoint'] ?? ''])) {
+			return $binding['endpoint'];
 		}
 
-		$primaryHasModel = false;
-		$secondaryHasModel = false;
-		$budget = $this->providerAttemptBudget($requestOptions);
-		if ($budget !== null && isset($this->modelDiscoveryFailures[$budget])) {
-			return 'primary';
-		}
-		try {
-			$options = $this->getCachedModelOptions($settings, $requestOptions, $model, $streaming);
-		} catch (\Throwable $e) {
-			if ($e instanceof \Exception && $this->isNonRetryableProviderException($e)) {
-				throw $e;
-			}
-			if ($budget !== null) {
-				$this->modelDiscoveryFailures[$budget] = true;
-			}
-			if (!($e instanceof \Exception)) {
-				throw $e;
-			}
-			$this->logger->warning('LLM model lookup failed, defaulting unprefixed model to primary endpoint', [
-				'exception' => $e,
-				'model' => $model,
-			]);
-			return 'primary';
-		}
-
-		foreach ($options as $option) {
-			if (($option['model'] ?? '') !== $model) {
-				continue;
-			}
-
-			if (($option['endpoint'] ?? 'primary') === 'secondary') {
-				$secondaryHasModel = true;
-			} else {
-				$primaryHasModel = true;
+		$catalogue = $this->buildModelCatalogue($settings, false, $requestOptions, $model, $streaming);
+		$matches = [];
+		foreach ($catalogue['model_options'] as $option) {
+			if ($option['model'] === $model) {
+				$matches[$option['endpoint']] = true;
 			}
 		}
-
-		if ($primaryHasModel) {
-			return 'primary';
+		// A missing snapshot of another configured provider is not proof of uniqueness.
+		$complete = true;
+		foreach ($catalogue['providers'] as $provider) {
+			if ($providers[$provider['id']]['url'] !== '' && $provider['last_success_at'] === null) {
+				$complete = false;
+			}
 		}
+		if (count($matches) !== 1 || !$complete) {
+			throw new \InvalidArgumentException('The provider for this saved model could not be determined. Select an explicit Primary or Secondary model.');
+		}
+		$endpoint = (string)array_key_first($matches);
+		$this->modelReferenceBindings[$model] = [
+			'endpoint' => $endpoint,
+			'fingerprint' => $providers[$endpoint]['fingerprint'],
+		];
+		$this->config?->setAppValue(Application::APP_ID, self::MODEL_BINDINGS_CACHE_KEY, json_encode($this->modelReferenceBindings) ?: '{}');
+		return $endpoint;
+	}
 
-		return $secondaryHasModel ? 'secondary' : 'primary';
+	/**
+	 * Canonical references retain their provider even when discovery is offline.
+	 * Null represents inheritance (for a bot) or no configured fallback.
+	 * Legacy references are upgraded only with evidence, never by guessing primary.
+	 */
+	public function canonicalizeModelReference(?string $reference): ?string {
+		self::validateModelReference($reference);
+		$reference = trim((string)$reference);
+		if ($reference === '') {
+			return null;
+		}
+		if (preg_match('/^(primary|secondary):(.+)$/', $reference, $matches) === 1) {
+			$model = trim($matches[2]);
+			if ($model !== '') {
+				return $matches[1] . ':' . $model;
+			}
+		}
+		if (str_starts_with($reference, 'primary:') || str_starts_with($reference, 'secondary:')) {
+			throw new \InvalidArgumentException('Select a model after the provider name.');
+		}
+		$canonical = $this->resolveEndpointKeyForUnprefixedModel($this->settingsService->getSettings(), $reference, [], false) . ':' . $reference;
+		self::validateModelReference($canonical);
+		return $canonical;
+	}
+
+	/** Validate before persistence or any provider request, without echoing raw input. */
+	public static function validateModelReference(?string $reference): void {
+		if ($reference !== null && (strlen(trim($reference)) > self::MAX_MODEL_REFERENCE_LENGTH
+			|| preg_match('/[\x00-\x1f\x7f]/', $reference) === 1)) {
+			throw new \InvalidArgumentException('Model references must be at most 512 bytes and cannot contain control characters.');
+		}
+	}
+
+	private function readModelReferenceBindings(): array {
+		if ($this->modelReferenceBindings === null) {
+			$raw = $this->config?->getAppValue(Application::APP_ID, self::MODEL_BINDINGS_CACHE_KEY, '') ?? '';
+			$decoded = json_decode($raw, true);
+			$this->modelReferenceBindings = [];
+			foreach (is_array($decoded) ? $decoded : [] as $model => $binding) {
+				if (is_string($model) && is_array($binding)
+					&& in_array($binding['endpoint'] ?? null, ['primary', 'secondary'], true)
+					&& is_string($binding['fingerprint'] ?? null)) {
+					$this->modelReferenceBindings[$model] = $binding;
+				}
+			}
+		}
+		return $this->modelReferenceBindings;
+	}
+
+	/** A deliberate, bounded inference probe of exactly the selected provider. */
+	public function testModelConnection(string $reference): array {
+		self::validateModelReference($reference);
+		if (preg_match('/^(primary|secondary):\S.*$/', trim($reference)) !== 1) {
+			throw new \InvalidArgumentException('Select an explicit Primary or Secondary model to test.');
+		}
+		$settings = $this->settingsService->getSettings();
+		$options = [
+			'max_tokens' => 32,
+			'provider_attempt_budget' => new ProviderAttemptBudget(1),
+		];
+		$model = $this->resolveModelConfig($settings, $reference, $options);
+		$options = $this->withInitialModelParameterProfile($options, $model['model']);
+		$started = microtime(true);
+		$response = $this->sendResolvedChatCompletion(
+			[['role' => 'user', 'content' => 'Reply with OK.']], $model, $settings, $options, 'selected', 'connection_test'
+		);
+		if (trim((string)($response['content'] ?? '')) === '') {
+			throw new \RuntimeException('The provider returned no test text. Try a different model or review its token requirements.');
+		}
+		return [
+			'success' => true,
+			'model' => $model['id'],
+			'checked_at' => time(),
+			'latency_ms' => (int)round((microtime(true) - $started) * 1000),
+			'message' => 'A real test response was received from the selected provider.',
+		];
 	}
 
 	/**
@@ -1908,139 +1974,165 @@ class LLMClient {
 	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
 	 */
 	public function listModelOptions(): array {
-		$settings = $this->settingsService->getSettings();
-		$timeout = $this->settingsService->normalizePositiveInteger(
-			$settings->getLlmModelsTimeout(),
-			SettingsService::DEFAULT_LLM_MODELS_TIMEOUT
-		);
-		$options = $this->fetchConfiguredModelOptions($settings, $timeout);
-		$this->storeModelOptionsCache($settings, $options);
-
-		return $options;
+		return $this->getModelCatalogue()['model_options'];
 	}
 
 	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
+	 * Discovery is independent for each provider. A failed provider retains its
+	 * last-known list; discovery never grants access or changes selected models.
 	 */
-	private function fetchConfiguredModelOptions(
+	public function getModelCatalogue(bool $refresh = false): array {
+		return $this->buildModelCatalogue($this->settingsService->getSettings(), $refresh);
+	}
+
+	private function buildModelCatalogue(
 		$settings,
-		int $timeout,
+		bool $refresh,
 		array $requestOptions = [],
 		?string $modelReference = null,
 		bool $streaming = false,
 	): array {
+		$timeout = $this->settingsService->normalizePositiveInteger(
+			$settings->getLlmModelsTimeout(), SettingsService::DEFAULT_LLM_MODELS_TIMEOUT
+		);
 		$options = [];
-		$options = array_merge(
-			$options,
-			$this->fetchModelOptionsForEndpoint(
-				'primary',
-				'Primary',
-				$this->getModelsEndpoint($settings->getApiProvider(), $settings->getApiEndpoint()),
-				$this->settingsService->getApiKey(),
-				$timeout,
-				$requestOptions,
-				$modelReference,
-				$streaming,
-			)
-		);
+		$statuses = [];
+		foreach ($this->configuredModelProviders($settings) as $id => $provider) {
+			$record = $this->readProviderCatalogue($settings, $id, $provider['fingerprint']);
+			if (!$provider['configured']) {
+				$statuses[] = [
+					'id' => $id, 'label' => $provider['label'], 'status' => $provider['credential_error'] ? 'error' : 'unconfigured',
+					'model_count' => 0, 'last_success_at' => null, 'checked_at' => null,
+					'next_refresh_at' => null,
+					'error' => $provider['credential_error'] ? 'The saved provider credentials could not be read. Save the credentials again.' : null,
+				];
+				continue;
+			}
+			if ($refresh || (int)($record['next_refresh_at'] ?? 0) <= time()) {
+				$now = time();
+				try {
+					$fetched = $this->fetchModelOptionsForEndpoint(
+						$id, $provider['label'], $provider['url'], $provider['key'], $timeout,
+						$requestOptions, $modelReference, $streaming
+					);
+					$record = [
+						'fingerprint' => $provider['fingerprint'], 'options' => $fetched,
+						'last_success_at' => $now, 'checked_at' => $now,
+						'next_refresh_at' => $now + self::MODEL_OPTIONS_CACHE_TTL,
+						'status' => 'ready', 'error' => null,
+					];
+				} catch (\Throwable $e) {
+					// Cancellation and the agent's shared attempt budget are hard limits.
+					if ($e instanceof \Exception && $this->isNonRetryableProviderException($e)) {
+						throw $e;
+					}
+					$record = array_merge($record, [
+						'fingerprint' => $provider['fingerprint'], 'checked_at' => $now,
+						'next_refresh_at' => $now + self::MODEL_DISCOVERY_RETRY_SECONDS,
+						'status' => isset($record['last_success_at']) ? 'stale' : 'error',
+						'error' => $e instanceof \Exception ? $this->modelDiscoveryErrorMessage($e) : 'The model list could not be refreshed.',
+					]);
+					if (!($e instanceof \Exception)) {
+						$this->providerCatalogueCache[$id] = $record;
+						throw $e;
+					}
+				}
+				$this->providerCatalogueCache[$id] = $record;
+				$this->config?->setAppValue(Application::APP_ID, self::MODEL_CATALOGUE_CACHE_PREFIX . $id, json_encode($record) ?: '{}');
+			}
+			$providerOptions = $record['options'] ?? [];
+			foreach ($providerOptions as $option) {
+				$option['availability'] = $record['status'] === 'ready' ? 'available' : 'stale';
+				$options[] = $option;
+			}
+			$statuses[] = [
+				'id' => $id, 'label' => $provider['label'], 'status' => $record['status'] ?? 'error',
+				'model_count' => count($providerOptions), 'last_success_at' => $record['last_success_at'] ?? null,
+				'checked_at' => $record['checked_at'] ?? null, 'next_refresh_at' => $record['next_refresh_at'] ?? null,
+				'error' => $record['error'] ?? null,
+			];
+		}
+		return [
+			'models' => array_column($options, 'id'), 'model_options' => $options,
+			'providers' => $statuses, 'refresh_interval_seconds' => self::MODEL_OPTIONS_CACHE_TTL,
+		];
+	}
 
+	/** Never expose provider response bodies, keys, or private URLs in discovery status. */
+	private function modelDiscoveryErrorMessage(\Exception $exception): string {
+		$status = $this->httpStatusFromException($exception);
+		return match ($status) {
+			401, 403 => 'Authentication failed. Check the saved provider credentials.',
+			404, 405 => 'This provider does not expose a model list at the configured endpoint.',
+			429 => 'The provider rate limit was reached. The list will be retried shortly.',
+			default => 'The model list could not be refreshed. Check the connection and try again.',
+		};
+	}
+
+	private function configuredModelProviders($settings): array {
+		$primaryUrl = '';
+		try {
+			$primaryUrl = $this->getModelsEndpoint($settings->getApiProvider(), $settings->getApiEndpoint());
+		} catch (\Exception $e) {
+			// An incomplete initial setup is not a provider outage.
+		}
 		$secondaryEndpoint = trim((string)$settings->getSecondaryApiEndpoint());
-		if ($secondaryEndpoint !== '') {
-			$options = array_merge(
-				$options,
-				$this->fetchModelOptionsForEndpoint(
-					'secondary',
-					'Secondary',
-					$this->getModelsEndpoint('custom', $secondaryEndpoint),
-					(string)($this->settingsService->getSecondaryApiKey() ?? ''),
-					$timeout,
-					$requestOptions,
-					$modelReference,
-					$streaming,
-				)
-			);
+		$providers = [
+			'primary' => ['label' => 'Primary', 'url' => $primaryUrl],
+			'secondary' => [
+				'label' => 'Secondary',
+				'url' => $secondaryEndpoint === '' ? '' : $this->getModelsEndpoint('custom', $secondaryEndpoint),
+			],
+		];
+		foreach ($providers as $id => &$provider) {
+			$provider['key'] = '';
+			$provider['credential_error'] = false;
+			try {
+				if ($provider['url'] !== '') {
+					$provider['key'] = $id === 'primary'
+						? $this->settingsService->getApiKey()
+						: (string)($this->settingsService->getSecondaryApiKey() ?? '');
+				}
+			} catch (\Throwable $e) {
+				// Credential problems belong to one provider, not the whole catalogue
+				// or an inference request explicitly bound to the healthy provider.
+				$provider['credential_error'] = true;
+			}
+			$provider['configured'] = $provider['url'] !== '' && $provider['key'] !== '';
+			$provider['fingerprint'] = hash('sha256', $provider['url'] . "\0" . ($provider['credential_error'] ? 'unreadable-credential' : $provider['key']));
 		}
-
-		return $options;
+		unset($provider);
+		return $providers;
 	}
 
-	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
-	 */
-	private function getCachedModelOptions(
-		$settings,
-		array $requestOptions = [],
-		?string $modelReference = null,
-		bool $streaming = false,
-	): array {
-		$cached = $this->readModelOptionsCache($settings, true);
-		if ($cached !== null) {
-			return $cached;
+	private function readProviderCatalogue($settings, string $id, string $fingerprint): array {
+		if (isset($this->providerCatalogueCache[$id]) && $this->providerCatalogueCache[$id]['fingerprint'] === $fingerprint) {
+			return $this->providerCatalogueCache[$id];
 		}
-
-		$timeout = $this->settingsService->normalizePositiveInteger(
-			$settings->getLlmModelsTimeout(),
-			SettingsService::DEFAULT_LLM_MODELS_TIMEOUT
-		);
-		$options = $this->fetchConfiguredModelOptions(
-			$settings,
-			$timeout,
-			$requestOptions,
-			$modelReference,
-			$streaming,
-		);
-		$this->storeModelOptionsCache($settings, $options);
-
-		return $options;
+		$raw = $this->config?->getAppValue(Application::APP_ID, self::MODEL_CATALOGUE_CACHE_PREFIX . $id, '') ?? '';
+		$record = json_decode($raw, true);
+		if (is_array($record) && ($record['fingerprint'] ?? '') === $fingerprint && is_array($record['options'] ?? null)) {
+			$record['options'] = array_values(array_filter($this->normalizeCachedModelOptions($record['options']), static fn (array $option): bool => $option['endpoint'] === $id));
+		} else {
+			$record = ['fingerprint' => $fingerprint, 'options' => []];
+		}
+		$this->providerCatalogueCache[$id] = $record;
+		return $record;
 	}
 
-	/** Routing needs fresh discovery; capacities retain last-known data until a refresh. */
+	/** Last-known capacity data is usable without starting discovery. */
 	private function readModelOptionsCache($settings, bool $requireFresh): ?array {
-		$fingerprint = $this->modelEndpointFingerprint($settings);
-		if ($this->modelOptionsCache !== null && $this->modelOptionsCacheFingerprint === $fingerprint
-			&& (!$requireFresh || $this->modelOptionsCacheExpiresAt >= time())) {
-			return $this->modelOptionsCache;
+		$options = [];
+		foreach ($this->configuredModelProviders($settings) as $id => $provider) {
+			if (!$provider['configured']) {
+				continue;
+			}
+			$record = $this->readProviderCatalogue($settings, $id, $provider['fingerprint']);
+			if (!$requireFresh || ($record['next_refresh_at'] ?? 0) > time()) {
+				$options = array_merge($options, $record['options']);
+			}
 		}
-		if ($this->config === null) {
-			return null;
-		}
-		$raw = $this->config->getAppValue(Application::APP_ID, self::MODEL_OPTIONS_CACHE_KEY, '');
-		$decoded = $raw !== '' ? json_decode($raw, true) : null;
-		if (!is_array($decoded) || ($decoded['fingerprint'] ?? '') !== $fingerprint
-			|| !is_array($decoded['options'] ?? null)
-			|| ($requireFresh && (int)($decoded['expires_at'] ?? 0) < time())) {
-			return null;
-		}
-		$this->modelOptionsCache = $this->normalizeCachedModelOptions($decoded['options']);
-		$this->modelOptionsCacheFingerprint = $fingerprint;
-		$this->modelOptionsCacheExpiresAt = (int)($decoded['expires_at'] ?? 0);
-		return $this->modelOptionsCache;
-	}
-
-	/**
-	 * @param array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}> $options
-	 */
-	private function storeModelOptionsCache($settings, array $options): void {
-		$this->modelOptionsCache = $options;
-		$this->modelOptionsCacheFingerprint = $this->modelEndpointFingerprint($settings);
-		$this->modelOptionsCacheExpiresAt = time() + self::MODEL_OPTIONS_CACHE_TTL;
-		if ($this->config === null) {
-			return;
-		}
-
-		$this->config->setAppValue(Application::APP_ID, self::MODEL_OPTIONS_CACHE_KEY, json_encode([
-			'fingerprint' => $this->modelOptionsCacheFingerprint,
-			'expires_at' => $this->modelOptionsCacheExpiresAt,
-			'options' => $options,
-		]) ?: '');
-	}
-
-	private function modelEndpointFingerprint($settings): string {
-		return sha1(implode('|', [
-			trim((string)$settings->getApiProvider()),
-			rtrim(trim((string)$settings->getApiEndpoint()), '/'),
-			rtrim(trim((string)$settings->getSecondaryApiEndpoint()), '/'),
-		]));
+		return $options;
 	}
 
 	/**
@@ -2106,6 +2198,9 @@ class LLMClient {
 			], $requestOptions), $timeout, $this->agentRunControl($requestOptions));
 
 			$body = json_decode($response->getBody(), true);
+			if (!is_array($body) || (!is_array($body['data'] ?? null) && !is_array($body['models'] ?? null))) {
+				throw new \UnexpectedValueException('The provider returned an invalid model list.');
+			}
 			$models = $this->extractModelIds($body);
 			sort($models);
 			$limitsByModel = [];
@@ -2136,11 +2231,10 @@ class LLMClient {
 			if ($this->isNonRetryableProviderException($e)) {
 				throw $e;
 			}
-			$this->logger->error('LLM list models failed: ' . $e->getMessage(), [
-				'exception' => $e,
-				'endpoint' => $endpointKey,
+			$this->logger->warning('LLM model discovery failed', [
+				'endpoint' => $endpointKey, 'status' => $this->httpStatusFromException($e),
 			]);
-			throw new \Exception('Failed to list models: ' . $e->getMessage());
+			throw new \Exception('Failed to list models.', $this->httpStatusFromException($e) ?? 0, $e);
 		}
 	}
 

@@ -67,6 +67,7 @@ class BotService {
 	private BrandingService $brandingService;
 	private WikiPathService $wikiPathService;
 	private ?IFactory $l10nFactory;
+	private ?LLMClient $llmClient;
 
 	public function __construct(
 		BotMapper $botMapper,
@@ -95,8 +96,10 @@ class BotService {
 		?BrandingService $brandingService = null,
 		?WikiPathService $wikiPathService = null,
 		?IFactory $l10nFactory = null,
+		?LLMClient $llmClient = null,
 	) {
 		$this->l10nFactory = $l10nFactory;
+		$this->llmClient = $llmClient;
 		$this->botMapper = $botMapper;
 		$this->conversationMapper = $conversationMapper;
 		$this->chatRoomMapper = $chatRoomMapper;
@@ -122,6 +125,55 @@ class BotService {
 		$this->traceService = $traceService;
 		$this->brandingService = $brandingService ?? new BrandingService();
 		$this->wikiPathService = $wikiPathService ?? new WikiPathService($this->brandingService);
+	}
+
+	/** Discovery is not authorization: only administrator-released choices are selectable. */
+	private function normalizeBotModelSelection(?string $reference, ?string $previous = null): ?string {
+		LLMClient::validateModelReference($reference);
+		$reference = trim((string)$reference);
+		if ($reference === '') {
+			return null;
+		}
+		if ($this->llmClient === null) {
+			return $reference;
+		}
+		// Unrelated edits must remain possible during an outage or after a model
+		// was removed from discovery/allowlist. Never unbind an existing choice.
+		if ($previous !== null && $reference === trim($previous)) {
+			try {
+				return $this->llmClient->canonicalizeModelReference($reference);
+			} catch (\InvalidArgumentException $e) {
+				return $previous;
+			}
+		}
+		$canonical = $this->llmClient->canonicalizeModelReference($reference);
+		if ($previous !== null) {
+			try {
+				if ($canonical === $this->llmClient->canonicalizeModelReference($previous)) {
+					return $canonical;
+				}
+			} catch (\InvalidArgumentException $e) {
+				// A genuinely changed choice still has to be authorized below.
+			}
+		}
+		$settings = $this->settingsService->getSettings();
+		if (!$settings->getAllowMultipleModels()) {
+			throw new AuthorizationException('Individual model selection is disabled. Use the administrator default.');
+		}
+		$allowed = json_decode((string)$settings->getAllowedModels(), true);
+		foreach (is_array($allowed) ? $allowed : [] as $candidate) {
+			if (!is_string($candidate)) {
+				continue;
+			}
+			try {
+				if ($this->llmClient->canonicalizeModelReference($candidate) === $canonical) {
+					return $canonical;
+				}
+			} catch (\InvalidArgumentException $e) {
+				// An ambiguous old allowlist entry does not grant both providers.
+			}
+		}
+		throw new AuthorizationException('This model has not been released by the administrator.');
 	}
 
 	/**
@@ -250,7 +302,7 @@ class BotService {
 		$bot->setMentionName($mentionName);
 		$bot->setSystemPrompt($systemPrompt);
 		if ($model !== null && $model !== '') {
-			$bot->setModel($model);
+			$bot->setModel($this->normalizeBotModelSelection($model));
 		}
 		$bot->setTemperature($this->settingsService->normalizeTemperatureValue($temperature, true));
 		$bot->setIsActive(true);
@@ -336,7 +388,9 @@ class BotService {
 		$targetAllowedTeams = $targetVisibility === 'teams'
 			? $this->normalizeIdArray($allowedTeams ?? $editableState['allowed_teams'])
 			: [];
-		$targetModel = $model !== null ? ($model !== '' ? $model : null) : $editableState['model'];
+		$targetModel = $model !== null
+			? $this->normalizeBotModelSelection($model, $editableState['model'])
+			: $editableState['model'];
 		$targetTemperature = $temperature !== self::TEMPERATURE_NOT_PROVIDED
 			? $this->settingsService->normalizeTemperatureValue($temperature, true)
 			: $editableState['temperature'];

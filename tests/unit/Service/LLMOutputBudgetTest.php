@@ -130,10 +130,17 @@ class LLMOutputBudgetTest extends TestCase {
 		$this->assertSame(['context_tokens' => 16384], $byId['primary:context-only']['limits']);
 		$this->assertSame(['output_tokens' => 2048, 'context_tokens' => 32768], $byId['secondary:model-a']['limits']);
 		$this->assertEmpty($byId['secondary:no-metadata']['limits'] ?? []);
-		$stored = json_decode($cache['llm_model_options_cache'], true, 512, JSON_THROW_ON_ERROR);
-		$this->assertSame($options, $stored['options']);
-		$stored['expires_at'] = time() - 3600;
-		$cache['llm_model_options_cache'] = json_encode($stored, JSON_THROW_ON_ERROR);
+		foreach (['primary', 'secondary'] as $endpoint) {
+			$stored = json_decode($cache['llm_model_catalogue_' . $endpoint], true, 512, JSON_THROW_ON_ERROR);
+			$expected = array_values(array_filter($options, static fn (array $option): bool => $option['endpoint'] === $endpoint));
+			foreach ($expected as &$option) {
+				unset($option['availability']);
+			}
+			unset($option);
+			$this->assertSame($expected, $stored['options']);
+			$stored['next_refresh_at'] = time() - 3600;
+			$cache['llm_model_catalogue_' . $endpoint] = json_encode($stored, JSON_THROW_ON_ERROR);
+		}
 
 		// A new client must retain known capacities even when routing discovery is stale.
 		$client = $this->createMock(IClient::class);
@@ -241,11 +248,11 @@ class LLMOutputBudgetTest extends TestCase {
 		});
 		$llm = $this->llm($client, $settings, $config);
 		for ($i = 0; $i < 4; $i++) {
-			$llm->listModelOptions();
+			$llm->getModelCatalogue(true);
 			$this->turn($llm, false, 'primary:model-a');
 		}
 		$this->assertSame([2048, 8192, 32768, 32768], $budgets);
-		$this->assertSame([], json_decode($cache['llm_model_options_cache'], true, 512, JSON_THROW_ON_ERROR)['options']);
+		$this->assertSame([], json_decode($cache['llm_model_catalogue_primary'], true, 512, JSON_THROW_ON_ERROR)['options']);
 	}
 
 	#[DataProvider('cappedRequests')]
@@ -420,15 +427,16 @@ class LLMOutputBudgetTest extends TestCase {
 	}
 
 	private function cacheData(Settings $settings, array $options): array {
-		return ['llm_model_options_cache' => json_encode([
-			'fingerprint' => sha1(implode('|', [
-				trim((string)$settings->getApiProvider()),
-				rtrim(trim((string)$settings->getApiEndpoint()), '/'),
-				rtrim(trim((string)$settings->getSecondaryApiEndpoint()), '/'),
-			])),
-			'expires_at' => time() + 300,
-			'options' => $options,
-		], JSON_THROW_ON_ERROR)];
+		$cache = [];
+		foreach (['primary', 'secondary'] as $endpoint) {
+			$cache['llm_model_catalogue_' . $endpoint] = json_encode([
+				'fingerprint' => hash('sha256', 'https://' . $endpoint . '.example.invalid/v1/models' . "\0synthetic-" . $endpoint . '-key'),
+				'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300,
+				'status' => 'ready', 'error' => null,
+				'options' => array_values(array_filter($options, static fn (array $option): bool => ($option['endpoint'] ?? '') === $endpoint)),
+			], JSON_THROW_ON_ERROR);
+		}
+		return $cache;
 	}
 
 	private function config(array &$cache): IConfig {

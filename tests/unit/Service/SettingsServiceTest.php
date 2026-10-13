@@ -13,6 +13,32 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class SettingsServiceTest extends TestCase {
+	public function testInvalidModelReferencesFailBeforeCredentialsOrSettingsAreChanged(): void {
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->expects($this->never())->method('getSettings');
+		$mapper->expects($this->never())->method('update');
+		$credentials = $this->createMock(CredentialService::class);
+		$credentials->expects($this->never())->method('encrypt');
+		$service = new SettingsService($mapper, $credentials,
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class));
+		foreach ([
+			['defaultModel' => 'primary:' . str_repeat('x', 505)],
+			['fallbackModel' => "secondary:bad\nmodel"],
+			['allowedModels' => ["primary:bad\0model"]],
+		] as $invalid) {
+			try {
+				$service->updateSettings(...array_merge([
+					'apiProvider' => 'custom', 'apiKey' => 'new-key',
+					'apiEndpoint' => 'https://new.invalid', 'defaultModel' => 'primary:ok',
+				], $invalid));
+				$this->fail('Invalid model reference accepted');
+			} catch (\InvalidArgumentException $e) {
+				$this->assertStringContainsString('512 bytes', $e->getMessage());
+			}
+		}
+	}
+
 	public function testUpdateSettingsTriggersTalkBotRegistrationAfterPersistingSecret(): void {
 		$settings = new Settings();
 		$mapper = $this->createMock(SettingsMapper::class);

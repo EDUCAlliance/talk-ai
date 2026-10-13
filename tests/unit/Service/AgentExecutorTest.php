@@ -1285,7 +1285,7 @@ class AgentExecutorTest extends TestCase {
 		$this->assertSame(0, $result['logicalTurns']);
 	}
 
-	public function testTracePreflightDiscoveryErrorIsSecretSafeAndDoesNotBlockRealTurn(): void {
+	public function testTracePreflightDiscoveryErrorIsSecretSafeAndCannotGuessLegacyModelProvider(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
@@ -1299,26 +1299,13 @@ class AgentExecutorTest extends TestCase {
 		$settingsService->method('normalizePositiveInteger')
 			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
 
-		$response = $this->createMock(IResponse::class);
-		$response->method('getBody')->willReturn(json_encode([
-			'model' => 'model-a',
-			'choices' => [[
-				'message' => ['content' => 'safe answer'],
-				'finish_reason' => 'stop',
-			]],
-		]) ?: '');
-		$response->method('getHeader')->willReturn('');
-		$response->method('getStatusCode')->willReturn(200);
 
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->once())
 			->method('get')
 			->with('https://primary.example.invalid/v1/models')
 			->willThrowException(new \Error('discovery failed at https://secret.example.invalid using api-key-secret'));
-		$client->expects($this->once())
-			->method('post')
-			->with('https://primary.example.invalid/v1/chat/completions')
-			->willReturn($response);
+		$client->expects($this->never())->method('post');
 		$clientService = $this->createMock(IClientService::class);
 		$clientService->method('newClient')->willReturn($client);
 
@@ -1359,10 +1346,10 @@ class AgentExecutorTest extends TestCase {
 			['trace_run_id' => 73, 'max_provider_attempts' => 2]
 		);
 
-		$this->assertSame('completed', $result['status']);
-		$this->assertSame('safe answer', $result['content']);
-		$this->assertSame(1, $result['logicalTurns']);
-		$this->assertSame(2, $result['providerAttempts']);
+		$this->assertSame('error', $result['status']);
+		$this->assertNotSame('safe answer', $result['content']);
+		$this->assertSame(0, $result['logicalTurns']);
+		$this->assertSame(1, $result['providerAttempts']);
 
 		$llmRequestEvents = array_values(array_filter(
 			$events,
@@ -1377,9 +1364,9 @@ class AgentExecutorTest extends TestCase {
 			$events,
 			static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
 		));
-		$this->assertCount(2, $providerAttemptEvents);
-		$this->assertSame(['error', 'ok'], array_column(array_column($providerAttemptEvents, 'event'), 'status'));
-		$this->assertSame(['model_discovery', 'selected'], array_map(
+		$this->assertCount(1, $providerAttemptEvents);
+		$this->assertSame(['error'], array_column(array_column($providerAttemptEvents, 'event'), 'status'));
+		$this->assertSame(['model_discovery'], array_map(
 			static fn (array $event): string => $event['event']['payload']['route'],
 			$providerAttemptEvents
 		));

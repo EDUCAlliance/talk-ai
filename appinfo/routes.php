@@ -48,6 +48,8 @@ return [
 		['name' => 'settings#index', 'url' => '/api/v1/settings', 'verb' => 'GET'],
 		['name' => 'settings#update', 'url' => '/api/v1/settings', 'verb' => 'PUT'],
 		['name' => 'settings#models', 'url' => '/api/v1/models', 'verb' => 'GET'],
+		['name' => 'settings#refreshModels', 'url' => '/api/v1/models/refresh', 'verb' => 'POST'],
+		['name' => 'settings#testModel', 'url' => '/api/v1/models/test', 'verb' => 'POST'],
 		['name' => 'settings#groups', 'url' => '/api/v1/groups', 'verb' => 'GET'],
 		['name' => 'settings#teams', 'url' => '/api/v1/teams', 'verb' => 'GET'],
 		['name' => 'app_icon#show', 'url' => '/api/v1/app-icon/{variant}', 'verb' => 'GET'],

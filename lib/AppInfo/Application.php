@@ -28,6 +28,7 @@ use OCA\EducAI\Jobs\CleanupRoomDocumentsJob;
 use OCA\EducAI\Jobs\ProcessQueuedRequestsJob;
 use OCA\EducAI\Jobs\RebuildWikiRootRegistryJob;
 use OCA\EducAI\Jobs\ReindexBotSourceJob;
+use OCA\EducAI\Jobs\RefreshModelCatalogueJob;
 use OCA\EducAI\Jobs\SyncWikiRootIndexJob;
 use OCA\EducAI\Listener\BotPickerListener;
 use OCA\EducAI\Listener\TalkEnabledListener;
@@ -47,6 +48,7 @@ use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\EmbeddingClient;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\McpClient;
+use OCA\EducAI\Service\ModelReferenceMigrationService;
 use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RagIngestionService;
@@ -233,6 +235,14 @@ class Application extends App implements IBootstrap {
 				$c->get(\Psr\Log\LoggerInterface::class),
 				$c->get(\OCP\IConfig::class),
 				$c->get(TraceService::class)
+			);
+		});
+
+		$context->registerService(ModelReferenceMigrationService::class, function (IContainer $c) {
+			return new ModelReferenceMigrationService(
+				$c->get(SettingsMapper::class),
+				$c->get(BotMapper::class),
+				$c->get(LLMClient::class),
 			);
 		});
 
@@ -509,7 +519,8 @@ class Application extends App implements IBootstrap {
 				$c->get(TraceService::class),
 				$c->get(BrandingService::class),
 				$c->get(WikiPathService::class),
-				$c->get(\OCP\L10N\IFactory::class)
+				$c->get(\OCP\L10N\IFactory::class),
+				$c->get(LLMClient::class),
 			);
 		});
 
@@ -679,6 +690,12 @@ class Application extends App implements IBootstrap {
 	}
 
 	public function boot(IBootContext $context): void {
+		$context->injectFn(function (IJobList $jobList): void {
+			// Also register for existing installations before the next app release.
+			if (!$jobList->has(RefreshModelCatalogueJob::class, null)) {
+				$jobList->add(RefreshModelCatalogueJob::class);
+			}
+		});
 		$context->injectFn(function (IInitialState $initialState, BrandingService $brandingService): void {
 			$initialState->provideLazyInitialState('branding', static fn (): array => $brandingService->getPublicState());
 		});

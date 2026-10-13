@@ -13,6 +13,7 @@ use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\EmbeddingAdminService;
 use OCA\EducAI\Service\LLMClient;
+use OCA\EducAI\Service\ModelReferenceMigrationService;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\SettingsService;
 use OCA\EducAI\Service\TraceService;
@@ -64,6 +65,7 @@ class SettingsController extends Controller {
 		TraceService $traceService,
 		IL10N $l10n,
 		private EmbeddingAdminService $embeddingAdmin,
+		private ?ModelReferenceMigrationService $modelReferenceMigration = null,
 	) {
 		parent::__construct($appName, $request);
 		$this->settingsService = $settingsService;
@@ -155,10 +157,38 @@ class SettingsController extends Controller {
 		mixed $modelOutputTokenLimits = null,
 	): DataResponse {
 		try {
+			if (trim($defaultModel) === '') {
+				return $this->errorResponse('default_model_required', $this->l10n->t('Choose a default model before saving.'), 400);
+			}
 			$this->settingsService->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 			$this->settingsService->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
 			$this->logger->info('EducAI Settings Update - catalogueApiEndpoint: ' . var_export($catalogueApiEndpoint, true) . ', catalogueEnabled: ' . var_export($catalogueEnabled, true));
-			$beforeRateLimitConfig = $this->extractRateLimitConfig($this->settingsService->getSettings());
+			$previous = $this->settingsService->getSettings();
+			$connectionsChanged = $apiProvider !== $previous->getApiProvider()
+				|| $apiEndpoint !== $previous->getApiEndpoint()
+				|| ($secondaryApiEndpoint !== null && $secondaryApiEndpoint !== $previous->getSecondaryApiEndpoint())
+				|| ($apiKey !== '' && $apiKey !== '***')
+				|| ($secondaryApiKey !== null && $secondaryApiKey !== '' && $secondaryApiKey !== '***');
+			$defaultModel = $this->normalizeModelChoice($defaultModel, [$previous->getDefaultModel()], $connectionsChanged);
+			if ($fallbackModel !== null) {
+				$fallbackModel = $this->normalizeModelChoice($fallbackModel, [$previous->getFallbackModel()], $connectionsChanged);
+			}
+			if ($allowedModels !== null) {
+				$previousAllowed = json_decode($previous->getAllowedModels() ?: '[]', true) ?: [];
+				$allowedModels = array_values(array_unique(array_map(
+					fn (string $model): string => $this->normalizeModelChoice($model, $previousAllowed, $connectionsChanged),
+					$allowedModels,
+				)));
+			}
+			if (is_array($modelOutputTokenLimits)) {
+				$previousLimitModels = array_keys($previous->getModelOutputTokenLimitsArray());
+				$normalizedLimits = [];
+				foreach ($modelOutputTokenLimits as $model => $limit) {
+					$normalizedLimits[$this->normalizeModelChoice((string)$model, $previousLimitModels, $connectionsChanged)] = $limit;
+				}
+				$modelOutputTokenLimits = $normalizedLimits;
+			}
+			$beforeRateLimitConfig = $this->extractRateLimitConfig($previous);
 			$settings = $this->settingsService->updateSettings(
 				$apiProvider,
 				$apiKey,
@@ -220,6 +250,8 @@ class SettingsController extends Controller {
 			}
 
 			return new DataResponse($this->buildSettingsPayload($settings));
+		} catch (\InvalidArgumentException $e) {
+			return $this->errorResponse('settings_validation_failed', $this->l10n->t('Check the model selections and settings. Select an explicit provider for new or ambiguous model names.'), 400);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to update settings: ' . $e->getMessage());
 			return $this->errorResponse('settings_update_failed', $this->l10n->t('Failed to update settings'), 400);
@@ -228,11 +260,55 @@ class SettingsController extends Controller {
 
 	/**
 	 * @NoAdminRequired
-	 * List models from the configured provider
+	 * Read independently cached provider catalogues. This never tests inference.
 	 */
 	public function models(): DataResponse {
+		return $this->modelCatalogueResponse(false);
+	}
+
+	/**
+	 * @AdminRequired
+	 * Explicitly refresh discovery; this does not authorize new models.
+	 */
+	public function refreshModels(): DataResponse {
+		return $this->modelCatalogueResponse(true);
+	}
+
+	/**
+	 * @AdminRequired
+	 * Send one small test to the explicitly selected, saved provider. No fallback.
+	 */
+	public function testModel(string $model): DataResponse {
+		if (strlen($model) > 512 || preg_match('/[\x00-\x1f\x7f]/', $model)
+			|| !preg_match('/^(primary|secondary):\S+$/D', $model)) {
+			return $this->errorResponse('model_reference_required', $this->l10n->t('Select a model with an explicit provider before testing.'), 400);
+		}
 		try {
-			$modelOptions = $this->llmClient->listModelOptions();
+			$result = $this->llmClient->testModelConnection($model);
+			$result['message'] = $this->l10n->t('A real test answer was received from the selected provider.');
+			return new DataResponse($result);
+		} catch (\Throwable $e) {
+			// Provider errors can contain credentials or upstream response bodies.
+			$this->logger->warning('The explicit model connection test failed');
+			return new DataResponse([
+				'success' => false,
+				'errorCode' => 'model_test_failed',
+				'error' => $this->l10n->t('The provider did not return a test answer. Check the saved endpoint, credentials, selected model and available credit.'),
+				'model' => $model,
+				'checked_at' => time(),
+			], 502);
+		}
+	}
+
+	private function modelCatalogueResponse(bool $refresh): DataResponse {
+		try {
+			$catalogue = $this->llmClient->getModelCatalogue($refresh);
+			try {
+				$this->modelReferenceMigration?->migrate();
+			} catch (\Throwable $e) {
+				// A deferred migration must not hide an otherwise usable catalogue.
+				$this->logger->warning('Legacy model references could not yet be migrated');
+			}
 			$modelOptions = array_map(function (array $option): array {
 				$endpoint = (string)($option['endpoint'] ?? '');
 				$model = (string)($option['model'] ?? '');
@@ -243,15 +319,40 @@ class SettingsController extends Controller {
 				}
 
 				return $option;
-			}, $modelOptions);
-			return new DataResponse([
-				'models' => array_values(array_map(static fn (array $option): string => (string)$option['id'], $modelOptions)),
-				'model_options' => $modelOptions,
-			]);
+			}, $catalogue['model_options']);
+			$catalogue['models'] = array_values(array_map(static fn (array $option): string => (string)$option['id'], $modelOptions));
+			$catalogue['model_options'] = $modelOptions;
+			$catalogue['providers'] = array_map(function (array $provider): array {
+				$provider['label'] = $provider['id'] === 'secondary' ? $this->l10n->t('Secondary') : $this->l10n->t('Primary');
+				if (is_string($provider['error'] ?? null)) {
+					$provider['error'] = $this->l10n->t($provider['error']);
+				}
+				return $provider;
+			}, $catalogue['providers'] ?? []);
+			return new DataResponse($catalogue);
 		} catch (Exception $e) {
-			$this->logger->error('Failed to list models: ' . $e->getMessage());
+			$this->logger->error('Failed to read the model catalogue');
 			return $this->errorResponse('models_load_failed', $this->l10n->t('Failed to load models'), 400);
 		}
+	}
+
+	private function normalizeModelChoice(string $reference, array $previous, bool $connectionsChanged): string {
+		$reference = trim($reference);
+		if (strlen($reference) > 512 || preg_match('/[\x00-\x1f\x7f]/', $reference)) {
+			throw new \InvalidArgumentException('Invalid model reference');
+		}
+		if ($reference === '' || in_array($reference, $previous, true)) {
+			// Untouched legacy choices must not prevent unrelated settings changes.
+			return $reference;
+		}
+		if (preg_match('/^(primary|secondary):\S+$/D', $reference)) {
+			return $reference;
+		}
+		if ($connectionsChanged) {
+			throw new \InvalidArgumentException('New model choices require an explicit provider');
+		}
+		return $this->llmClient->canonicalizeModelReference($reference)
+			?? throw new \InvalidArgumentException('A model reference is required');
 	}
 
 	/**
