@@ -202,7 +202,7 @@ export default {
 .mention-badge {
 	display: inline-block;
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 4px 12px;
 	border-radius: 16px;
 	font-size: 13px;
@@ -241,9 +241,10 @@ export default {
 	white-space: nowrap;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .visibility-badge.global {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .visibility-badge.personal {
@@ -253,12 +254,12 @@ export default {
 
 .visibility-badge.teams {
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .visibility-badge.groups {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .bot-description {
@@ -338,14 +339,16 @@ export default {
 	transition: background 0.2s, border-color 0.2s;
 }
 
-.primary-button {
+/* Nextcloud core lightens every focused <button>; keep the primary colours after a click. */
+.primary-button,
+.primary-button:focus {
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	border: 1px solid var(--color-primary-element);
 }
 
 .primary-button:hover {
-	background: var(--color-primary-element-light);
+	background: var(--color-primary-element-hover);
 }
 
 .secondary-button {
@@ -362,8 +365,8 @@ export default {
 	position: absolute;
 	top: 12px;
 	inset-inline-end: 12px;
-	background: var(--color-error);
-	color: white;
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
+	color: var(--color-error-text);
 	padding: 4px 10px;
 	border-radius: 12px;
 	font-size: 11px;

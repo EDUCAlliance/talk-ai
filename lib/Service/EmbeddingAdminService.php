@@ -27,6 +27,7 @@ class EmbeddingAdminService {
 		$counts = ['total' => 0, 'queued' => 0, 'processing' => 0, 'ready' => 0, 'error' => 0];
 		$errors = [];
 		$lastIndexed = null;
+		$oldestIndexed = null;
 		foreach ($this->sourceMapper->findAll() as $source) {
 			$counts['total']++;
 			$status = $source->getStatus();
@@ -42,13 +43,15 @@ class EmbeddingAdminService {
 			}
 			if ($source->getLastIndexedAt() !== null) {
 				$lastIndexed = max($lastIndexed ?? 0, $source->getLastIndexedAt());
+				$oldestIndexed = min($oldestIndexed ?? PHP_INT_MAX, $source->getLastIndexedAt());
 			}
 		}
 		$ragEnabled = (bool)$this->settings->getRagConfig()['rag_enabled'];
+		$changedAt = $this->configuration->requiredSince('rag');
 		return [
 			'rag' => $counts + [
 				'enabled' => $ragEnabled,
-				'needs_reindex' => $this->configuration->isRequired('rag'),
+				'needs_reindex' => $changedAt !== null && $oldestIndexed !== null && $oldestIndexed <= $changedAt,
 				'last_indexed' => $lastIndexed,
 				'errors' => $errors,
 			],

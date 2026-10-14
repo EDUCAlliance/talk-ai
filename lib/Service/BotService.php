@@ -18,6 +18,7 @@ use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
+use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
@@ -67,6 +68,7 @@ class BotService {
 	private BrandingService $brandingService;
 	private WikiPathService $wikiPathService;
 	private ?IFactory $l10nFactory;
+	private ?LLMClient $llmClient;
 
 	public function __construct(
 		BotMapper $botMapper,
@@ -95,8 +97,10 @@ class BotService {
 		?BrandingService $brandingService = null,
 		?WikiPathService $wikiPathService = null,
 		?IFactory $l10nFactory = null,
+		?LLMClient $llmClient = null,
 	) {
 		$this->l10nFactory = $l10nFactory;
+		$this->llmClient = $llmClient;
 		$this->botMapper = $botMapper;
 		$this->conversationMapper = $conversationMapper;
 		$this->chatRoomMapper = $chatRoomMapper;
@@ -122,6 +126,54 @@ class BotService {
 		$this->traceService = $traceService;
 		$this->brandingService = $brandingService ?? new BrandingService();
 		$this->wikiPathService = $wikiPathService ?? new WikiPathService($this->brandingService);
+	}
+
+	private function authorizeModelSelection(?string $reference, ?string $previous = null): ?string {
+		LLMClient::validateModelReference($reference);
+		$reference = trim((string)$reference);
+		if ($reference === '') {
+			return null;
+		}
+		if ($this->llmClient === null) {
+			return $reference;
+		}
+		// An unchanged choice stays valid when discovery or the allowlist no longer contain it.
+		if ($previous !== null && $reference === trim($previous)) {
+			try {
+				return $this->llmClient->canonicalizeModelReference($reference);
+			} catch (\InvalidArgumentException $e) {
+				return $previous;
+			}
+		}
+		$canonical = $this->llmClient->canonicalizeModelReference($reference);
+		if ($previous !== null && preg_match('/^(primary|secondary):(.+)$/', (string)$canonical, $parts) === 1 && $parts[2] === trim($previous)) {
+			return $canonical;
+		}
+		if ($previous !== null) {
+			try {
+				if ($canonical === $this->llmClient->canonicalizeModelReference($previous)) {
+					return $canonical;
+				}
+			} catch (\InvalidArgumentException $e) {
+			}
+		}
+		$settings = $this->settingsService->getSettings();
+		if (!$settings->getAllowMultipleModels()) {
+			throw new ModelNotReleasedException(true);
+		}
+		$allowed = json_decode((string)$settings->getAllowedModels(), true);
+		foreach (is_array($allowed) ? $allowed : [] as $candidate) {
+			if (!is_string($candidate)) {
+				continue;
+			}
+			try {
+				if ($this->llmClient->canonicalizeModelReference($candidate) === $canonical) {
+					return $canonical;
+				}
+			} catch (\InvalidArgumentException $e) {
+			}
+		}
+		throw new ModelNotReleasedException(false);
 	}
 
 	/**
@@ -250,7 +302,7 @@ class BotService {
 		$bot->setMentionName($mentionName);
 		$bot->setSystemPrompt($systemPrompt);
 		if ($model !== null && $model !== '') {
-			$bot->setModel($model);
+			$bot->setModel($this->authorizeModelSelection($model));
 		}
 		$bot->setTemperature($this->settingsService->normalizeTemperatureValue($temperature, true));
 		$bot->setIsActive(true);
@@ -336,7 +388,9 @@ class BotService {
 		$targetAllowedTeams = $targetVisibility === 'teams'
 			? $this->normalizeIdArray($allowedTeams ?? $editableState['allowed_teams'])
 			: [];
-		$targetModel = $model !== null ? ($model !== '' ? $model : null) : $editableState['model'];
+		$targetModel = $model !== null
+			? $this->authorizeModelSelection($model, $editableState['model'])
+			: $editableState['model'];
 		$targetTemperature = $temperature !== self::TEMPERATURE_NOT_PROVIDED
 			? $this->settingsService->normalizeTemperatureValue($temperature, true)
 			: $editableState['temperature'];

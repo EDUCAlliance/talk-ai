@@ -128,6 +128,22 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$this->assertStringNotContainsString('private', json_encode($status));
 	}
 
+	public function testReindexIsOnlyRequestedForContentIndexedBeforeTheChange(): void {
+		$this->settings->method('getRagConfig')->willReturn(['rag_enabled' => true]);
+		$this->catalogue->method('getStats')->willReturn(['count' => 0, 'last_indexed' => null, 'needs_reindex' => false, 'state' => 'idle']);
+		$this->configuration->method('requiredSince')->with('rag')->willReturn(500);
+		$fresh = $this->source(21, 'ready');
+		$fresh->setLastIndexedAt(600);
+		$old = $this->source(22, 'ready');
+		$old->setLastIndexedAt(400);
+		foreach ([[[], false], [[$this->source(20)], false], [[$fresh], false], [[$fresh, $old], true]] as [$sources, $expected]) {
+			$this->sources = $this->createMock(BotSourceMapper::class);
+			$this->sources->method('findAll')->willReturn($sources);
+			$service = new EmbeddingAdminService($this->sources, $this->ingestion, $this->settings, $this->catalogue, $this->jobs, $this->configuration, $this->createMock(LoggerInterface::class));
+			$this->assertSame($expected, $service->getStatus()['rag']['needs_reindex']);
+		}
+	}
+
 	public function testDisabledCatalogueCannotBeQueuedDirectly(): void {
 		$this->catalogue->method('isEnabled')->willReturn(false);
 		$this->jobs->expects($this->never())->method('add');

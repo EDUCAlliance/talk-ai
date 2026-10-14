@@ -47,6 +47,7 @@ use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\EmbeddingClient;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\McpClient;
+use OCA\EducAI\Service\ModelReferenceMigrationService;
 use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RagIngestionService;
@@ -236,6 +237,14 @@ class Application extends App implements IBootstrap {
 			);
 		});
 
+		$context->registerService(ModelReferenceMigrationService::class, function (IContainer $c) {
+			return new ModelReferenceMigrationService(
+				$c->get(SettingsMapper::class),
+				$c->get(BotMapper::class),
+				$c->get(LLMClient::class),
+			);
+		});
+
 		$context->registerService(EmbeddingClient::class, function (IContainer $c) {
 			return new EmbeddingClient(
 				$c->get(\OCP\Http\Client\IClientService::class),
@@ -249,7 +258,8 @@ class Application extends App implements IBootstrap {
 			return new DoclingClient(
 				$c->get(\OCP\Http\Client\IClientService::class),
 				$c->get(SettingsService::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(\OCP\IL10N::class),
 			);
 		});
 
@@ -509,7 +519,8 @@ class Application extends App implements IBootstrap {
 				$c->get(TraceService::class),
 				$c->get(BrandingService::class),
 				$c->get(WikiPathService::class),
-				$c->get(\OCP\L10N\IFactory::class)
+				$c->get(\OCP\L10N\IFactory::class),
+				$c->get(LLMClient::class),
 			);
 		});
 

@@ -606,10 +606,11 @@ export default {
 	min-height: 36px;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .error-banner {
 	padding: 10px 12px;
 	border-radius: var(--border-radius);
-	background: var(--color-error);
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
 	color: var(--color-error-text);
 }
 
@@ -705,12 +706,12 @@ export default {
 
 .status-badge.success,
 .status-badge.ok {
-	background: var(--color-success);
-	color: var(--color-primary-element-text);
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .status-badge.error {
-	background: var(--color-error);
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
 	color: var(--color-error-text);
 }
 
@@ -718,8 +719,8 @@ export default {
 .status-badge.incomplete,
 .status-badge.running,
 .status-badge.started {
-	background: var(--color-warning);
-	color: var(--color-main-text);
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .pagination {
@@ -783,7 +784,7 @@ export default {
 }
 
 .event-error {
-	color: var(--color-error);
+	color: var(--color-error-text);
 	font-weight: 600;
 }
 

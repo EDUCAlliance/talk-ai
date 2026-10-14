@@ -4,13 +4,16 @@ import test from 'node:test'
 import vm from 'node:vm'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
+import * as modelSelection from '../../src/utils/modelSelection.js'
+import * as adminSettings from '../../src/utils/adminSettings.js'
+import { deriveOverview } from '../../src/utils/adminOverview.js'
 
 // Exercise the real component methods without mounting unrelated admin panels.
 function admin(axios) {
 	const source = readFileSync(new URL('../../src/components/AdminSettings.vue', import.meta.url), 'utf8')
 	const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .+$/gm, '').replace('export default', 'globalThis.component =')
 	const errors = []
-	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', BotForm: {}, EmbeddingMaintenance: {},
+	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', BotForm: {}, adminComponents: {}, modelSelection, adminSettings, deriveOverview,
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage,
 		applyEducAiRuntimeIconPayload() {}, showSuccess() {}, showError() {}, confirm: () => true,
 		console: { ...console, error: (...args) => errors.push(args) } }
@@ -18,6 +21,7 @@ function admin(axios) {
 	const component = scope.component
 	const state = component.data()
 	state.errors = errors
+	state.$nextTick = callback => callback()
 	for (const [name, method] of Object.entries(component.methods)) state[name] = method.bind(state)
 	for (const [name, computed] of Object.entries(component.computed)) Object.defineProperty(state, name, { get: computed.bind(state) })
 	return state

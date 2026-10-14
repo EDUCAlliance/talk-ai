@@ -1289,6 +1289,7 @@ class AgentExecutorTest extends TestCase {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
 		$settings->setDefaultModel('model-a');
 		$settings->setLlmModelsTimeout(25);
 		$settings->setLlmChatTimeout(90);
@@ -1296,9 +1297,14 @@ class AgentExecutorTest extends TestCase {
 		$settingsService = $this->createMock(SettingsService::class);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
 		$settingsService->method('normalizePositiveInteger')
 			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
 
+		$discovery = $this->createMock(IResponse::class);
+		$discovery->method('getBody')->willReturn(json_encode(['data' => [['id' => 'model-b']]]) ?: '');
+		$discovery->method('getHeader')->willReturn('');
+		$discovery->method('getStatusCode')->willReturn(200);
 		$response = $this->createMock(IResponse::class);
 		$response->method('getBody')->willReturn(json_encode([
 			'model' => 'model-a',
@@ -1311,10 +1317,14 @@ class AgentExecutorTest extends TestCase {
 		$response->method('getStatusCode')->willReturn(200);
 
 		$client = $this->createMock(IClient::class);
-		$client->expects($this->once())
+		$client->expects($this->exactly(2))
 			->method('get')
-			->with('https://primary.example.invalid/v1/models')
-			->willThrowException(new \Error('discovery failed at https://secret.example.invalid using api-key-secret'));
+			->willReturnCallback(static function (string $url) use ($discovery): IResponse {
+				if ($url === 'https://primary.example.invalid/v1/models') {
+					throw new \Error('discovery failed at https://secret.example.invalid using api-key-secret');
+				}
+				return $discovery;
+			});
 		$client->expects($this->once())
 			->method('post')
 			->with('https://primary.example.invalid/v1/chat/completions')
@@ -1356,13 +1366,13 @@ class AgentExecutorTest extends TestCase {
 			'system',
 			[['role' => 'user', 'content' => 'Question']],
 			[],
-			['trace_run_id' => 73, 'max_provider_attempts' => 2]
+			['trace_run_id' => 73, 'max_provider_attempts' => 3]
 		);
 
 		$this->assertSame('completed', $result['status']);
 		$this->assertSame('safe answer', $result['content']);
 		$this->assertSame(1, $result['logicalTurns']);
-		$this->assertSame(2, $result['providerAttempts']);
+		$this->assertSame(3, $result['providerAttempts']);
 
 		$llmRequestEvents = array_values(array_filter(
 			$events,
@@ -1377,9 +1387,9 @@ class AgentExecutorTest extends TestCase {
 			$events,
 			static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
 		));
-		$this->assertCount(2, $providerAttemptEvents);
-		$this->assertSame(['error', 'ok'], array_column(array_column($providerAttemptEvents, 'event'), 'status'));
-		$this->assertSame(['model_discovery', 'selected'], array_map(
+		$this->assertCount(3, $providerAttemptEvents);
+		$this->assertSame(['error', 'ok', 'ok'], array_column(array_column($providerAttemptEvents, 'event'), 'status'));
+		$this->assertSame(['model_discovery', 'model_discovery', 'selected'], array_map(
 			static fn (array $event): string => $event['event']['payload']['route'],
 			$providerAttemptEvents
 		));

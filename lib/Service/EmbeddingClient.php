@@ -339,11 +339,17 @@ class EmbeddingClient {
         }
         if ($model === null || $model === '') {
             $settings = $this->settingsService->getSettings();
-            $model = $settings->getDefaultModel();
+            $model = self::inheritedModelName((string)$settings->getDefaultModel());
         }
 
         return (string)$model;
     }
+
+    /** Chat routing prefixes are local identifiers, never embedding model IDs. */
+    public static function inheritedModelName(string $chatReference): string {
+        return preg_replace('/^(primary|secondary):/', '', $chatReference, 1) ?? $chatReference;
+    }
+
     private function resolveEndpoint(?string $custom, ?string $chatEndpoint): ?string {
         $endpoint = $custom;
         if ($endpoint === null || $endpoint === '') {

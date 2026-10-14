@@ -20,6 +20,7 @@ class SettingsService {
 	public const APP_ICON_MODE_DEFAULT = 'default';
 	public const APP_ICON_MODE_CUSTOM = 'custom';
 	public const APP_ICON_UPLOAD_PREFIX = 'educai-upload://';
+	public const CLEARABLE_CREDENTIALS = ['secondaryApiKey', 'embeddingApiKey', 'visionApiKey', 'speechApiKey', 'doclingApiKey'];
 
 	private SettingsMapper $mapper;
 	private CredentialService $credentialService;
@@ -171,6 +172,8 @@ class SettingsService {
 	 * @param string|null $doclingAuthMode
 	 * @param mixed $maxOutputTokens Integer or digit string; null preserves the saved value.
 	 * @param mixed $modelOutputTokenLimits Model reference => token limit; null preserves, [] clears.
+	 * @param array<int,string>|null $clearCredentials Optional credentials to remove (see CLEARABLE_CREDENTIALS);
+	 *                                                 a new non-empty value for the same key in this call wins.
 	 * @return Settings
 	 */
 	public function updateSettings(
@@ -226,9 +229,19 @@ class SettingsService {
 		?string $doclingAuthMode = null,
 		mixed $maxOutputTokens = null,
 		mixed $modelOutputTokenLimits = null,
+		?array $clearCredentials = null,
 	): Settings {
+		LLMClient::validateModelReference($defaultModel);
+		LLMClient::validateModelReference($fallbackModel);
+		foreach ($allowedModels ?? [] as $reference) {
+			if (!is_string($reference)) {
+				throw new \InvalidArgumentException('Allowed models must contain model references.');
+			}
+			LLMClient::validateModelReference($reference);
+		}
 		$this->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 		$this->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
+		$clear = array_fill_keys(self::validateClearCredentials($clearCredentials), true);
 		$settings = $this->mapper->getSettings();
 		$previousSettings = clone $settings;
 		$shouldSyncTalkBot = false;
@@ -246,6 +259,8 @@ class SettingsService {
 		}
 		if ($secondaryApiKey !== null && $secondaryApiKey !== '') {
 			$settings->setSecondaryApiKey($this->credentialService->encrypt($secondaryApiKey));
+		} elseif (isset($clear['secondaryApiKey'])) {
+			$settings->setSecondaryApiKey(null);
 		}
 		if ($fallbackModel !== null) {
 			$settings->setFallbackModel($fallbackModel !== '' ? $fallbackModel : null);
@@ -281,6 +296,8 @@ class SettingsService {
 		if ($embeddingApiKey !== null && $embeddingApiKey !== '') {
 			// Encrypt embedding API key before storing
 			$settings->setEmbeddingApiKey($this->credentialService->encrypt($embeddingApiKey));
+		} elseif (isset($clear['embeddingApiKey'])) {
+			$settings->setEmbeddingApiKey(null);
 		}
 		if ($embeddingModel !== null) {
 			$settings->setEmbeddingModel($embeddingModel !== '' ? $embeddingModel : null);
@@ -326,6 +343,8 @@ class SettingsService {
 		}
 		if ($doclingApiKey !== null && $doclingApiKey !== '') {
 			$settings->setDoclingApiKey($this->credentialService->encrypt($doclingApiKey));
+		} elseif (isset($clear['doclingApiKey'])) {
+			$settings->setDoclingApiKey(null);
 		}
 		if ($doclingApiProfile !== null) {
 			$settings->setDoclingApiProfile($doclingApiProfile);
@@ -338,6 +357,8 @@ class SettingsService {
 		}
 		if ($visionApiKey !== null && $visionApiKey !== '') {
 			$settings->setVisionApiKey($this->credentialService->encrypt($visionApiKey));
+		} elseif (isset($clear['visionApiKey'])) {
+			$settings->setVisionApiKey(null);
 		}
 		if ($visionModel !== null) {
 			$settings->setVisionModel($visionModel !== '' ? $visionModel : null);
@@ -347,6 +368,8 @@ class SettingsService {
 		}
 		if ($speechApiKey !== null && $speechApiKey !== '') {
 			$settings->setSpeechApiKey($this->credentialService->encrypt($speechApiKey));
+		} elseif (isset($clear['speechApiKey'])) {
+			$settings->setSpeechApiKey(null);
 		}
 		if ($speechModel !== null) {
 			$settings->setSpeechModel($speechModel !== '' ? $speechModel : null);
@@ -785,6 +808,23 @@ class SettingsService {
 			'docling_auth_mode' => $authMode,
 			'api_key' => $apiKey,
 		];
+	}
+
+	/** @return array<int,string> Unique names of the credentials to remove */
+	public static function validateClearCredentials(mixed $clearCredentials): array {
+		if ($clearCredentials === null) {
+			return [];
+		}
+		if (!is_array($clearCredentials)) {
+			throw new \InvalidArgumentException('Only optional credentials can be removed');
+		}
+		foreach ($clearCredentials as $name) {
+			if (!is_string($name) || !in_array($name, self::CLEARABLE_CREDENTIALS, true)) {
+				throw new \InvalidArgumentException('Only optional credentials can be removed');
+			}
+		}
+
+		return array_values(array_unique($clearCredentials));
 	}
 
 	public function validateDoclingOptions(?string $profile, ?string $authMode): void {

@@ -15,13 +15,18 @@ class EmbeddingConfigurationService {
 	public function recordChange(Settings $before, Settings $after): void {
 		foreach (['rag', 'catalogue'] as $scope) {
 			if ($this->fingerprint($before, $scope) !== $this->fingerprint($after, $scope)) {
-				$this->config->setAppValue('educai', $scope . '_reindex_required', '1');
+				$this->config->setAppValue('educai', $scope . '_reindex_required', (string)time());
 			}
 		}
 	}
 
 	public function isRequired(string $scope): bool {
-		return $this->config->getAppValue('educai', $scope . '_reindex_required', '0') === '1';
+		return $this->requiredSince($scope) !== null;
+	}
+
+	public function requiredSince(string $scope): ?int {
+		$changedAt = (int)$this->config->getAppValue('educai', $scope . '_reindex_required', '0');
+		return $changedAt > 0 ? $changedAt : null;
 	}
 
 	/** Queued is not completed; source/job status continues to show the work. */
@@ -36,7 +41,7 @@ class EmbeddingConfigurationService {
 		// Match EmbeddingClient::getActiveModel: a missing/empty embedding model
 		// inherits the chat default, so changing that default changes vector space.
 		if ($model === null || $model === '') {
-			$model = $settings->getDefaultModel();
+			$model = EmbeddingClient::inheritedModelName((string)$settings->getDefaultModel());
 		}
 		$sourceConfiguration = $scope === 'catalogue'
 			? [rtrim(trim((string)$settings->getCatalogueApiEndpoint()), '/')]

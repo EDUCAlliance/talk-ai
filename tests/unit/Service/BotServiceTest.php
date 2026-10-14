@@ -16,10 +16,13 @@ use OCA\EducAI\Db\ConversationMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\Exception\AuthorizationException;
+use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolProvider;
+use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
@@ -43,6 +46,88 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class BotServiceTest extends TestCase {
+	public function testNewModelSelectionsRespectAdministratorReleasePolicy(): void {
+		foreach ([false, true] as $allowMultiple) {
+			$bot = $this->createPersonalBot();
+			$bot->setModel(null);
+			$mapper = $this->createMock(BotMapper::class);
+			$mapper->method('findById')->willReturn($bot);
+			$mapper->expects($this->never())->method('update');
+			$permissions = $this->createMock(PermissionService::class);
+			$permissions->method('canEditBot')->willReturn(true);
+			$settings = new Settings();
+			$settings->setAllowMultipleModels($allowMultiple);
+			$settings->setAllowedModels('["primary:shared"]');
+			$settingsService = $this->createMock(SettingsService::class);
+			$settingsService->method('getSettings')->willReturn($settings);
+			$llm = $this->createMock(LLMClient::class);
+			$llm->method('canonicalizeModelReference')->willReturnCallback(static fn (?string $reference): ?string => $reference);
+			$service = $this->createBotService($mapper, $permissions, settingsService: $settingsService, llmClient: $llm);
+			try {
+				$service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', model: 'secondary:shared');
+				$this->fail('Discovery or a same-named model on another provider must not grant access');
+			} catch (AuthorizationException $e) {
+				$this->assertStringContainsString($allowMultiple ? 'not been released' : 'selection is disabled', $e->getMessage());
+			}
+		}
+	}
+
+	public function testReleasedRawChoiceIsSavedWithStableProviderBinding(): void {
+		$bot = $this->createPersonalBot();
+		$bot->setModel(null);
+		$mapper = $this->createMock(BotMapper::class);
+		$mapper->method('findById')->willReturn($bot);
+		$mapper->expects($this->once())->method('update')->willReturnCallback(static fn (Bot $bot): Bot => $bot);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$settings = new Settings();
+		$settings->setAllowMultipleModels(true);
+		$settings->setAllowedModels('["secondary:unique"]');
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$llm = $this->createMock(LLMClient::class);
+		$llm->method('canonicalizeModelReference')->willReturnCallback(static fn (?string $reference): ?string => $reference === 'unique' ? 'secondary:unique' : $reference);
+		$service = $this->createBotService($mapper, $permissions, settingsService: $settingsService, llmClient: $llm);
+		$this->assertSame('secondary:unique', $service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', model: 'unique')->getModel());
+	}
+
+	public function testUnrelatedEditsPreserveRetiredAndUnresolvedExistingSelections(): void {
+		foreach (['secondary:retired', 'ambiguous-legacy'] as $reference) {
+			$bot = $this->createPersonalBot();
+			$bot->setModel($reference);
+			$mapper = $this->createMock(BotMapper::class);
+			$mapper->method('findById')->willReturn($bot);
+			$mapper->expects($this->once())->method('update')->willReturnCallback(static fn (Bot $bot): Bot => $bot);
+			$permissions = $this->createMock(PermissionService::class);
+			$permissions->method('canEditBot')->willReturn(true);
+			$llm = $this->createMock(LLMClient::class);
+			$llm->method('canonicalizeModelReference')->willReturnCallback(static function (?string $reference): ?string {
+				if ($reference === 'ambiguous-legacy') {
+					throw new \InvalidArgumentException('No proof during outage');
+				}
+				return $reference;
+			});
+			$service = $this->createBotService($mapper, $permissions, llmClient: $llm);
+			$updated = $service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', model: $reference, description: 'Changed only description');
+			$this->assertSame($reference, $updated->getModel());
+			$this->assertSame('Changed only description', $updated->getDescription());
+		}
+	}
+
+	public function testSwitchingToInheritedDefaultNeverRequiresIndividualModelPermission(): void {
+		$bot = $this->createPersonalBot();
+		$bot->setModel('secondary:retired');
+		$mapper = $this->createMock(BotMapper::class);
+		$mapper->method('findById')->willReturn($bot);
+		$mapper->expects($this->once())->method('update')->willReturnCallback(static fn (Bot $bot): Bot => $bot);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->never())->method('canonicalizeModelReference');
+		$service = $this->createBotService($mapper, $permissions, llmClient: $llm);
+		$this->assertNull($service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', model: '')->getModel());
+	}
+
 	public function testPersonalBotUpgradeToSharedScopeBecomesDraftWithoutPublishRights(): void {
 		$bot = $this->createPersonalBot();
 		$botMapper = $this->createMock(BotMapper::class);
@@ -159,6 +244,59 @@ class BotServiceTest extends TestCase {
 		$this->assertSame('reviewer', $updated->getApprovedBy());
 		$this->assertSame(100, $updated->getApprovedAt());
 		$this->assertSame('Changed bot', $updated->getPendingChangesArray()['bot_name'] ?? null);
+	}
+
+	public function testApprovedRequestToUseTheAdministratorDefaultClearsTheExplicitModel(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setModel('secondary:live-model');
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->with(7)->willReturn($bot);
+		$botMapper->expects($this->exactly(2))->method('update')->willReturnCallback(static fn (Bot $updated): Bot => $updated);
+		$permissionService = $this->createMock(PermissionService::class);
+		$permissionService->method('canEditBot')->willReturn(true);
+		$permissionService->method('canPublishBotToScope')->willReturn(false);
+		$permissionService->method('canApproveBot')->willReturn(true);
+		$llm = $this->createMock(LLMClient::class);
+		$llm->expects($this->never())->method('canonicalizeModelReference');
+		$service = $this->createBotService($botMapper, $permissionService, llmClient: $llm);
+
+		$pending = $service->updateBot(id: 7, userId: 'owner', botName: 'Live bot', systemPrompt: 'Live prompt', model: '');
+		$this->assertSame('secondary:live-model', $pending->getModel(), 'The approved version stays live until approval');
+		$this->assertArrayHasKey('model', $pending->getPendingChangesArray());
+		$this->assertNull($pending->getPendingChangesArray()['model']);
+
+		$approved = $service->approveBot(7, 'reviewer');
+		$this->assertNull($approved->getModel());
+		$this->assertNull($approved->getPendingChangesArray());
+	}
+
+	public function testQualifyingAnUnqualifiedNameWithItsOwnModelIsNotANewChoice(): void {
+		$bot = $this->createPersonalBot();
+		$bot->setModel('gpt-4o');
+		$mapper = $this->createMock(BotMapper::class);
+		$mapper->method('findById')->willReturn($bot);
+		$mapper->expects($this->once())->method('update')->willReturnCallback(static fn (Bot $updated): Bot => $updated);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$settings = new Settings();
+		$settings->setAllowMultipleModels(false);
+		$settings->setAllowedModels('[]');
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$llm = $this->createMock(LLMClient::class);
+		$llm->method('canonicalizeModelReference')->willReturnCallback(static function (?string $reference): ?string {
+			if ($reference === 'gpt-4o') {
+				throw new \InvalidArgumentException('Select an explicit Primary or Secondary model.');
+			}
+			return $reference;
+		});
+		$service = $this->createBotService($mapper, $permissions, settingsService: $settingsService, llmClient: $llm);
+
+		$updated = $service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', model: 'secondary:gpt-4o');
+		$this->assertSame('secondary:gpt-4o', $updated->getModel());
+
+		$this->expectException(ModelNotReleasedException::class);
+		$service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', model: 'secondary:other');
 	}
 
 	public function testUpdatingVersionedPendingBotKeepsLiveVersionUntouched(): void {
@@ -2382,6 +2520,7 @@ class BotServiceTest extends TestCase {
 		?EmbeddingMapper $embeddingMapper = null,
 		?TraceService $traceService = null,
 		?IFactory $l10nFactory = null,
+		?LLMClient $llmClient = null,
 	): BotService {
 		return new BotService(
 			$botMapper,
@@ -2407,7 +2546,8 @@ class BotServiceTest extends TestCase {
 			$wikiRootRegistryService ?? $this->createMock(WikiRootRegistryService::class),
 			$wikiLocationService ?? $this->createMock(WikiLocationService::class),
 			$traceService,
-			l10nFactory: $l10nFactory
+			l10nFactory: $l10nFactory,
+			llmClient: $llmClient,
 		);
 	}
 

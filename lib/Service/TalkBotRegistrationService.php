@@ -205,8 +205,12 @@ class TalkBotRegistrationService {
 		return $secret;
 	}
 
-	private function getWebhookUrl(): string {
+	public function getWebhookUrl(): string {
 		return $this->urlGenerator->linkToRouteAbsolute('educai.webhook.talk');
+	}
+
+	public function hasWebhookSecret(): bool {
+		return trim((string)$this->settingsMapper->getSettings()->getWebhookSecret()) !== '';
 	}
 
 	/**

@@ -151,21 +151,25 @@
 						</p>
 					</div>
 
-					<div v-if="selectableModelOptions.length > 0" class="form-group">
+					<div class="form-group">
 						<label for="model-select">{{ t('educai', 'Model') }}</label>
-						<select
+						<ModelSelector
 							id="model-select"
 							v-model="formData.model"
-							:disabled="selectableModelOptions.length === 0">
-							<option
-								v-for="option in selectableModelOptions"
-								:key="option.id"
-								:value="option.id">
-								{{ option.label }}
-							</option>
-						</select>
-						<p v-if="selectableModelOptions.length === 0" class="hint">
-							{{ t('educai', 'No models are allowed by the administrator yet.') }}
+							:options="selectableModelOptions"
+							:unlisted-endpoints="unlistedEndpoints"
+							:empty-label="t('educai', 'Use administrator default')" />
+						<p class="hint">
+							{{ t('educai', 'The default follows administrator settings. An explicit model stays bound to its provider.') }}
+						</p>
+						<p v-if="!settings.allowMultipleModels" class="hint">
+							{{ t('educai', 'Per-bot model selection is disabled. Existing explicit selections are preserved.') }}
+						</p>
+						<p v-else-if="settings.allowedModels.length === 0" class="hint">
+							{{ t('educai', 'No additional models have been released by the administrator.') }}
+						</p>
+						<p v-if="modelLoadError" class="hint" role="alert">
+							{{ modelLoadError }}
 						</p>
 					</div>
 
@@ -635,6 +639,8 @@ import NcProgressBar from '@nextcloud/vue/dist/Components/NcProgressBar.js'
 import { getCanonicalLocale, t } from '../l10n.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { normalizeToolSelectionAliases } from '../utils/toolAliases.js'
+import * as modelSelection from '../utils/modelSelection.js'
+import ModelSelector from './ModelSelector.vue'
 
 const WIKI_BUILT_IN_TOOLS = new Set([
 	'wiki_search',
@@ -654,6 +660,7 @@ export default {
 	name: 'BotForm',
 	components: {
 		NcProgressBar,
+		ModelSelector,
 	},
 	props: {
 		bot: {
@@ -704,6 +711,9 @@ export default {
 				secondaryEndpointEnabled: false,
 				modelOptions: [],
 			},
+			modelLoadError: '',
+			modelProviders: [],
+			initialModel: '',
 			availableGroups: [],
 			availableTeams: [],
 			availableCollectives: [],
@@ -883,19 +893,19 @@ export default {
 			return false
 		},
 		selectableModelOptions() {
-			const options = this.settings.allowMultipleModels
-				? this.settings.allowedModels.map((model) => this.findOrCreateModelOption(model))
-				: (this.settings.secondaryEndpointEnabled ? this.settings.modelOptions : [])
-
-			const filtered = options.filter(Boolean)
-			if (this.formData.model) {
-				const currentId = this.toEndpointModelId(this.formData.model)
-				if (!filtered.some((option) => option.id === currentId)) {
-					filtered.push(this.findOrCreateModelOption(currentId))
-				}
-			}
-
-			return filtered
+			const allowed = this.settings.allowMultipleModels ? this.settings.allowedModels : []
+			const selected = [this.formData.model, ...this.qualifiedCurrentModel, ...allowed].filter(Boolean)
+			return modelSelection.modelOptionsWithCurrent(this.settings.modelOptions, selected, this.unlistedEndpoints)
+				.filter(option => selected.includes(option.id))
+		},
+		qualifiedCurrentModel() {
+			const current = this.formData.model
+			if (!current || modelSelection.splitModelReference(current)) return []
+			const providers = this.modelProviders.filter(provider => provider.status && provider.status !== 'unconfigured').map(provider => provider.id)
+			return (providers.length > 0 ? providers : ['primary']).map(provider => `${provider}:${current}`)
+		},
+		unlistedEndpoints() {
+			return modelSelection.unlistedModelEndpoints(this.modelProviders)
 		},
 		isPersonalBot() {
 			return this.formData.visibility === 'personal'
@@ -1000,6 +1010,7 @@ export default {
 				selectedTools: [],
 				onboardingQuestions,
 			}
+			this.initialModel = this.formData.model
 			this.loadBotTools()
 			this.loadRagSources()
 		}
@@ -1069,89 +1080,53 @@ export default {
 				this.settings.allowMultipleModels = !!data.allow_multiple_models
 				this.settings.allowedModels = Array.isArray(data.allowed_models) ? data.allowed_models : []
 				this.settings.secondaryEndpointEnabled = !!(data.secondary_api_endpoint || '').trim()
-				if (this.settings.allowMultipleModels || this.settings.secondaryEndpointEnabled) {
-					await this.loadModelOptions()
-				}
-				if (this.formData.model) {
-					this.formData.model = this.toEndpointModelId(this.formData.model)
-				} else if (this.selectableModelOptions.length > 0) {
-					this.formData.model = this.selectableModelOptions[0].id
-				}
+				await this.loadModelOptions()
 			} catch (e) {
-				// ignore
+				this.modelLoadError = t('educai', 'Could not load model settings. The saved selection has been preserved.')
 			}
 		},
 		async loadModelOptions() {
 			try {
 				const response = await axios.get(generateUrl('/apps/educai/api/v1/models'))
-				this.settings.modelOptions = this.normalizeModelOptions(response.data?.model_options, response.data?.models)
+				this.settings.modelOptions = modelSelection.normalizeModelOptions(response.data?.model_options, response.data?.models)
+				this.modelProviders = Array.isArray(response.data?.providers) ? response.data.providers : []
+				this.modelLoadError = this.modelProviders.some(provider => ['stale', 'error'].includes(provider.status))
+					? t('educai', 'Some provider catalogues could not be updated. Saved model choices are still available.')
+					: ''
+				await this.refreshSavedModelBindings()
 			} catch (e) {
-				this.settings.modelOptions = []
+				this.settings.modelOptions = this.settings.modelOptions.map(option => ({ ...option, availability: 'stale' }))
+				this.modelLoadError = t('educai', 'Could not update the model catalogue. Saved model choices are still available.')
+			}
+		},
+		async refreshSavedModelBindings() {
+			if (this.settings.allowedModels.some(value => value && !modelSelection.splitModelReference(value))) {
+				try {
+					const response = await axios.get(generateUrl('/apps/educai/api/v1/settings'))
+					this.settings.allowedModels = modelSelection.adoptSavedModelBindings(this.settings.allowedModels, response.data.allowed_models)
+				} catch (error) {
+					// The existing allowlist remains usable if reconciliation is unavailable.
+				}
+			}
+			if (!this.bot?.id || !this.initialModel || modelSelection.splitModelReference(this.initialModel) || this.formData.model !== this.initialModel) return
+			try {
+				const admin = this.userPermissions?.isAdmin
+				const response = await axios.get(generateUrl(admin ? '/apps/educai/api/v1/admin/bots' : `/apps/educai/api/v1/bots/${this.bot.id}`))
+				const saved = admin ? response.data.find(bot => bot.id === this.bot.id) : response.data
+				const model = saved?.has_pending_changes && saved?.pending_changes?.model !== undefined ? saved.pending_changes.model : saved?.model
+				if (this.formData.model === this.initialModel) {
+					this.formData.model = modelSelection.adoptSavedModelBinding(this.formData.model, model)
+					this.initialModel = this.formData.model
+				}
+			} catch (error) {
+				// A binding is adopted only after it is confirmed by saved server state.
 			}
 		},
 		toEndpointModelId(model) {
-			const value = (model || '').trim()
-			if (value === '') {
-				return ''
-			}
-			if (/^(primary|secondary):/.test(value)) {
-				return value
-			}
-			const matches = this.settings.modelOptions.filter((option) => option.model === value)
-			return matches.length === 1 ? matches[0].id : `primary:${value}`
+			return modelSelection.modelReference(model)
 		},
 		toStoredModelReference(model) {
-			const id = this.toEndpointModelId(model)
-			if (id === '') {
-				return ''
-			}
-			const rawModel = id.replace(/^(primary|secondary):/, '')
-			const matches = this.settings.modelOptions.filter((option) => option.model === rawModel)
-			return matches.length > 1 ? id : rawModel
-		},
-		normalizeModelOptions(rawOptions, rawModels) {
-			if (Array.isArray(rawOptions) && rawOptions.length > 0) {
-				return rawOptions
-					.filter((option) => option && option.id && option.model)
-					.map((option) => ({
-						id: String(option.id),
-						label: option.label || this.modelLabel(option.id),
-						model: String(option.model),
-						endpoint: option.endpoint === 'secondary' ? 'secondary' : 'primary',
-					}))
-			}
-
-			return Array.isArray(rawModels)
-				? rawModels.map((model) => this.findOrCreateModelOption(model))
-				: []
-		},
-		findOrCreateModelOption(model) {
-			const id = this.toEndpointModelId(model)
-			if (id === '') {
-				return null
-			}
-			const found = this.settings.modelOptions.find((option) => option.id === id)
-			if (found) {
-				return found
-			}
-			const endpoint = id.startsWith('secondary:') ? 'secondary' : 'primary'
-			return {
-				id,
-				label: this.modelLabel(id),
-				model: id.replace(/^(primary|secondary):/, ''),
-				endpoint,
-			}
-		},
-		modelLabel(model) {
-			const id = this.toEndpointModelId(model)
-			if (id === '') {
-				return ''
-			}
-			const modelName = id.replace(/^(primary|secondary):/, '')
-			if (id.startsWith('secondary:')) {
-				return t('educai', 'Secondary · {model}', { model: modelName })
-			}
-			return t('educai', 'Primary · {model}', { model: modelName })
+			return modelSelection.modelReference(model)
 		},
 		normalizeTemperatureValue(value) {
 			if (value === null || value === undefined || value === '') {
@@ -1886,7 +1861,7 @@ export default {
 				visibility: this.formData.visibility,
 				allowedGroups: this.formData.visibility === 'groups' ? this.formData.allowedGroups : [],
 				allowedTeams: this.formData.visibility === 'teams' ? this.formData.allowedTeams : [],
-				model: this.selectableModelOptions.length > 0 ? this.toStoredModelReference(this.formData.model) : undefined,
+				model: this.toStoredModelReference(this.formData.model) || (this.bot?.id ? '' : null),
 				temperature: this.formData.useCustomTemperature ? this.normalizeTemperatureValue(this.formData.temperature) : null,
 				ragEnabled: this.formData.ragEnabled,
 				tools: toolPayload,
@@ -2043,13 +2018,13 @@ export default {
 }
 
 .button.primary {
-	background-color: var(--color-primary);
-	color: white;
-	border-color: var(--color-primary);
+	background-color: var(--color-primary-element);
+	color: var(--color-primary-element-text);
+	border-color: var(--color-primary-element);
 }
 
 .button.primary:hover {
-	background-color: var(--color-primary-element-light);
+	background-color: var(--color-primary-element-hover);
 }
 
 /* Align checkbox with label text and standardize size */
@@ -2152,19 +2127,20 @@ export default {
 	text-transform: uppercase;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .status-ready {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .status-pending {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .status-error {
-	background: var(--color-error);
-	color: #fff;
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
+	color: var(--color-error-text);
 }
 
 .source-meta {
@@ -2174,7 +2150,7 @@ export default {
 }
 
 .source-meta.source-error {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 
 .source-actions {
@@ -2250,7 +2226,7 @@ export default {
 }
 
 .tool-unavailable {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 
 .tool-endpoint {
@@ -2374,8 +2350,8 @@ export default {
 	gap: 8px;
 	margin-top: 10px;
 	padding: 10px 14px;
-	background: var(--color-warning-light, #fff3cd);
-	border: 1px solid var(--color-warning);
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	border: 1px solid var(--color-element-warning, var(--color-warning));
 	border-radius: 6px;
 	font-size: 13px;
 	color: var(--color-warning-text, #856404);
@@ -2459,7 +2435,7 @@ export default {
 
 .question-badge {
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 2px 8px;
 	border-radius: 4px;
 	font-size: 12px;
@@ -2569,7 +2545,7 @@ select.answer-next {
 
 .inline-error {
 	margin: 0;
-	color: var(--color-error);
+	color: var(--color-error-text);
 	font-size: 13px;
 	font-weight: 600;
 }
@@ -2577,8 +2553,8 @@ select.answer-next {
 .onboarding-error {
 	margin-top: 12px;
 	padding: 10px 14px;
-	background: var(--color-error-light, #fdecea);
-	border: 1px solid color-mix(in srgb, var(--color-error, #b91c1c) 65%, #000 35%);
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
+	border: 1px solid var(--color-element-error, var(--color-error));
 	border-radius: 6px;
 	font-size: 13px;
 	color: var(--color-main-text, #111);

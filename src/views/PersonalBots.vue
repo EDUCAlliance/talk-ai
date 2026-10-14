@@ -631,13 +631,9 @@ export default {
 
 .button:hover { background: var(--color-background-hover); }
 
-.button.primary { background-color: var(--color-primary); color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 14px; }
+.button.primary { background-color: var(--color-primary-element); color: var(--color-primary-element-text); border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 14px; }
 
-.button.primary:hover { background-color: var(--color-primary-element-light); }
-
-.button.error { color: var(--color-error); }
-
-.button.error:hover { background: var(--color-error); color: white; border-color: var(--color-error); }
+.button.primary:hover { background-color: var(--color-primary-element-hover); }
 
 /* Approval Section */
 .approval-section {
@@ -659,9 +655,10 @@ export default {
 	font-weight: 600;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .section-header .badge {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 	padding: 2px 10px;
 	border-radius: 12px;
 	font-size: 13px;
@@ -707,7 +704,7 @@ export default {
 .approval-info .mention-badge {
 	display: inline-block;
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 2px 10px;
 	border-radius: 10px;
 	font-size: 12px;
@@ -733,18 +730,18 @@ export default {
 }
 
 .visibility-badge.global {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .visibility-badge.teams {
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .visibility-badge.groups {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .visibility-badge.personal {
@@ -759,7 +756,7 @@ export default {
 	font-size: 11px;
 	font-weight: 600;
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 	margin-inline-start: 6px;
 }
 
@@ -769,8 +766,8 @@ export default {
 	border-radius: 10px;
 	font-size: 11px;
 	font-weight: 600;
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 	margin-inline-start: 6px;
 }
 
@@ -930,6 +927,6 @@ export default {
 }
 
 .error-text {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 </style>

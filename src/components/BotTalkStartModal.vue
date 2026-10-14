@@ -321,7 +321,7 @@ export default {
 .mention-badge {
 	display: inline-block;
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 	padding: 4px 12px;
 	border-radius: 16px;
 	font-size: 14px;
@@ -381,7 +381,7 @@ export default {
 
 .mode-tab.active {
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .form-section {
@@ -454,15 +454,16 @@ textarea {
 	gap: 8px;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .error-state {
-	background: var(--color-error-hover);
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
 	color: var(--color-error-text);
-	border: 1px solid var(--color-error);
+	border: 1px solid var(--color-element-error, var(--color-error));
 }
 
 .warning-state {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .room-list {
@@ -574,11 +575,11 @@ textarea {
 .button.primary {
 	background: var(--color-primary-element);
 	border-color: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .button.primary:hover:not(:disabled) {
-	background: var(--color-primary-element-light);
+	background: var(--color-primary-element-hover);
 }
 
 .button:disabled {

@@ -430,4 +430,18 @@ class CatalogueClient {
 			'error' => null,
 		];
 	}
+
+	/** @return array{fingerprint: ?string, summary: ?string} */
+	public function connectionCheckTarget(?string $endpoint = null): array {
+		try {
+			$resolved = rtrim(trim($endpoint ?? $this->getEndpoint()), '/');
+		} catch (\Throwable $e) {
+			return ['fingerprint' => null, 'summary' => null];
+		}
+
+		return [
+			'fingerprint' => ConnectionCheckStore::fingerprint('catalogue', [$resolved], null),
+			'summary' => null,
+		];
+	}
 }

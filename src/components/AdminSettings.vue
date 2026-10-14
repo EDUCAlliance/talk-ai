@@ -1,1509 +1,164 @@
 <template>
-	<!-- eslint-disable vue/html-indent, vue/singleline-html-element-content-newline -->
-	<div class="admin-settings">
-		<h3 class="settings-title">
-			<span class="icon-settings" />
-			{{ t('educai', 'Administrator Settings') }}
-		</h3>
-
-		<form class="settings-body" autocomplete="off" @submit.prevent="saveSettings">
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('appearance') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('appearance'))"
-					:aria-controls="sectionId('appearance')"
-					@click="toggleSection('appearance')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Appearance') }}</span>
-						<span class="accordion-description">{{ t('educai', 'App icon variants for settings and navigation surfaces.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ appIconSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('appearance')"
-					:id="sectionId('appearance')"
-					class="accordion-panel">
-					<div class="app-icon-config">
-						<div class="icon-mode-tabs" :aria-label="t('educai', 'App icon mode')">
-							<button
-								type="button"
-								class="icon-mode-tab"
-								:class="{ 'icon-mode-tab--active': settings.appIconMode === 'default' }"
-								@click="setAppIconMode('default')">
-								{{ t('educai', 'Default') }}
-							</button>
-							<button
-								type="button"
-								class="icon-mode-tab"
-								:class="{ 'icon-mode-tab--active': settings.appIconMode === 'custom' }"
-								@click="setAppIconMode('custom')">
-								{{ t('educai', 'Custom') }}
-							</button>
-						</div>
-
-						<div class="app-icon-preview-grid">
-							<div class="app-icon-preview-card app-icon-preview-card--light">
-								<span class="app-icon-preview-card__label">{{ t('educai', 'Black on light') }}</span>
-								<span class="app-icon-preview-card__frame">
-									<img
-										v-if="appIconBlackPreviewUrl"
-										:src="appIconBlackPreviewUrl"
-									:alt="t('educai', '{name} black app icon preview', { name: APP_DISPLAY_NAME })">
-									<span v-else class="app-icon-preview-card__missing">{{ t('educai', 'Missing') }}</span>
-								</span>
-							</div>
-							<div class="app-icon-preview-card app-icon-preview-card--dark">
-								<span class="app-icon-preview-card__label">{{ t('educai', 'White on dark') }}</span>
-								<span class="app-icon-preview-card__frame">
-									<img
-										v-if="appIconWhitePreviewUrl"
-										:src="appIconWhitePreviewUrl"
-									:alt="t('educai', '{name} white app icon preview', { name: APP_DISPLAY_NAME })">
-									<span v-else class="app-icon-preview-card__missing">{{ t('educai', 'Missing') }}</span>
-								</span>
-							</div>
-						</div>
-
-						<div v-if="settings.appIconMode === 'default'" class="app-icon-mode-panel">
-							<p class="hint">
-								{{ t('educai', 'Uses the bundled {name} icon pair: dark icon for light settings surfaces, white icon for app navigation.', { name: APP_DISPLAY_NAME }) }}
-							</p>
-						</div>
-
-						<div v-else class="app-icon-mode-panel">
-							<div class="form-grid">
-								<div class="form-group">
-									<label for="app-icon-black-url">{{ t('educai', 'Black icon') }}</label>
-									<div class="app-icon-input-row">
-										<input
-											id="app-icon-black-url"
-											v-model="settings.appIconBlackUrl"
-											type="text"
-											name="educai-app-icon-black-url"
-											autocomplete="off"
-											placeholder="https://example.org/educai-black.svg or /apps/theming/img/educai-black.svg">
-										<button
-											type="button"
-											class="button"
-											:disabled="uploadingAppIconVariant === 'black'"
-											@click="triggerAppIconUpload('black')">
-										{{ uploadingAppIconVariant === 'black' ? t('educai', 'Uploading...') : t('educai', 'Upload SVG') }}
-										</button>
-										<input
-											ref="appIconBlackFileInput"
-											class="app-icon-file-input"
-											type="file"
-											accept="image/svg+xml,.svg"
-											@change="uploadAppIconSvg('black', $event)">
-									</div>
-									<p class="hint">
-										{{ t('educai', 'Used on light settings surfaces. Enter a URL/path or upload an SVG from your computer.') }}
-									</p>
-								</div>
-								<div class="form-group">
-									<label for="app-icon-white-url">{{ t('educai', 'White icon') }}</label>
-									<div class="app-icon-input-row">
-										<input
-											id="app-icon-white-url"
-											v-model="settings.appIconWhiteUrl"
-											type="text"
-											name="educai-app-icon-white-url"
-											autocomplete="off"
-											placeholder="https://example.org/educai-white.svg or /apps/theming/img/educai-white.svg">
-										<button
-											type="button"
-											class="button"
-											:disabled="uploadingAppIconVariant === 'white'"
-											@click="triggerAppIconUpload('white')">
-										{{ uploadingAppIconVariant === 'white' ? t('educai', 'Uploading...') : t('educai', 'Upload SVG') }}
-										</button>
-										<input
-											ref="appIconWhiteFileInput"
-											class="app-icon-file-input"
-											type="file"
-											accept="image/svg+xml,.svg"
-											@change="uploadAppIconSvg('white', $event)">
-									</div>
-									<p class="hint">
-										{{ t('educai', 'Used in the dark app navigation/header context. Enter a URL/path or upload an SVG from your computer.') }}
-									</p>
-								</div>
-							</div>
-						</div>
-
-						<div class="button-row app-icon-actions">
-							<button type="button" class="button" @click="resetAppIconConfig">
-								{{ t('educai', 'Reset to default icon') }}
-							</button>
-						</div>
-					</div>
-				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('essentials') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('essentials'))"
-					:aria-controls="sectionId('essentials')"
-					@click="toggleSection('essentials')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Essentials') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Default creativity and Talk webhook secret.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ essentialsSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('essentials')"
-					:id="sectionId('essentials')"
-					class="accordion-panel">
-					<div class="form-group">
-						<label for="default-temperature">{{ t('educai', 'Default Temperature') }}</label>
-						<input
-							id="default-temperature"
-							v-model.number="settings.defaultTemperature"
-							type="number"
-							min="0"
-							max="1"
-							step="0.01"
-							placeholder="0.20">
-						<p class="hint">
-							{{ t('educai', 'Controls how deterministic or creative bots are by default. Lower values are better for agentic, tool-using, RAG, and workflow bots. Higher values can be useful for creative writing or brainstorming bots.') }}
-						</p>
-						<div class="temperature-presets">
-							<button type="button" class="button" @click="applyDefaultTemperaturePreset(0.2)">
-								{{ t('educai', 'Precise {temperature}', { temperature: formatTemperature(0.2) }) }}
-							</button>
-							<button type="button" class="button" @click="applyDefaultTemperaturePreset(0.4)">
-								{{ t('educai', 'Balanced {temperature}', { temperature: formatTemperature(0.4) }) }}
-							</button>
-							<button type="button" class="button" @click="applyDefaultTemperaturePreset(0.6)">
-								{{ t('educai', 'Creative {temperature}', { temperature: formatTemperature(0.6) }) }}
-							</button>
-						</div>
-					</div>
-
-					<div class="form-group">
-						<label for="webhook-secret">{{ t('educai', 'Webhook Secret') }}</label>
-						<input
-							id="webhook-secret"
-							v-model="settings.webhookSecret"
-							type="password"
-							name="educai-webhook-secret"
-							autocomplete="new-password"
-							placeholder="your-webhook-secret">
-						<p class="hint">
-							{{ t('educai', 'Secret used to verify webhook requests from Nextcloud Talk.') }}
-						</p>
-					</div>
-				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('modelEndpoints') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('modelEndpoints'))"
-					:aria-controls="sectionId('modelEndpoints')"
-					@click="toggleSection('modelEndpoints')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Model Endpoints') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Primary and optional secondary OpenAI-compatible providers.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ modelEndpointsSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('modelEndpoints')"
-					:id="sectionId('modelEndpoints')"
-					class="accordion-panel">
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Primary Endpoint') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Used for existing raw model names and as the default provider.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-						<label for="api-endpoint">{{ t('educai', 'Primary API Endpoint') }}</label>
-						<input
-							id="api-endpoint"
-							v-model="settings.apiEndpoint"
-							type="url"
-							name="educai-api-endpoint"
-							autocomplete="off"
-							placeholder="https://chat-ai.academiccloud.de/v1/chat/completions"
-							required>
-						<p class="hint">
-							{{ t('educai', 'AcademicCloud (GWDG) or OpenAI-compatible API endpoint URL.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-						<label for="api-key">{{ t('educai', 'Primary API Key') }}</label>
-						<input
-							id="api-key"
-							v-model="settings.apiKey"
-							type="password"
-							name="educai-api-key"
-							autocomplete="new-password"
-							placeholder="sk-...">
-						<p class="hint">
-							{{ t('educai', 'Used for primary endpoint requests. Stored securely and never displayed back.') }}
-						</p>
-					</div>
-
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Secondary Endpoint') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Optional. When configured, bots can choose models from both endpoints.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-						<label for="secondary-api-endpoint">{{ t('educai', 'Secondary API Endpoint') }}</label>
-						<input
-							id="secondary-api-endpoint"
-							v-model="settings.secondaryApiEndpoint"
-							type="url"
-							name="educai-secondary-api-endpoint"
-							autocomplete="off"
-							placeholder="https://example.org/v1/chat/completions">
-					</div>
-
-					<div class="form-group">
-						<label for="secondary-api-key">{{ t('educai', 'Secondary API Key') }}</label>
-						<input
-							id="secondary-api-key"
-							v-model="settings.secondaryApiKey"
-							type="password"
-							name="educai-secondary-api-key"
-							autocomplete="new-password"
-							placeholder="sk-...">
-						<p class="hint">
-							{{ t('educai', 'Leave blank to keep an already stored secondary key.') }}
-						</p>
-					</div>
-
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Model Selection') }}</h4>
-					</div>
-
-					<div class="form-group">
-						<label for="default-model">{{ t('educai', 'Default Model') }}</label>
-						<select
-							v-if="availableModelOptions.length > 0"
-							id="default-model"
-							v-model="settings.defaultModel"
-							:disabled="settings.allowMultipleModels">
-							<option
-								v-for="option in availableModelOptionsWithCurrent(settings.defaultModel)"
-								:key="option.id"
-								:value="option.id">
-								{{ option.label }}
-							</option>
-						</select>
-						<input
-							v-else
-							id="default-model"
-							v-model="settings.defaultModel"
-							type="text"
-							:disabled="settings.allowMultipleModels"
-							placeholder="primary:llama-3.3-70b-instruct">
-						<p v-if="settings.allowMultipleModels" class="hint">
-							{{ t('educai', 'Disabled because Multiple Models mode is enabled.') }}
-						</p>
-						<p v-else class="hint">
-							{{ t('educai', 'Legacy unprefixed model names continue to use the primary endpoint.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-						<label class="checkbox">
-							<input
-								v-model="settings.allowMultipleModels"
-								type="checkbox"
-								@change="onToggleMultiple">
-							{{ t('educai', 'Allow Multiple Models (per-bot selection)') }}
-						</label>
-						<p class="hint">
-							{{ t('educai', 'If enabled, choose which models are available for bots. Users will select one when creating a bot.') }}
-						</p>
-					</div>
-
-					<div v-if="settings.allowMultipleModels" class="form-group">
-						<label>{{ t('educai', 'Allowed Models') }}</label>
-						<div v-if="loadingModels" class="hint">
-							{{ t('educai', 'Loading models…') }}
-						</div>
-						<div v-else>
-							<div v-if="modelLoadError" class="hint" style="color:var(--color-error)">
-								{{ modelLoadError }}
-							</div>
-							<div v-if="availableModelOptions.length === 0" class="hint">
-								{{ t('educai', 'No models loaded.') }}
-								<button
-									type="button"
-									class="button"
-									@click="loadModels">
-									{{ t('educai', 'Load models') }}
-								</button>
-							</div>
-							<select
-								v-model="settings.allowedModels"
-								multiple
-								:size="modelSelectSize">
-								<option
-									v-for="option in availableModelOptionsWithCurrent(settings.allowedModels)"
-									:key="option.id"
-									:value="option.id">
-									{{ option.label }}
-								</option>
-							</select>
-							<p class="hint">
-								{{ t('educai', 'Hold Cmd/Ctrl to select multiple. Save after selection.') }}
-							</p>
-						</div>
-					</div>
-				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('outputLimits') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('outputLimits'))"
-					:aria-controls="sectionId('outputLimits')"
-					@click="toggleSection('outputLimits')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Response Limits') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Output budget per model response, separate from conversation memory.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ formatNumber(settings.maxOutputTokens) }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('outputLimits')"
-					:id="sectionId('outputLimits')"
-					class="accordion-panel">
-					<div class="form-group">
-						<label for="max-output-tokens">{{ t('educai', 'Maximum output tokens') }}</label>
-						<input
-							id="max-output-tokens"
-							v-model.number="settings.maxOutputTokens"
-							type="number"
-							min="1"
-							max="131072"
-							step="1">
-						<p class="hint">
-							{{ t('educai', 'Default: 32768. Reasoning models share this budget. Higher limits may increase response time and cost. Reported model limits can reduce the effective budget. Reload models to refresh those limits; use an override for providers that do not report them.') }}
-						</p>
-					</div>
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Model-specific output limits') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Optional overrides match the exact model reference, including primary: or secondary:. Other models use the default above.') }}
-						</p>
-					</div>
-					<button
-						type="button"
-						class="button"
-						:disabled="loadingModels"
-						@click="loadModels">
-						{{ t('educai', 'Reload models') }}
-					</button>
-					<p v-if="modelLoadError" class="hint" role="alert">{{ modelLoadError }}</p>
-					<datalist id="output-limit-models">
-						<option
-							v-for="option in availableModelOptionsWithCurrent([settings.defaultModel, settings.fallbackModel])"
-							:key="option.id"
-							:value="option.id">
-							{{ option.label }}
-						</option>
-					</datalist>
-					<div
-						v-for="(override, index) in outputTokenOverrides"
-						:key="index"
-						class="output-token-limit-row">
-						<div class="form-group">
-							<label :for="`output-limit-model-${index}`">{{ t('educai', 'Model reference') }}</label>
-							<input
-								:id="`output-limit-model-${index}`"
-								v-model="override.model"
-								type="text"
-								list="output-limit-models"
-								maxlength="512"
-								placeholder="primary:model-name">
-						</div>
-						<div class="form-group">
-							<label :for="`output-limit-tokens-${index}`">{{ t('educai', 'Maximum output tokens') }}</label>
-							<input
-								:id="`output-limit-tokens-${index}`"
-								v-model.number="override.tokens"
-								type="number"
-								min="1"
-								max="131072"
-								step="1">
-						</div>
-						<button
-							type="button"
-							class="button"
-							:aria-label="t('educai', 'Remove model override')"
-							@click="outputTokenOverrides.splice(index, 1)">
-							{{ t('educai', 'Remove') }}
-						</button>
-					</div>
-					<button type="button" class="button" @click="addOutputTokenOverride">
-						{{ t('educai', 'Add model override') }}
-					</button>
-				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('fallbackTimeouts') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('fallbackTimeouts'))"
-					:aria-controls="sectionId('fallbackTimeouts')"
-					@click="toggleSection('fallbackTimeouts')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Fallback & Timeouts') }}</span>
-						<span class="accordion-description">{{ t('educai', 'One retry model and LLM request time limits.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ fallbackTimeoutSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('fallbackTimeouts')"
-					:id="sectionId('fallbackTimeouts')"
-					class="accordion-panel">
-					<div class="form-group">
-						<label for="fallback-model">{{ t('educai', 'Fallback Model') }}</label>
-						<select
-							v-if="availableModelOptions.length > 0"
-							id="fallback-model"
-							v-model="settings.fallbackModel">
-							<option value="">{{ t('educai', 'No fallback') }}</option>
-							<option
-								v-for="option in availableModelOptionsWithCurrent(settings.fallbackModel)"
-								:key="option.id"
-								:value="option.id">
-								{{ option.label }}
-							</option>
-						</select>
-						<input
-							v-else
-							id="fallback-model"
-							v-model="settings.fallbackModel"
-							type="text"
-							placeholder="secondary:qwen3-coder-next">
-						<p class="hint">
-							{{ t('educai', 'Used once after timeout or connection failures before the request fails finally.') }}
-						</p>
-					</div>
-
-					<div class="form-grid form-grid--three">
-						<div class="form-group">
-							<label for="llm-chat-timeout">{{ t('educai', 'Chat Timeout (seconds)') }}</label>
-							<input
-								id="llm-chat-timeout"
-								v-model.number="settings.llmChatTimeout"
-								type="number"
-								min="1"
-								step="1">
-							<p class="hint">
-								{{ t('educai', 'Maximum time to wait for a regular, non-streaming LLM response.') }}
-							</p>
-						</div>
-						<div class="form-group">
-							<label for="llm-stream-timeout">{{ t('educai', 'Streaming Timeout (seconds)') }}</label>
-							<input
-								id="llm-stream-timeout"
-								v-model.number="settings.llmStreamTimeout"
-								type="number"
-								min="1"
-								step="1">
-							<p class="hint">
-								{{ t('educai', 'Maximum time to keep a streaming response open while the model is generating.') }}
-							</p>
-						</div>
-						<div class="form-group">
-							<label for="llm-models-timeout">{{ t('educai', 'Model-List Timeout (seconds)') }}</label>
-							<input
-								id="llm-models-timeout"
-								v-model.number="settings.llmModelsTimeout"
-								type="number"
-								min="1"
-								step="1">
-						</div>
-					</div>
-				</div>
-			</section>
-
-			<section ref="embeddingSettings"
-class="accordion-section"
-tabindex="-1"
-:class="{ 'accordion-section--open': isSectionOpen('rag') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('rag'))"
-					:aria-controls="sectionId('rag')"
-					@click="toggleSection('rag')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Embeddings / Knowledge sources') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Reindex all sources, monitor progress and configure embeddings.') }}</span>
-					</span>
-					<span class="accordion-meta" :class="{ 'accordion-meta--warning': hasPendingEmbeddingConfigChange }">
-						{{ ragSummary }}
-					</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('rag')"
-					:id="sectionId('rag')"
-					class="accordion-panel">
-					<EmbeddingMaintenance
-						:pending-changes="hasPendingIndexSettings"
-						:saving="saving"
-						:active="isSectionOpen('rag')"
-						:refresh-key="indexRefreshKey"
-						@save-settings="saveSettings" />
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Retrieval-Augmented Generation') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Configure embeddings and chunking parameters used when bots index Nextcloud files.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-				<label class="checkbox">
-					<input
-						v-model="settings.ragEnabled"
-						type="checkbox">
-					{{ t('educai', 'Enable Retrieval-Augmented Generation') }}
-				</label>
-				<p class="hint">
-					{{ t('educai', 'When enabled, bots can index approved files and surface relevant snippets in conversations.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="embedding-endpoint">{{ t('educai', 'Embedding API Endpoint') }}</label>
-				<input
-					id="embedding-endpoint"
-					v-model="settings.embeddingApiEndpoint"
-					type="url"
-					name="educai-embedding-endpoint"
-					autocomplete="off"
-					placeholder="https://chat-ai.academiccloud.de/v1/embeddings">
-				<p class="hint">
-					{{ t('educai', 'Optional. Leave blank to reuse the chat completion endpoint.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="embedding-key">{{ t('educai', 'Embedding API Key') }}</label>
-				<input
-					id="embedding-key"
-					v-model="settings.embeddingApiKey"
-					type="password"
-					name="educai-embedding-key"
-					autocomplete="new-password"
-					placeholder="sk-...">
-				<p class="hint">
-					{{ t('educai', 'Optional. Provide only if embeddings require a different credential. Stored securely and never displayed back.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="embedding-model">{{ t('educai', 'Embedding Model') }}</label>
-				<input
-					id="embedding-model"
-					v-model="settings.embeddingModel"
-					type="text"
-					placeholder="multilingual-e5-large-instruct">
-				<p class="hint">
-					{{ t('educai', 'Set the provider-specific embedding model identifier (e.g., multilingual-e5-large-instruct, e5-mistral-7b-instruct).') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="embedding-rate-limit-mode">{{ t('educai', 'Embedding Rate Limit Mode') }}</label>
-				<select
-					id="embedding-rate-limit-mode"
-					v-model="settings.embeddingRateLimitMode">
-					<option value="inherit">
-						{{ t('educai', 'Inherit Chat Limits') }}
-					</option>
-					<option value="disabled">
-						{{ t('educai', 'Disabled') }}
-					</option>
-					<option value="custom">
-						{{ t('educai', 'Custom') }}
-					</option>
-				</select>
-				<p class="hint">
-					{{ t('educai', 'Use "inherit" to follow chat queue limits, "disabled" for self-hosted embedding endpoints without throttling, or "custom" for dedicated embedding quotas.') }}
-				</p>
-			</div>
-
-			<div v-if="settings.embeddingRateLimitMode === 'custom'" class="form-grid">
-				<div class="form-group">
-					<label for="embedding-rate-limit-second">{{ t('educai', 'Embedding Requests per Second') }}</label>
-					<input
-						id="embedding-rate-limit-second"
-						v-model.number="settings.embeddingRateLimitSecond"
-						type="number"
-						min="1"
-						:placeholder="t('educai', 'Optional')">
-					<p class="hint">
-						{{ t('educai', 'Optional. Leave blank if the embedding provider does not expose second-level headers.') }}
-					</p>
-				</div>
-				<div class="form-group">
-					<label for="embedding-rate-limit-minute">{{ t('educai', 'Embedding Requests per Minute') }}</label>
-					<input
-						id="embedding-rate-limit-minute"
-						v-model.number="settings.embeddingRateLimitMinute"
-						type="number"
-						min="1"
-						placeholder="100">
-					<p class="hint">
-						{{ t('educai', 'Default for GWDG embeddings: 100/minute.') }}
-					</p>
-				</div>
-				<div class="form-group">
-					<label for="embedding-rate-limit-hour">{{ t('educai', 'Embedding Requests per Hour') }}</label>
-					<input
-						id="embedding-rate-limit-hour"
-						v-model.number="settings.embeddingRateLimitHour"
-						type="number"
-						min="1"
-						placeholder="2000">
-					<p class="hint">
-						{{ t('educai', 'Default for GWDG embeddings: 2000/hour.') }}
-					</p>
-				</div>
-				<div class="form-group">
-					<label for="embedding-rate-limit-day">{{ t('educai', 'Embedding Requests per Day') }}</label>
-					<input
-						id="embedding-rate-limit-day"
-						v-model.number="settings.embeddingRateLimitDay"
-						type="number"
-						min="1"
-						placeholder="4000">
-					<p class="hint">
-						{{ t('educai', 'Default for GWDG embeddings: 4000/day.') }}
-					</p>
+	<div class="educai-admin">
+		<header class="educai-admin__head">
+			<div class="educai-admin__title">
+				<span class="educai-admin__app" aria-hidden="true">
+					<img v-if="appIconWhitePreviewUrl" :src="appIconWhitePreviewUrl" alt="">
+				</span>
+				<div>
+					<h2>{{ APP_DISPLAY_NAME }}</h2>
+					<p>{{ t('educai', 'Administration · Bots, models and knowledge sources for Nextcloud Talk') }}</p>
 				</div>
 			</div>
-			<div v-if="hasPendingEmbeddingConfigChange" class="embedding-warning">
-				<strong>{{ t('educai', 'Embedding settings changed.') }}</strong>
-				<p>
-					{{ t('educai', 'Save first, then run "Reindex All Embeddings" to rebuild bot vectors for the active embedding model.') }}
-				</p>
-			</div>
+			<a class="educai-admin__doc"
+				:href="documentationUrl"
+				target="_blank"
+				rel="noopener noreferrer">{{ t('educai', 'Documentation') }} ↗</a>
+		</header>
 
-			<div class="form-grid">
-				<div class="form-group">
-					<label for="rag-chunk-size">{{ t('educai', 'Chunk Size (tokens)') }}</label>
-					<input
-						id="rag-chunk-size"
-						v-model.number="settings.ragChunkSize"
-						type="number"
-						min="100"
-						step="10"
-						placeholder="750">
-					<p class="hint">
-						{{ t('educai', 'Controls how much text each embedding covers. Larger chunks reduce recall but speed ingestion.') }}
-					</p>
-				</div>
-				<div class="form-group">
-					<label for="rag-chunk-overlap">{{ t('educai', 'Chunk Overlap (tokens)') }}</label>
-					<input
-						id="rag-chunk-overlap"
-						v-model.number="settings.ragChunkOverlap"
-						type="number"
-						min="0"
-						step="5"
-						placeholder="50">
-				<p class="hint">
-					{{ t('educai', 'Overlap provides continuity between adjacent chunks. Increase for long-form documents.') }}
-				</p>
-			</div>
+		<div class="ta-tabs"
+			role="tablist"
+			:aria-label="t('educai', '{app} administration', { app: APP_DISPLAY_NAME })"
+			@keydown="onTabKeydown">
+			<button v-for="tab in adminTabs"
+				:id="`educai-admin-tab-${tab.id}`"
+				:key="tab.id"
+				type="button"
+				role="tab"
+				class="ta-tab"
+				:class="{ 'ta-tab--active': activeTab === tab.id }"
+				:aria-selected="String(activeTab === tab.id)"
+				:aria-controls="`educai-admin-panel-${tab.id}`"
+				:tabindex="activeTab === tab.id ? 0 : -1"
+				@click="setTab(tab.id)">
+				{{ tab.label }}
+				<span v-if="tab.count !== null" class="ta-tab__count">{{ tab.count }}</span>
+				<span v-if="dirtyTabs.includes(tab.id)" class="ta-tab__dot" :title="t('educai', 'Unsaved changes')">
+					<span class="hidden-visually">{{ t('educai', 'Unsaved changes') }}</span>
+				</span>
+			</button>
 		</div>
+
+		<OverviewTab v-show="activeTab === 'overview'"
+			id="educai-admin-panel-overview"
+			role="tabpanel"
+			aria-labelledby="educai-admin-tab-overview" />
+		<ModelsTab v-show="activeTab === 'models'"
+			id="educai-admin-panel-models"
+			role="tabpanel"
+			aria-labelledby="educai-admin-tab-models" />
+		<KnowledgeTab v-show="activeTab === 'knowledge'"
+			id="educai-admin-panel-knowledge"
+			role="tabpanel"
+			aria-labelledby="educai-admin-tab-knowledge" />
+		<CapabilitiesTab v-show="activeTab === 'capabilities'"
+			id="educai-admin-panel-capabilities"
+			role="tabpanel"
+			aria-labelledby="educai-admin-tab-capabilities" />
+		<SystemTab v-show="activeTab === 'system'"
+			id="educai-admin-panel-system"
+			role="tabpanel"
+			aria-labelledby="educai-admin-tab-system" />
+		<BotsTab v-show="activeTab === 'bots'"
+			id="educai-admin-panel-bots"
+			role="tabpanel"
+			aria-labelledby="educai-admin-tab-bots" />
+
+		<datalist id="educai-primary-models">
+			<option v-for="model in primaryModelIds" :key="model" :value="model" />
+		</datalist>
+
+		<SaveBar v-if="hasUnsavedChanges"
+			:labels="unsavedLabels"
+			:saving="saving"
+			@save="saveSettings"
+			@discard="discardChanges" />
+
+		<AdminDialog v-if="toolFormVisible"
+			id="educai-tool-dialog"
+			:title="toolForm.id ? t('educai', 'Edit Tool') : t('educai', 'Register Tool')"
+			@close="closeToolForm">
+			<form class="ta-dialog-form" @submit.prevent="saveTool">
+				<div class="ta-field">
+					<label for="tool-name" class="ta-label">{{ t('educai', 'Tool Name') }}</label>
+					<input id="tool-name"
+						v-model="toolForm.name"
+						class="ta-input"
+						type="text"
+						required>
 				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('catalogue') }">
-				<button type="button"
-class="accordion-header"
-:aria-expanded="String(isSectionOpen('catalogue'))"
-:aria-controls="sectionId('catalogue')"
-@click="toggleSection('catalogue')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Course catalogue integration') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Optional course search and catalogue indexing.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ settings.catalogueEnabled ? t('educai', 'Enabled') : t('educai', 'Disabled') }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div v-show="isSectionOpen('catalogue')" :id="sectionId('catalogue')" class="accordion-panel">
-					<div class="form-group">
-						<label class="checkbox"><input v-model="settings.catalogueEnabled" type="checkbox">{{ t('educai', 'Enable course catalogue integration') }}</label>
-						<p class="hint">{{ t('educai', 'Disabled by default. When disabled, catalogue tools and automatic requests are unavailable; saved settings and index data are retained. Branding is configured independently.') }}</p>
-					</div>
-					<div class="form-group">
-						<label for="catalogue-endpoint">{{ t('educai', 'Catalogue API endpoint') }}</label>
-						<input id="catalogue-endpoint"
-v-model="settings.catalogueApiEndpoint"
-type="url"
-placeholder="https://catalogue.example.org/api"
-autocomplete="off">
-					</div>
-					<div class="form-group">
-						<label for="catalogue-interval">{{ t('educai', 'Automatic refresh interval (hours)') }}</label>
-						<input id="catalogue-interval"
-v-model.number="settings.catalogueReindexHours"
-type="number"
-min="1"
-step="1">
-					</div>
-					<button type="button" :disabled="catalogueTesting || !settings.catalogueApiEndpoint.trim()" @click="testCatalogue">{{ catalogueTesting ? t('educai', 'Testing…') : t('educai', 'Test catalogue connection') }}</button>
-					<p v-if="catalogueTestResult" role="status">{{ catalogueTestResult }}</p>
-					<p class="hint">{{ t('educai', 'This test contacts the endpoint entered above without saving or enabling the integration.') }}</p>
-					<button type="button" @click="openIndexMaintenance">{{ t('educai', 'Open index maintenance') }}</button>
+				<div class="ta-field">
+					<label for="tool-endpoint" class="ta-label">{{ t('educai', 'MCP Endpoint URL') }}</label>
+					<input id="tool-endpoint"
+						v-model="toolForm.mcpEndpointUrl"
+						class="ta-input ta-input--mono"
+						type="url"
+						name="educai-mcp-endpoint"
+						autocomplete="off"
+						required>
+					<p class="ta-hint">
+						{{ t('educai', 'HTTP or WebSocket URL exposing the MCP server.') }}
+					</p>
 				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('docling') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('docling'))"
-					:aria-controls="sectionId('docling')"
-					@click="toggleSection('docling')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Document Conversion') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Docling conversion for PDF and Office ingestion.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ doclingSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('docling')"
-					:id="sectionId('docling')"
-					class="accordion-panel">
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Document Conversion (Docling)') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Enable conversion of PDF, DOCX, PPTX and other binary documents to text for RAG ingestion. This uses the Docling API to extract content from documents that cannot be read as plain text.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-				<label class="checkbox">
-					<input
-						v-model="settings.doclingEnabled"
-						type="checkbox">
-					{{ t('educai', 'Enable Document Conversion') }}
+				<div class="ta-field">
+					<label for="tool-description" class="ta-label">{{ t('educai', 'Description') }}</label>
+					<textarea id="tool-description"
+						v-model="toolForm.description"
+						class="ta-input"
+						rows="3"
+						:placeholder="t('educai', 'Short human-readable summary')" />
+				</div>
+				<div class="ta-field">
+					<label for="tool-auth" class="ta-label">{{ t('educai', 'Authentication JSON') }}</label>
+					<textarea id="tool-auth"
+						v-model="toolForm.authentication"
+						class="ta-input ta-input--mono"
+						rows="4"
+						placeholder="{&quot;headers&quot;:{&quot;Authorization&quot;:&quot;Bearer &lt;token&gt;&quot;}}" />
+					<p class="ta-hint">
+						{{ toolHasStoredAuth
+							? t('educai', 'Provide JSON describing auth headers or tokens. Stored credentials are kept unless you enter new values (re-enter to test or rotate).')
+							: t('educai', 'Provide JSON describing auth headers or tokens. Leave blank when no authentication is required.') }}
+					</p>
+				</div>
+				<label class="ta-check">
+					<input v-model="toolForm.enabled" type="checkbox">
+					{{ t('educai', 'Enabled by default') }}
 				</label>
-				<p class="hint">
-					{{ t('educai', 'When enabled, PDF and Office documents attached to bots will be converted to text for indexing.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="docling-profile">{{ t('educai', 'Docling API profile') }}</label>
-				<select id="docling-profile" v-model="settings.doclingApiProfile" @change="changeDoclingProfile">
-					<option value="docling_serve">{{ t('educai', 'Docling Serve (official)') }}</option>
-					<option value="legacy">{{ t('educai', 'AcademicCloud / EDUC (compatibility)') }}</option>
-				</select>
-			</div>
-
-			<div class="form-group">
-				<label for="docling-auth">{{ t('educai', 'Docling authentication') }}</label>
-				<select id="docling-auth" v-model="settings.doclingAuthMode" @change="doclingTestResult = null">
-					<option value="x_api_key">X-Api-Key</option>
-					<option value="bearer">Bearer</option>
-					<option value="none">{{ t('educai', 'No authentication') }}</option>
-				</select>
-			</div>
-
-			<div class="form-group">
-				<label for="docling-endpoint">{{ t('educai', 'Docling API Endpoint') }}</label>
-				<input
-					id="docling-endpoint"
-					v-model="settings.doclingApiEndpoint"
-					type="url"
-					name="educai-docling-endpoint"
-					autocomplete="off"
-					:placeholder="settings.doclingApiProfile === 'docling_serve' ? 'https://docling.example.com/v1/convert/file' : 'https://chat-ai.academiccloud.de/v1/documents/convert'"
-					@input="doclingTestResult = null">
-				<p class="hint">
-					{{ settings.doclingApiProfile === 'docling_serve'
-						? t('educai', 'Enter the server base URL or its /v1/convert/file endpoint, including any reverse-proxy path prefix. The /v1/convert/source endpoint does not accept file uploads.')
-						: t('educai', 'Optional. Leave blank to use the default Academic Cloud endpoint.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="docling-key">{{ t('educai', 'Docling API Key') }}</label>
-				<input
-					id="docling-key"
-					v-model="settings.doclingApiKey"
-					type="password"
-					name="educai-docling-key"
-					autocomplete="new-password"
-					:disabled="settings.doclingAuthMode === 'none'"
-					@input="doclingTestResult = null">
-				<p class="hint">
-					{{ doclingKeyHint }}
-				</p>
-			</div>
-
-			<div class="button-row">
-				<button
-					type="button"
-					class="button"
-					:disabled="doclingTesting"
-					@click="testDoclingConnection">
-					{{ doclingTesting ? t('educai', 'Testing…') : t('educai', 'Test PDF conversion') }}
-				</button>
-				<span v-if="doclingTestResult" :class="doclingTestResult.success ? 'success-text' : 'error-text'">
-					{{ doclingTestResult.success ? t('educai', '✓ Test PDF converted successfully') : t('educai', '✗ {error}', { error: doclingTestResult.error }) }}
-				</span>
-			</div>
-
-			<div class="supported-formats">
-				<p class="hint">
-					<strong>{{ t('educai', 'Supported formats:') }}</strong> PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, PNG, JPG, TIFF, BMP
-				</p>
-			</div>
-				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('media') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('media'))"
-					:aria-controls="sectionId('media')"
-					@click="toggleSection('media')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Media Tools') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Image understanding and speech-to-text models.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ mediaSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('media')"
-					:id="sectionId('media')"
-					class="accordion-panel">
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Image Understanding') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Configure a multimodal model for image attachments uploaded in Nextcloud Talk. Bots only get image understanding when the built-in image tool is enabled for that bot.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-				<label for="vision-endpoint">{{ t('educai', 'Vision API Endpoint') }}</label>
-				<input
-					id="vision-endpoint"
-					v-model="settings.visionApiEndpoint"
-					type="url"
-					name="educai-vision-endpoint"
-					autocomplete="off"
-					placeholder="https://chat-ai.academiccloud.de/v1/chat/completions">
-				<p class="hint">
-					{{ t('educai', 'Optional. Leave blank to reuse the main chat completion endpoint.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="vision-key">{{ t('educai', 'Vision API Key') }}</label>
-				<input
-					id="vision-key"
-					v-model="settings.visionApiKey"
-					type="password"
-					name="educai-vision-key"
-					autocomplete="new-password"
-					placeholder="sk-...">
-				<p class="hint">
-					{{ t('educai', 'Optional. Leave blank to reuse the main API key.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="vision-model">{{ t('educai', 'Vision Model') }}</label>
-				<input
-					id="vision-model"
-					v-model="settings.visionModel"
-					type="text"
-					placeholder="llama-4-scout-17b-16e-instruct">
-				<p class="hint">
-					{{ t('educai', 'Set a model identifier that supports image inputs.') }}
-				</p>
-			</div>
-
-			<div class="button-row">
-				<button
-					type="button"
-					class="button"
-					:disabled="visionTesting"
-					@click="testVisionConnection">
-					{{ visionTesting ? t('educai', 'Testing…') : t('educai', 'Test Vision') }}
-				</button>
-				<span v-if="visionTestResult" :class="visionTestResult.success ? 'success-text' : 'error-text'">
-					{{ visionTestResult.success ? t('educai', '✓ Vision connection successful') : t('educai', '✗ {error}', { error: visionTestResult.error }) }}
-				</span>
-			</div>
-
-			<div class="section-divider" role="presentation" />
-
-			<div class="section-heading">
-				<h4>{{ t('educai', 'Speech To Text') }}</h4>
-				<p class="hint">
-					{{ t('educai', 'Configure a transcription model for audio and voice-message attachments uploaded in Nextcloud Talk. Bots only get this ability when the built-in audio tool is enabled for that bot.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="speech-endpoint">{{ t('educai', 'Speech API Endpoint') }}</label>
-				<input
-					id="speech-endpoint"
-					v-model="settings.speechApiEndpoint"
-					type="url"
-					name="educai-speech-endpoint"
-					autocomplete="off"
-					placeholder="https://chat-ai.academiccloud.de/v1/audio/transcriptions">
-				<p class="hint">
-					{{ t('educai', 'Optional. Leave blank to derive an OpenAI-compatible transcription endpoint from the main chat endpoint.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="speech-key">{{ t('educai', 'Speech API Key') }}</label>
-				<input
-					id="speech-key"
-					v-model="settings.speechApiKey"
-					type="password"
-					name="educai-speech-key"
-					autocomplete="new-password"
-					placeholder="sk-...">
-				<p class="hint">
-					{{ t('educai', 'Optional. Leave blank to reuse the main API key.') }}
-				</p>
-			</div>
-
-			<div class="form-group">
-				<label for="speech-model">{{ t('educai', 'Speech Model') }}</label>
-				<input
-					id="speech-model"
-					v-model="settings.speechModel"
-					type="text"
-					placeholder="whisper-large-v3">
-				<p class="hint">
-					{{ t('educai', 'Set the transcription model identifier, for example a Whisper-compatible model.') }}
-				</p>
-			</div>
-
-			<div class="button-row">
-				<button
-					type="button"
-					class="button"
-					:disabled="speechTesting"
-					@click="testSpeechConnection">
-					{{ speechTesting ? t('educai', 'Testing…') : t('educai', 'Test Speech') }}
-				</button>
-				<span v-if="speechTestResult" :class="speechTestResult.success ? 'success-text' : 'error-text'">
-					{{ speechTestResult.success ? t('educai', '✓ Speech connection successful') : t('educai', '✗ {error}', { error: speechTestResult.error }) }}
-				</span>
-			</div>
-				</div>
-			</section>
-
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('limits') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('limits'))"
-					:aria-controls="sectionId('limits')"
-					@click="toggleSection('limits')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Rate Limits') }}</span>
-						<span class="accordion-description">{{ t('educai', 'LLM queue limits, live counters, and queue processing.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ rateLimitSummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('limits')"
-					:id="sectionId('limits')"
-					class="accordion-panel">
-					<div class="section-heading">
-						<h4>{{ t('educai', 'LLM Rate Limiting Queue') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'When enabled, requests that exceed the LLM provider\'s rate limit will be queued and processed automatically via background jobs. Configure limits based on your provider\'s quota. For GWDG, use 30/minute, 200/hour, and 1000/day. Leave per-second empty if your provider does not expose a second-level window.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-				<label class="checkbox">
-					<input
-						v-model="settings.rateLimitEnabled"
-						type="checkbox">
-					{{ t('educai', 'Enable Rate Limit Queue') }}
-				</label>
-				<p class="hint">
-					{{ t('educai', 'When enabled, requests exceeding rate limits will be queued instead of failing. A background job will process queued requests as capacity becomes available.') }}
-				</p>
-			</div>
-
-			<div v-if="settings.rateLimitEnabled" class="form-grid">
-				<div class="form-group">
-					<label for="rate-limit-second">{{ t('educai', 'Requests per Second') }}</label>
-					<input
-						id="rate-limit-second"
-						v-model.number="settings.rateLimitSecond"
-						type="number"
-						min="1"
-						:placeholder="t('educai', 'Optional')">
-					<p class="hint">
-						{{ t('educai', 'Optional. Leave blank for providers like GWDG that only expose minute/hour/day headers.') }}
+				<div v-if="toolTestResult" class="ta-note ta-note--ok" role="status">
+					{{ n('educai', 'Connection works. The server offers {count} tool.', 'Connection works. The server offers {count} tools.', toolTestNames.length, { count: toolTestNames.length }) }}
+					<p v-if="toolTestNames.length" class="ta-tool-names">
+						{{ toolTestNames.join(', ') }}
 					</p>
+					<details>
+						<summary>{{ t('educai', 'Show server response') }}</summary>
+						<pre class="ta-pre">{{ toolTestResult }}</pre>
+					</details>
 				</div>
-				<div class="form-group">
-					<label for="rate-limit-minute">{{ t('educai', 'Requests per Minute') }}</label>
-					<input
-						id="rate-limit-minute"
-						v-model.number="settings.rateLimitMinute"
-						type="number"
-						min="1"
-						placeholder="30">
-					<p class="hint">
-						{{ t('educai', 'Maximum requests per minute (GWDG default: 30)') }}
-					</p>
-				</div>
-				<div class="form-group">
-					<label for="rate-limit-hour">{{ t('educai', 'Requests per Hour') }}</label>
-					<input
-						id="rate-limit-hour"
-						v-model.number="settings.rateLimitHour"
-						type="number"
-						min="1"
-						placeholder="200">
-					<p class="hint">
-						{{ t('educai', 'Maximum requests per hour (GWDG default: 200)') }}
-					</p>
-				</div>
-				<div class="form-group">
-					<label for="rate-limit-day">{{ t('educai', 'Requests per Day') }}</label>
-					<input
-						id="rate-limit-day"
-						v-model.number="settings.rateLimitDay"
-						type="number"
-						min="1"
-						placeholder="1000">
-					<p class="hint">
-						{{ t('educai', 'Maximum requests per day (GWDG default: 1000)') }}
-					</p>
-				</div>
-			</div>
-
-			<div v-if="settings.rateLimitEnabled" class="form-group">
-				<label for="rate-limit-queue-message">{{ t('educai', 'Queue Message') }}</label>
-				<textarea
-					id="rate-limit-queue-message"
-					v-model="settings.rateLimitQueueMessage"
-					rows="4"
-					:placeholder="t('educai', '⏳ Your request has been queued. Position: {position}, estimated wait: ~{wait} seconds.', { position: '{position}', wait: '{wait}' })" />
-				<p class="hint">
-					{{ t('educai', 'Message shown to users when their request is queued. Use {position} for queue position and {wait} for estimated wait time in seconds. Leave empty for the default message.', { position: '{position}', wait: '{wait}' }) }}
-				</p>
-			</div>
-
-			<div v-if="settings.rateLimitEnabled" class="rate-limit-status">
-				<div class="button-row">
-					<button
-						type="button"
-						class="button"
-						:disabled="rateLimitLoading"
-						@click="loadRateLimitStatus">
-						{{ rateLimitLoading ? t('educai', 'Loading…') : t('educai', 'Refresh Status') }}
+				<div class="ta-row ta-dialog-actions">
+					<button type="button"
+						class="ta-btn"
+						:disabled="toolTesting"
+						@click="testToolConnection">
+						{{ toolTesting ? t('educai', 'Testing…') : t('educai', 'Test Connection') }}
 					</button>
-					<button
-						type="button"
-						class="button primary"
-						:disabled="queueProcessing || !chatQueueStats.pending"
-						@click="processQueueNow">
-						{{ queueProcessing ? t('educai', 'Processing…') : t('educai', 'Process Queue Now') }}
+					<span class="ta-dialog-actions__spacer" />
+					<button type="button"
+						class="ta-btn ta-btn--ghost"
+						:disabled="toolSaving"
+						@click="closeToolForm">
+						{{ t('educai', 'Cancel') }}
+					</button>
+					<button type="submit"
+						class="ta-btn ta-btn--primary"
+						:disabled="toolSaving">
+						{{ toolForm.id ? t('educai', 'Save Changes') : t('educai', 'Create Tool') }}
 					</button>
 				</div>
-				<div v-if="rateLimitStatus" class="status-grid">
-					<div class="status-card">
-						<div class="status-value">{{ formatNumber(chatQueueStats.pending) }}</div>
-						<div class="status-label">{{ t('educai', 'Queued') }}</div>
-					</div>
-					<div class="status-card">
-						<div class="status-value">{{ formatNumber(chatQueueStats.processing) }}</div>
-						<div class="status-label">{{ t('educai', 'Processing') }}</div>
-					</div>
-				</div>
-				<p v-if="rateLimitStatus" class="hint rate-limit-hint">
-					{{ t('educai', 'Chat requests and embeddings are tracked separately. The cards below show the last observed provider headers per endpoint.') }}
-				</p>
-				<div v-if="rateLimitStatus" class="rate-limit-subsection">
-					<div class="rate-limit-subsection__header">
-						<h5>{{ t('educai', 'Chat / Queue') }}</h5>
-						<p class="hint">{{ t('educai', 'Used for bot replies and queued requests.') }}</p>
-					</div>
-					<div class="status-grid status-grid--compact">
-						<div class="status-card" :class="chatCanProcess ? 'status-ok' : 'status-limited'">
-							<div class="status-value">{{ chatCanProcess ? '✓' : '⏳' }}</div>
-							<div class="status-label">{{ chatCanProcess ? t('educai', 'Available') : t('educai', 'Rate Limited') }}</div>
-						</div>
-						<div v-if="chatRateLimitState?.limit_minute" class="status-card">
-							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_minute) }}/{{ formatNumber(chatRateLimitState.limit_minute) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Minute') }}</div>
-						</div>
-						<div v-if="chatRateLimitState?.limit_second" class="status-card">
-							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_second) }}/{{ formatNumber(chatRateLimitState.limit_second) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Second') }}</div>
-						</div>
-						<div v-if="chatRateLimitState?.limit_hour" class="status-card">
-							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_hour) }}/{{ formatNumber(chatRateLimitState.limit_hour) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Hour') }}</div>
-						</div>
-						<div v-if="chatRateLimitState?.limit_day" class="status-card">
-							<div class="status-value">{{ formatNumber(chatRateLimitState.remaining_day) }}/{{ formatNumber(chatRateLimitState.limit_day) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Day') }}</div>
-						</div>
-					</div>
-				</div>
-				<div v-if="rateLimitStatus" class="rate-limit-subsection">
-					<div class="rate-limit-subsection__header">
-						<h5>{{ t('educai', 'Embeddings') }}</h5>
-						<p class="hint">{{ t('educai', 'Embeddings are tracked independently from the chat queue.') }}</p>
-					</div>
-					<p v-if="embeddingRateLimitModeStatus === 'disabled'" class="hint">
-						{{ t('educai', 'Embedding rate limiting is disabled. Requests go straight to the configured embedding endpoint.') }}
-					</p>
-					<p v-else-if="embeddingStatusSource === 'configured'" class="hint">
-						{{ embeddingConfiguredHint }}
-					</p>
-					<p v-else-if="embeddingStatusSource === 'observed'" class="hint">
-						{{ t('educai', 'Showing the last observed embedding endpoint headers.') }}
-					</p>
-					<div v-if="embeddingRateLimitModeStatus !== 'disabled' && embeddingRateLimitState" class="status-grid status-grid--compact">
-						<div class="status-card" :class="embeddingCanProcess ? 'status-ok' : 'status-limited'">
-							<div class="status-value">{{ embeddingCanProcess ? '✓' : '⏳' }}</div>
-							<div class="status-label">{{ embeddingCanProcess ? t('educai', 'Available') : t('educai', 'Rate Limited') }}</div>
-						</div>
-						<div v-if="embeddingRateLimitState.limit_minute" class="status-card">
-							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_minute) }}/{{ formatNumber(embeddingRateLimitState.limit_minute) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Minute') }}</div>
-						</div>
-						<div v-if="embeddingRateLimitState.limit_second" class="status-card">
-							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_second) }}/{{ formatNumber(embeddingRateLimitState.limit_second) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Second') }}</div>
-						</div>
-						<div v-if="embeddingRateLimitState.limit_hour" class="status-card">
-							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_hour) }}/{{ formatNumber(embeddingRateLimitState.limit_hour) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Hour') }}</div>
-						</div>
-						<div v-if="embeddingRateLimitState.limit_day" class="status-card">
-							<div class="status-value">{{ formatNumber(embeddingRateLimitState.remaining_day) }}/{{ formatNumber(embeddingRateLimitState.limit_day) }}</div>
-							<div class="status-label">{{ t('educai', 'Per Day') }}</div>
-						</div>
-					</div>
-					<p v-else-if="embeddingRateLimitModeStatus !== 'disabled'" class="hint">
-						{{ t('educai', 'No embedding rate-limit headers observed yet.') }}
-					</p>
-				</div>
-			</div>
-				</div>
-			</section>
+			</form>
+		</AdminDialog>
 
-			<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('memory') }">
-				<button
-					type="button"
-					class="accordion-header"
-					:aria-expanded="String(isSectionOpen('memory'))"
-					:aria-controls="sectionId('memory')"
-					@click="toggleSection('memory')">
-					<span class="accordion-heading">
-						<span class="accordion-title">{{ t('educai', 'Conversation Memory') }}</span>
-						<span class="accordion-description">{{ t('educai', 'Context history budget for bot replies.') }}</span>
-					</span>
-					<span class="accordion-meta">{{ memorySummary }}</span>
-					<span class="accordion-chevron" aria-hidden="true">›</span>
-				</button>
-				<div
-					v-show="isSectionOpen('memory')"
-					:id="sectionId('memory')"
-					class="accordion-panel">
-					<div class="section-heading">
-						<h4>{{ t('educai', 'Conversation Memory') }}</h4>
-						<p class="hint">
-							{{ t('educai', 'Configure how much conversation history is sent to the LLM for context. Using token-based limits prevents context window overflow with large messages.') }}
-						</p>
-					</div>
-
-					<div class="form-group">
-				<label for="conversation-context-tokens">{{ t('educai', 'Context Token Limit') }}</label>
-				<input
-					id="conversation-context-tokens"
-					v-model.number="settings.conversationContextTokens"
-					type="number"
-					min="1000"
-					step="1"
-					placeholder="8000">
-				<p class="hint">
-					{{ t('educai', 'Maximum tokens of conversation history to include. Default: 8000 (safe for most models). Higher values provide more context but may exceed model limits. Common limits: Llama 3.1/3.3: 128K, Qwen 3: 32K-128K, Mistral: 32K-128K.') }}
-				</p>
-			</div>
-				</div>
-			</section>
-
-			<button type="submit" class="button primary" :disabled="saving">
-				{{ saving ? t('educai', 'Saving...') : t('educai', 'Save Settings') }}
-			</button>
-		</form>
-
-		<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('tools') }">
-			<button
-				type="button"
-				class="accordion-header"
-				:aria-expanded="String(isSectionOpen('tools'))"
-				:aria-controls="sectionId('tools')"
-				@click="toggleSection('tools')">
-				<span class="accordion-heading">
-					<span class="accordion-title">{{ t('educai', 'Agent Tools') }}</span>
-					<span class="accordion-description">{{ t('educai', 'Model Context Protocol tool registry.') }}</span>
-				</span>
-				<span class="accordion-meta">{{ toolsSummary }}</span>
-				<span class="accordion-chevron" aria-hidden="true">›</span>
-			</button>
-			<div
-				v-show="isSectionOpen('tools')"
-				:id="sectionId('tools')"
-				class="accordion-panel">
-				<div class="section-heading">
-					<h4>{{ t('educai', 'Agent Tool Registry') }}</h4>
-				<button
-					type="button"
-					class="button primary"
-					@click="openCreateTool">
-					{{ t('educai', 'Register Tool') }}
-				</button>
-			</div>
-			<p class="hint section-body">
-				{{ t('educai', 'Register Model Context Protocol endpoints. Enabled tools become available for bot creators to attach to their assistants.') }}
-			</p>
-			<div v-if="loadingTools" class="hint section-body">
-				{{ t('educai', 'Loading tools…') }}
-			</div>
-			<template v-else>
-				<div v-if="tools.length === 0" class="hint section-body">
-					{{ t('educai', 'No tools registered yet.') }}
-				</div>
-				<div v-else class="tool-list section-body">
-					<div
-						v-for="tool in tools"
-						:key="tool.id"
-						class="tool-row"
-						:class="{ 'tool-row--disabled': !tool.enabled }">
-						<div class="tool-info">
-							<div class="tool-name">
-								<span class="tool-name__label">{{ tool.name }}</span>
-								<span class="badge" :class="tool.enabled ? 'badge-success' : 'badge-muted'">
-								{{ tool.enabled ? t('educai', 'Enabled') : t('educai', 'Disabled') }}
-								</span>
-							</div>
-							<p v-if="tool.description" class="hint">
-								{{ tool.description }}
-							</p>
-							<p class="hint">
-								{{ t('educai', 'Endpoint:') }} <code>{{ tool.mcp_endpoint_url }}</code>
-							</p>
-						</div>
-						<div class="tool-actions">
-							<button
-								type="button"
-								class="button"
-								:disabled="toolSaving"
-								@click="toggleToolEnabled(tool)">
-								{{ tool.enabled ? t('educai', 'Disable') : t('educai', 'Enable') }}
-							</button>
-							<button
-								type="button"
-								class="button"
-								:disabled="toolSaving"
-								@click="editTool(tool)">
-								{{ t('educai', 'Edit') }}
-							</button>
-							<button
-								type="button"
-								class="button danger"
-								:disabled="toolSaving"
-								@click="deleteTool(tool)">
-								{{ t('educai', 'Delete') }}
-							</button>
-						</div>
-					</div>
-				</div>
-			</template>
-
-			<div v-if="toolFormVisible" class="tool-form">
-				<h4>{{ toolForm.id ? t('educai', 'Edit Tool') : t('educai', 'Register Tool') }}</h4>
-				<form @submit.prevent="saveTool">
-					<div class="form-group">
-						<label for="tool-name">{{ t('educai', 'Tool Name') }}</label>
-						<input
-							id="tool-name"
-							v-model="toolForm.name"
-							type="text"
-							required>
-					</div>
-					<div class="form-group">
-						<label for="tool-endpoint">{{ t('educai', 'MCP Endpoint URL') }}</label>
-						<input
-							id="tool-endpoint"
-							v-model="toolForm.mcpEndpointUrl"
-							type="url"
-							name="educai-mcp-endpoint"
-							autocomplete="off"
-							required>
-						<p class="hint">
-							{{ t('educai', 'HTTP or WebSocket URL exposing the MCP server.') }}
-						</p>
-					</div>
-					<div class="form-group">
-						<label for="tool-description">{{ t('educai', 'Description') }}</label>
-						<textarea
-							id="tool-description"
-							v-model="toolForm.description"
-							rows="3"
-							:placeholder="t('educai', 'Short human-readable summary')" />
-					</div>
-					<div class="form-group">
-						<label for="tool-auth">{{ t('educai', 'Authentication JSON') }}</label>
-						<textarea
-							id="tool-auth"
-							v-model="toolForm.authentication"
-							rows="4"
-							placeholder="{&quot;headers&quot;:{&quot;Authorization&quot;:&quot;Bearer &lt;token&gt;&quot;}}" />
-						<p class="hint">
-							{{ toolHasStoredAuth
-								? t('educai', 'Provide JSON describing auth headers or tokens. Stored credentials are kept unless you enter new values (re-enter to test or rotate).')
-								: t('educai', 'Provide JSON describing auth headers or tokens. Leave blank when no authentication is required.') }}
-						</p>
-					</div>
-					<div class="form-group">
-						<label class="checkbox">
-							<input
-								v-model="toolForm.enabled"
-								type="checkbox">
-							{{ t('educai', 'Enabled by default') }}
-						</label>
-					</div>
-					<div class="button-row">
-						<button
-							type="submit"
-							class="button primary"
-							:disabled="toolSaving">
-							{{ toolForm.id ? t('educai', 'Save Changes') : t('educai', 'Create Tool') }}
-						</button>
-						<button
-							type="button"
-							class="button"
-							:disabled="toolSaving"
-							@click="closeToolForm">
-							{{ t('educai', 'Cancel') }}
-						</button>
-						<button
-							type="button"
-							class="button"
-							:disabled="toolTesting"
-							@click="testToolConnection">
-							{{ toolTesting ? t('educai', 'Testing…') : t('educai', 'Test Connection') }}
-						</button>
-					</div>
-				</form>
-				<pre v-if="toolTestResult" class="tool-test-result">
-					{{ toolTestResult }}
-				</pre>
-			</div>
-			</div>
-		</section>
-
-		<section class="accordion-section" :class="{ 'accordion-section--open': isSectionOpen('bots') }">
-			<button
-				type="button"
-				class="accordion-header"
-				:aria-expanded="String(isSectionOpen('bots'))"
-				:aria-controls="sectionId('bots')"
-				@click="toggleSection('bots')">
-				<span class="accordion-heading">
-					<span class="accordion-title">{{ t('educai', 'All Bots') }}</span>
-					<span class="accordion-description">{{ t('educai', 'Admin overview and direct bot maintenance.') }}</span>
-				</span>
-				<span class="accordion-meta">{{ botsSummary }}</span>
-				<span class="accordion-chevron" aria-hidden="true">›</span>
-			</button>
-			<div
-				v-show="isSectionOpen('bots')"
-				:id="sectionId('bots')"
-				class="accordion-panel">
-				<div class="section-heading">
-					<h4>{{ t('educai', 'All Bots') }}</h4>
-				<div class="actions">
-					<button
-						type="button"
-						class="button"
-						:disabled="loadingAllBots"
-						@click="loadAllBots">
-						{{ loadingAllBots ? t('educai', 'Loading…') : t('educai', 'Refresh') }}
-					</button>
-				</div>
-			</div>
-			<div v-if="loadingAllBots" class="hint">{{ t('educai', 'Loading bots…') }}</div>
-			<div v-else-if="allBots.length === 0" class="hint">{{ t('educai', 'No bots found.') }}</div>
-			<div v-else class="bot-table">
-				<div class="bot-row bot-row--header">
-					<span>{{ t('educai', 'Name') }}</span>
-					<span>{{ t('educai', 'Mention') }}</span>
-					<span>{{ t('educai', 'Owner') }}</span>
-					<span>{{ t('educai', 'Visibility') }}</span>
-					<span>{{ t('educai', 'Status') }}</span>
-					<span class="actions-col">{{ t('educai', 'Actions') }}</span>
-				</div>
-				<div v-for="bot in allBots" :key="bot.id" class="bot-row">
-					<span>{{ bot.bot_name }}</span>
-					<span>{{ bot.mention_name }}</span>
-					<span>{{ bot.user_id }}</span>
-					<span>{{ formatVisibility(bot.visibility) }}</span>
-					<span class="status-pill" :class="`status-${bot.approval_status || 'approved'}`">
-						{{ formatApprovalStatus(bot.approval_status) }}
-					</span>
-					<span class="actions-col">
-						<button type="button" class="button" @click="editBotAdmin(bot)">{{ t('educai', 'Edit') }}</button>
-						<button type="button" class="button danger" @click="deleteBotAdmin(bot)">{{ t('educai', 'Delete') }}</button>
-					</span>
-				</div>
-			</div>
-			</div>
-		</section>
-
-		<BotForm
-			v-if="adminEditingBot"
+		<BotForm v-if="adminEditingBot"
 			:bot="adminEditingBot"
 			:user-permissions="{ isAdmin: true, isGroupAdmin: true, isTeamAdmin: true, hasApprovalRights: true, adminGroups: [], adminTeams: [] }"
 			@save="saveBotAdmin"
@@ -1519,14 +174,36 @@ import { showSuccess, showError } from '@nextcloud/dialogs'
 import { t, n, getCanonicalLocale } from '../l10n.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import BotForm from './BotForm.vue'
-import EmbeddingMaintenance from './EmbeddingMaintenance.vue'
 import { applyEducAiRuntimeIconPayload } from '../utils/appIconRuntime.js'
+import * as modelSelection from '../utils/modelSelection.js'
+import * as adminSettings from '../utils/adminSettings.js'
+import { deriveOverview } from '../utils/adminOverview.js'
+import * as adminComponents from './admin/index.js'
+
+const SERVICE_FIELDS = {
+	embedding: { endpoint: 'embeddingApiEndpoint', key: 'embeddingApiKey' },
+	vision: { endpoint: 'visionApiEndpoint', key: 'visionApiKey' },
+	speech: { endpoint: 'speechApiEndpoint', key: 'speechApiKey' },
+}
+
+const RATE_LIMIT_KEYS = {
+	chat: { second: 'rateLimitSecond', minute: 'rateLimitMinute', hour: 'rateLimitHour', day: 'rateLimitDay' },
+	embeddings: { second: 'embeddingRateLimitSecond', minute: 'embeddingRateLimitMinute', hour: 'embeddingRateLimitHour', day: 'embeddingRateLimitDay' },
+}
+
+function initialTab() {
+	if (typeof window === 'undefined' || !window.location) return 'overview'
+	return adminSettings.normalizeAdminTab(new URLSearchParams(window.location.search).get('tab'))
+}
 
 export default {
 	name: 'AdminSettings',
 	components: {
 		BotForm,
-		EmbeddingMaintenance,
+		...adminComponents,
+	},
+	provide() {
+		return { admin: this }
 	},
 	data() {
 		return {
@@ -1586,26 +263,43 @@ export default {
 				maxOutputTokens: 32768,
 			},
 			outputTokenOverrides: [],
-			openSections: {
-				appearance: true,
-				essentials: true,
-				modelEndpoints: false,
-				outputLimits: false,
-				fallbackTimeouts: false,
-				rag: true,
-				catalogue: false,
-				docling: false,
-				media: false,
-				limits: false,
-				memory: false,
-				tools: false,
-				bots: false,
+			activeTab: initialTab(),
+			settingsBaseline: null,
+			storedSecrets: {
+				apiKey: false,
+				secondaryApiKey: false,
+				webhookSecret: false,
+				embeddingApiKey: false,
+				doclingApiKey: false,
+				visionApiKey: false,
+				speechApiKey: false,
 			},
-			availableModels: [],
+			clearCredentials: [],
+			serviceModes: { embedding: 'inherit', vision: 'inherit', speech: 'inherit' },
+			serviceStash: {},
+			secretResetKey: 0,
+			openDetails: { outputOverrides: false, knowledgeAdvanced: false, doclingManual: false, queueMessage: false },
+			adminStatus: null,
+			adminStatusLoading: false,
+			embeddingStatus: null,
+			doclingDetecting: false,
+			doclingDetection: null,
+			doclingRevision: 0,
 			availableModelOptions: [],
 			loadingModels: false,
 			modelLoadError: '',
-			modelSelectSize: 12,
+			modelProviders: [],
+			modelRefreshInterval: 300,
+			modelRefreshTimer: null,
+			modelReloadPending: false,
+			modelPollingActive: false,
+			modelSettingsLoaded: false,
+			providerSettingsBaseline: null,
+			modelProviderRevision: 0,
+			modelSettingsBaseline: null,
+			modelTestSelection: '',
+			modelTesting: false,
+			modelTestResult: null,
 			loadingTools: false,
 			toolSaving: false,
 			toolTesting: false,
@@ -1634,7 +328,7 @@ export default {
 			indexRefreshKey: 0,
 			indexSettingsBaseline: { ragEnabled: false, catalogueEnabled: false, catalogueApiEndpoint: '', ragChunkSize: 750, ragChunkOverlap: 50 },
 			catalogueTesting: false,
-			catalogueTestResult: '',
+			catalogueTestResult: null,
 			embeddingConfigBaseline: {
 				apiProvider: 'custom',
 				apiEndpoint: '',
@@ -1645,6 +339,7 @@ export default {
 				hasEmbeddingApiKey: false,
 			},
 			loadingAllBots: false,
+			allBotsLoaded: false,
 			allBots: [],
 			adminEditingBot: null,
 			uploadingAppIconVariant: '',
@@ -1663,14 +358,80 @@ export default {
 		}
 	},
 	computed: {
+		changedKeys() {
+			return adminSettings.changedSettingKeys(this.settings, this.outputTokenOverrides, this.settingsBaseline, this.clearCredentials)
+		},
+		hasUnsavedChanges() {
+			return this.changedKeys.length > 0
+		},
+		dirtyTabs() {
+			return adminSettings.changedTabs(this.changedKeys)
+		},
+		unsavedLabels() {
+			return adminSettings.changedLabels(this.changedKeys)
+		},
+		adminTabs() {
+			return [
+				{ id: 'overview', label: t('educai', 'Overview'), count: null },
+				{ id: 'models', label: t('educai', 'Models'), count: null },
+				{ id: 'knowledge', label: t('educai', 'Knowledge'), count: null },
+				{ id: 'capabilities', label: t('educai', 'Capabilities'), count: null },
+				{ id: 'system', label: t('educai', 'System'), count: null },
+				{ id: 'bots', label: t('educai', 'Bots'), count: this.allBots.length ? this.formatNumber(this.allBots.length) : null },
+			]
+		},
+		overview() {
+			if (!this.settingsBaseline) return null
+			return deriveOverview({
+				saved: this.settingsBaseline,
+				stored: this.storedSecrets,
+				providers: this.modelProviders,
+				checks: this.adminStatus?.checks || {},
+				embedding: this.embeddingStatus,
+				queue: this.rateLimitStatus,
+				bots: this.allBotsLoaded ? this.allBots : null,
+				tools: this.tools,
+				unqualifiedModels: this.adminStatus?.unqualified_models || [],
+				appName: APP_DISPLAY_NAME,
+			})
+		},
+		primaryModelIds() {
+			return [...new Set(this.availableModelOptions.filter(option => option.endpoint === 'primary').map(option => option.model))]
+				.sort((a, b) => a.localeCompare(b))
+		},
+		providerHosts() {
+			return {
+				primary: adminSettings.endpointHost(this.settings.apiEndpoint),
+				secondary: adminSettings.endpointHost(this.settings.secondaryApiEndpoint),
+			}
+		},
+		webhookUrl() {
+			if (this.adminStatus?.talk?.webhook_url) return this.adminStatus.talk.webhook_url
+			const origin = typeof window !== 'undefined' ? window.location?.origin || '' : ''
+			return origin + generateUrl('/apps/educai/webhook/talk')
+		},
+		documentationUrl() {
+			return 'https://github.com/EDUCAlliance/talk-ai/blob/main/docs/ADMIN_SETTINGS.md'
+		},
+		toolTestNames() {
+			try {
+				const tools = JSON.parse(this.toolTestResult || '[]')
+				return Array.isArray(tools) ? tools.map(tool => tool?.name).filter(Boolean) : []
+			} catch {
+				return []
+			}
+		},
+		hasUnsavedProviderSettings() {
+			if (!this.providerSettingsBaseline) return false
+			return ['apiProvider', 'apiEndpoint', 'secondaryApiEndpoint', 'llmModelsTimeout'].some(key => String(this.settings[key] || '').trim() !== String(this.providerSettingsBaseline[key] || '').trim())
+				|| !!(this.settings.apiKey || '').trim() || !!(this.settings.secondaryApiKey || '').trim()
+				|| this.clearCredentials.includes('secondaryApiKey')
+		},
+		canTestModel() {
+			return this.modelSettingsLoaded && !this.hasUnsavedProviderSettings && !this.modelTesting && !this.saving && !!modelSelection.splitModelReference(this.modelTestSelection)
+		},
 		hasPendingIndexSettings() {
 			return this.hasPendingEmbeddingConfigChange || Object.keys(this.indexSettingsBaseline).some(key => String(this.settings[key]).trim() !== String(this.indexSettingsBaseline[key]).trim())
-		},
-		appIconSummary() {
-			if (this.settings.appIconMode === 'custom') {
-				return t('educai', 'Custom')
-			}
-			return t('educai', 'Default')
 		},
 		appIconBlackPreviewUrl() {
 			return this.resolveAppIconPreviewUrl('black')
@@ -1731,104 +492,238 @@ export default {
 		},
 		doclingKeyHint() {
 			if (this.settings.doclingAuthMode === 'none') {
-				return t('educai', 'No credential is sent. Any stored Docling key is kept for later use.')
+				return t('educai', 'The current profile sends no key. A stored key is kept.')
 			}
 			if (this.doclingHasStoredApiKey) {
-				return t('educai', 'A stored Docling key is configured and kept unless you enter a new value.')
+				return t('educai', 'A stored key stays in use until you replace or remove it.')
 			}
 			return this.settings.doclingApiProfile === 'legacy' && this.settings.doclingAuthMode === 'bearer'
-				? t('educai', 'Leave blank to reuse the main API key.')
-				: t('educai', 'Enter a dedicated Docling key, or select No authentication if your server does not require one. The main API key is not used.')
+				? t('educai', 'Leave empty to use the primary API key.')
+				: t('educai', 'Only needed if the server requires a key. The primary API key is not sent.')
 		},
-		essentialsSummary() {
-			return t('educai', 'Temp {temperature}', { temperature: this.formatTemperature(this.settings.defaultTemperature) })
+
+	},
+	watch: {
+		hasUnsavedProviderSettings(changed) {
+			if (changed) this.modelTestResult = null
 		},
-		modelEndpointsSummary() {
-			if (this.settings.allowMultipleModels) {
-				const count = this.settings.allowedModels.length
-				return n('educai', '{count} allowed model', '{count} allowed models', count, { count: this.formatNumber(count) })
-			}
-			if ((this.settings.secondaryApiEndpoint || '').trim() !== '') {
-				return t('educai', 'Primary + Secondary')
-			}
-			return this.formatModelLabel(this.settings.defaultModel) || t('educai', 'Primary only')
+		modelTestSelection() {
+			this.modelTestResult = null
 		},
-		fallbackTimeoutSummary() {
-			const fallback = this.formatModelLabel(this.settings.fallbackModel)
-			return fallback || t('educai', '{chat} / {stream} / {models} seconds', {
-				chat: this.formatNumber(this.settings.llmChatTimeout || 90),
-				stream: this.formatNumber(this.settings.llmStreamTimeout || 240),
-				models: this.formatNumber(this.settings.llmModelsTimeout || 20),
-			})
-		},
-		modelOptionMap() {
-			return this.availableModelOptions.reduce((map, option) => {
-				map[option.id] = option
-				return map
-			}, {})
-		},
-		ragSummary() {
-			if (this.hasPendingEmbeddingConfigChange) {
-				return t('educai', 'Changed - reindex needed')
-			}
-			return this.settings.ragEnabled ? (this.settings.embeddingModel || t('educai', 'Enabled')) : t('educai', 'Disabled')
-		},
-		doclingSummary() {
-			return this.settings.doclingEnabled ? t('educai', 'Enabled') : t('educai', 'Disabled')
-		},
-		mediaSummary() {
-			const enabled = []
-			if (this.settings.visionModel) {
-				enabled.push(t('educai', 'Vision'))
-			}
-			if (this.settings.speechModel) {
-				enabled.push(t('educai', 'Speech'))
-			}
-			return enabled.length ? enabled.join(' + ') : t('educai', 'No models')
-		},
-		rateLimitSummary() {
-			if (!this.settings.rateLimitEnabled) {
-				return t('educai', 'Disabled')
-			}
-			const count = this.chatQueueStats.pending
-			return n('educai', '{count} queued request', '{count} queued requests', count, { count: this.formatNumber(count) })
-		},
-		memorySummary() {
-			const count = this.settings.conversationContextTokens || 8000
-			return n('educai', '{count} token', '{count} tokens', count, { count: this.formatNumber(count) })
-		},
-		toolsSummary() {
-			if (this.loadingTools) {
-				return t('educai', 'Loading')
-			}
-			const count = this.tools.length
-			return n('educai', '{count} registered tool', '{count} registered tools', count, { count: this.formatNumber(count) })
-		},
-		botsSummary() {
-			if (this.loadingAllBots) {
-				return t('educai', 'Loading')
-			}
-			const count = this.allBots.length
-			return n('educai', '{count} bot', '{count} bots', count, { count: this.formatNumber(count) })
-		},
+		modelTestResult(value) { if (value) this.loadAdminStatus() },
+		doclingTestResult(value) { if (value) this.loadAdminStatus() },
+		doclingDetection(value) { if (value) this.loadAdminStatus() },
+		visionTestResult(value) { if (value) this.loadAdminStatus() },
+		speechTestResult(value) { if (value) this.loadAdminStatus() },
+		catalogueTestResult(value) { if (value) this.loadAdminStatus() },
+		settingsBaseline(value, previous) { if (previous) this.loadAdminStatus() },
 	},
 	mounted() {
+		this.modelPollingActive = true
 		this.loadSettings()
 		this.loadTools()
 		this.loadAllBots()
+		this.loadAdminStatus()
+		this.loadEmbeddingStatus()
+		window.addEventListener('beforeunload', this.onBeforeUnload)
+	},
+	beforeDestroy() {
+		this.modelPollingActive = false
+		clearTimeout(this.modelRefreshTimer)
+		if (typeof window !== 'undefined') window.removeEventListener('beforeunload', this.onBeforeUnload)
 	},
 	methods: {
 		t,
 		n,
-		isSectionOpen(key) {
-			return !!this.openSections[key]
+		setTab(tab, target = '') {
+			this.activeTab = adminSettings.normalizeAdminTab(tab)
+			if (typeof window !== 'undefined' && window.history?.replaceState && window.location) {
+				const url = new URL(window.location.href)
+				if (this.activeTab === 'overview') {
+					url.searchParams.delete('tab')
+				} else {
+					url.searchParams.set('tab', this.activeTab)
+				}
+				window.history.replaceState(window.history.state, '', url.toString())
+			}
+			if (this.activeTab === 'overview' && this.settingsBaseline) this.refreshOverview()
+			if (target) this.$nextTick(() => this.scrollToTarget(target))
 		},
-		sectionId(key) {
-			return `educai-admin-section-${key}`
+		scrollToTarget(id) {
+			const element = typeof document !== 'undefined' ? document.getElementById(id) : null
+			if (!element) return
+			if (element.tagName === 'DETAILS') element.open = true
+			element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+			element.focus?.({ preventScroll: true })
 		},
-		toggleSection(key) {
-			if (Object.prototype.hasOwnProperty.call(this.openSections, key)) {
-				this.openSections[key] = !this.openSections[key]
+		onTabKeydown(event) {
+			const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
+			if (!keys.includes(event.key)) return
+			event.preventDefault()
+			const tabs = adminSettings.ADMIN_TABS
+			const index = tabs.indexOf(this.activeTab)
+			const next = event.key === 'Home'
+				? 0
+				: event.key === 'End'
+					? tabs.length - 1
+					: (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+			this.setTab(tabs[next])
+			this.$nextTick(() => document.getElementById(`educai-admin-tab-${tabs[next]}`)?.focus())
+		},
+		goTo(action) {
+			if (!action) return
+			if (action.app) {
+				window.location.href = generateUrl('/apps/educai/')
+				return
+			}
+			this.setTab(action.tab, action.target)
+		},
+		refreshOverview() {
+			this.loadAdminStatus()
+			this.loadEmbeddingStatus()
+			if (this.settings.rateLimitEnabled) this.loadRateLimitStatus()
+		},
+		captureSettingsBaseline() {
+			this.settingsBaseline = adminSettings.snapshotSettings(this.settings, this.outputTokenOverrides)
+		},
+		discardChanges() {
+			if (!this.settingsBaseline) return
+			this.outputTokenOverrides = adminSettings.restoreSettings(this.settings, this.settingsBaseline)
+			this.clearCredentials = []
+			this.secretResetKey++
+			this.syncServiceModes()
+			this.resetDoclingResults()
+			this.visionTestResult = null
+			this.speechTestResult = null
+			this.catalogueTestResult = null
+		},
+		onBeforeUnload(event) {
+			if (!this.hasUnsavedChanges) return
+			event.preventDefault()
+			event.returnValue = ''
+		},
+		setSecret(key, value) {
+			this.settings[key] = value
+			if (String(value || '').trim() !== '') this.setSecretRemoval(key, false)
+		},
+		setSecretRemoval(key, remove) {
+			if (!adminSettings.CLEARABLE_SECRETS.includes(key)) return
+			const others = this.clearCredentials.filter(item => item !== key)
+			this.clearCredentials = remove ? [...others, key] : others
+			if (remove) this.settings[key] = ''
+		},
+		setServiceMode(service, mode) {
+			const fields = SERVICE_FIELDS[service]
+			if (!fields) return
+			if (mode === 'inherit') {
+				const endpoint = String(this.settings[fields.endpoint] || '').trim()
+				if (endpoint) this.serviceStash = { ...this.serviceStash, [service]: endpoint }
+				this.settings[fields.endpoint] = ''
+				this.settings[fields.key] = ''
+				if (this.storedSecrets[fields.key]) this.setSecretRemoval(fields.key, true)
+			} else {
+				if (!String(this.settings[fields.endpoint] || '').trim() && this.serviceStash[service]) {
+					this.settings[fields.endpoint] = this.serviceStash[service]
+				}
+				this.setSecretRemoval(fields.key, false)
+			}
+			this.serviceModes = { ...this.serviceModes, [service]: mode === 'inherit' ? 'inherit' : 'custom' }
+		},
+		capabilityTestBlocked(service) {
+			const fields = SERVICE_FIELDS[service]
+			if (!fields || !this.settingsBaseline) return false
+			const switchedToInherit = !String(this.settings[fields.endpoint] || '').trim() && !!String(this.settingsBaseline[fields.endpoint] || '').trim()
+			return switchedToInherit || this.clearCredentials.includes(fields.key)
+		},
+		syncServiceModes() {
+			const modes = {}
+			for (const [service, fields] of Object.entries(SERVICE_FIELDS)) {
+				modes[service] = adminSettings.serviceSourceMode({
+					endpoint: this.settings[fields.endpoint],
+					hasStoredKey: this.storedSecrets[fields.key],
+					typedKey: this.settings[fields.key],
+					clearPending: this.clearCredentials.includes(fields.key),
+				})
+			}
+			this.serviceModes = modes
+		},
+		setRateLimit(kind, window, value) {
+			const key = RATE_LIMIT_KEYS[kind]?.[window]
+			if (key) this.settings[key] = value
+		},
+		applyRateLimitPreset(kind) {
+			const preset = adminSettings.RATE_LIMIT_PRESETS[kind]
+			if (!preset) return
+			for (const window of adminSettings.RATE_LIMIT_WINDOWS) this.setRateLimit(kind, window, preset[window])
+		},
+		async loadAdminStatus() {
+			if (this.adminStatusLoading) return
+			this.adminStatusLoading = true
+			try {
+				const { data } = await axios.get(generateUrl('/apps/educai/api/v1/admin/status'))
+				this.adminStatus = data && (data.checks || data.talk) ? data : null
+			} catch (error) {
+				// Remembered checks are optional; the overview works without them.
+			} finally {
+				this.adminStatusLoading = false
+			}
+		},
+		async loadEmbeddingStatus() {
+			try {
+				const { data } = await axios.get(generateUrl('/apps/educai/api/v1/admin/embeddings/status'))
+				if (data?.rag) this.embeddingStatus = data
+			} catch (error) {
+				// The index section reports its own loading errors.
+			}
+		},
+		onEmbeddingStatus(status) {
+			if (status?.rag) this.embeddingStatus = status
+		},
+		resetDoclingResults() {
+			this.doclingRevision++
+			this.doclingDetection = null
+			this.doclingTestResult = null
+		},
+		async detectDocling() {
+			if (this.doclingDetecting) return
+			this.doclingDetecting = true
+			this.resetDoclingResults()
+			const revision = this.doclingRevision
+			try {
+				const typedKey = (this.settings.doclingApiKey || '').trim()
+				const { data } = await axios.post(generateUrl('/apps/educai/api/v1/admin/docling/detect'), {
+					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
+					doclingApiKey: typedKey || null,
+					ignoreStoredKey: !typedKey && this.clearCredentials.includes('doclingApiKey'),
+				})
+				if (revision === this.doclingRevision) this.applyDoclingDetection(data)
+			} catch (error) {
+				if (revision !== this.doclingRevision) return
+				this.doclingDetection = {
+					success: false,
+					profile: null,
+					error: getApiErrorMessage(error, t('educai', 'The Docling server could not be detected. Check the address and try again.')),
+				}
+			} finally {
+				this.doclingDetecting = false
+			}
+		},
+		applyDoclingDetection(result) {
+			const data = result && typeof result === 'object' ? result : {}
+			this.doclingDetection = { ...data, success: !!data.success }
+			if (!data.success) return
+			if (['docling_serve', 'legacy'].includes(data.profile)) this.settings.doclingApiProfile = data.profile
+			if (['x_api_key', 'bearer', 'none'].includes(data.auth_mode)) this.settings.doclingAuthMode = data.auth_mode
+			if (typeof data.endpoint === 'string' && data.endpoint.trim() !== (this.settings.doclingApiEndpoint || '').trim()) {
+				this.settings.doclingApiEndpoint = data.endpoint.trim()
+			}
+		},
+		async copyText(value) {
+			try {
+				await navigator.clipboard.writeText(value)
+				showSuccess(t('educai', 'Copied to the clipboard'))
+			} catch (error) {
+				showError(t('educai', 'Copying failed. Select the text and copy it manually.'))
 			}
 		},
 		normalizeTemperatureValue(value) {
@@ -1880,14 +775,6 @@ export default {
 		normalizeLoadedAppIconValue(value) {
 			const raw = String(value || '').trim()
 			return /^nextcloud-file(id)?:\/\//i.test(raw) ? '' : raw
-		},
-		triggerAppIconUpload(variant) {
-			const refName = variant === 'white' ? 'appIconWhiteFileInput' : 'appIconBlackFileInput'
-			const input = this.$refs[refName]
-			if (input) {
-				input.value = ''
-				input.click()
-			}
 		},
 		async uploadAppIconSvg(variant, event) {
 			const input = event?.target
@@ -2019,68 +906,78 @@ export default {
 			return new Intl.NumberFormat(getCanonicalLocale()).format(value)
 		},
 		toEndpointModelId(model) {
-			const value = (model || '').trim()
-			if (value === '') {
-				return ''
-			}
-			return /^(primary|secondary):/.test(value) ? value : `primary:${value}`
+			return modelSelection.modelReference(model)
 		},
 		formatModelLabel(model) {
-			const id = this.toEndpointModelId(model)
-			if (id === '') {
-				return ''
-			}
-			if (this.modelOptionMap[id]?.label) {
-				return this.modelOptionMap[id].label
-			}
-			if (id.startsWith('primary:')) {
-				return t('educai', 'Primary · {model}', { model: id.slice('primary:'.length) })
-			}
-			if (id.startsWith('secondary:')) {
-				return t('educai', 'Secondary · {model}', { model: id.slice('secondary:'.length) })
-			}
-			return id
+			return modelSelection.modelLabel(model)
 		},
-		normalizeModelOptions(rawOptions, rawModels) {
-			if (Array.isArray(rawOptions) && rawOptions.length > 0) {
-				return rawOptions
-					.filter((option) => option && option.id && option.model)
-					.map((option) => ({
-						id: String(option.id),
-						label: option.label || this.formatModelLabel(option.id),
-						model: String(option.model),
-						endpoint: option.endpoint === 'secondary' ? 'secondary' : 'primary',
-					}))
-			}
-
-			return Array.isArray(rawModels)
-				? rawModels.map((model) => ({
-					id: this.toEndpointModelId(String(model)),
-					label: this.formatModelLabel(String(model)),
-					model: String(model).replace(/^(primary|secondary):/, ''),
-					endpoint: String(model).startsWith('secondary:') ? 'secondary' : 'primary',
-				}))
-				: []
+		captureProviderSettingsBaseline(saved = this.settings) {
+			this.modelProviderRevision++
+			this.providerSettingsBaseline = Object.fromEntries(['apiProvider', 'apiEndpoint', 'secondaryApiEndpoint', 'llmModelsTimeout'].map(key => [key, saved[key]]))
 		},
-		availableModelOptionsWithCurrent(current) {
-			const values = Array.isArray(current) ? current : [current]
-			const options = [...this.availableModelOptions]
-			const existing = new Set(options.map((option) => option.id))
-			values
-				.map((value) => this.toEndpointModelId(value))
-				.filter((id) => id !== '' && !existing.has(id))
-				.forEach((id) => {
-					const endpoint = id.startsWith('secondary:') ? 'secondary' : 'primary'
-					const model = id.replace(/^(primary|secondary):/, '')
-					options.push({
-						id,
-						label: this.formatModelLabel(id),
-						model,
-						endpoint,
-					})
-					existing.add(id)
-				})
-			return options
+		captureModelSettingsBaseline(saved = this.settings) {
+			this.modelSettingsBaseline = { defaultModel: saved.defaultModel, fallbackModel: saved.fallbackModel, allowedModels: [...saved.allowedModels] }
+		},
+		adoptSavedModelBindings(saved) {
+			if (!this.modelSettingsBaseline || this.hasUnsavedProviderSettings) return
+			for (const [key, apiKey] of [['defaultModel', 'default_model'], ['fallbackModel', 'fallback_model']]) {
+				if (this.settings[key] !== this.modelSettingsBaseline[key]) continue
+				const previous = this.settings[key]
+				this.settings[key] = modelSelection.adoptSavedModelBinding(previous, saved[apiKey])
+				this.modelSettingsBaseline[key] = this.settings[key]
+				if (this.settingsBaseline?.[key] === previous) this.settingsBaseline[key] = this.settings[key]
+				if (key === 'defaultModel' && this.embeddingConfigBaseline.defaultModel === previous) this.embeddingConfigBaseline.defaultModel = this.settings[key]
+			}
+			if (JSON.stringify(this.settings.allowedModels) === JSON.stringify(this.modelSettingsBaseline.allowedModels)) {
+				const previous = JSON.stringify(this.settings.allowedModels)
+				this.settings.allowedModels = modelSelection.adoptSavedModelBindings(this.settings.allowedModels, saved.allowed_models)
+				this.modelSettingsBaseline.allowedModels = [...this.settings.allowedModels]
+				if (this.settingsBaseline && JSON.stringify(this.settingsBaseline.allowedModels) === previous) {
+					this.settingsBaseline.allowedModels = [...this.settings.allowedModels]
+				}
+			}
+		},
+		async refreshSavedModelBindings() {
+			if (!this.modelSettingsBaseline || this.hasUnsavedProviderSettings) return
+			const references = [this.settings.defaultModel, this.settings.fallbackModel, ...this.settings.allowedModels]
+			if (!references.some(value => value && !modelSelection.splitModelReference(value))) return
+			const baseline = this.modelProviderRevision
+			try {
+				const response = await axios.get(generateUrl('/apps/educai/api/v1/settings'))
+				if (baseline === this.modelProviderRevision) this.adoptSavedModelBindings(response.data)
+			} catch (error) {
+				// This optional reconciliation must not hide a successfully loaded catalogue.
+			}
+		},
+		scheduleModelRefresh() {
+			if (!this.modelPollingActive) return
+			clearTimeout(this.modelRefreshTimer)
+			this.modelRefreshTimer = setTimeout(() => {
+				if (typeof document !== 'undefined' && document.hidden) {
+					this.scheduleModelRefresh()
+					return
+				}
+				this.loadModels()
+			}, modelSelection.catalogueRefreshDelay(this.modelRefreshInterval))
+		},
+		async testModelResponse() {
+			if (!this.canTestModel) return
+			this.modelTesting = true
+			this.modelTestResult = null
+			const model = this.modelTestSelection
+			const baseline = this.modelProviderRevision
+			try {
+				const response = await axios.post(generateUrl('/apps/educai/api/v1/models/test'), { model })
+				if (!this.hasUnsavedProviderSettings && baseline === this.modelProviderRevision && model === this.modelTestSelection) {
+					this.modelTestResult = response.data
+				}
+			} catch (error) {
+				if (!this.hasUnsavedProviderSettings && baseline === this.modelProviderRevision && model === this.modelTestSelection) {
+					this.modelTestResult = { success: false, model, error: getApiErrorMessage(error, t('educai', 'No test response received. Check model access, provider settings, and account credit.')) }
+				}
+			} finally {
+				this.modelTesting = false
+			}
 		},
 		applyDefaultTemperaturePreset(value) {
 			this.settings.defaultTemperature = value
@@ -2179,6 +1076,7 @@ export default {
 				this.settings.doclingApiProfile = data.docling_api_profile || 'legacy'
 				this.settings.doclingAuthMode = data.docling_auth_mode || 'bearer'
 				this.doclingHasStoredApiKey = data.docling_api_key === '***'
+				this.storedSecrets = Object.fromEntries(Object.entries(adminSettings.STORED_SECRET_FIELDS).map(([key, field]) => [key, data[field] === '***']))
 				this.settings.visionApiEndpoint = data.vision_api_endpoint || ''
 				this.settings.visionModel = data.vision_model || ''
 				this.settings.speechApiEndpoint = data.speech_api_endpoint || ''
@@ -2192,9 +1090,16 @@ export default {
 				this.settings.conversationContextTokens = typeof data.conversation_context_tokens === 'number' ? data.conversation_context_tokens : 8000
 				this.settings.maxOutputTokens = data.max_output_tokens ?? 32768
 				this.outputTokenOverrides = Object.entries(data.model_output_token_limits || {}).map(([model, tokens]) => ({ model, tokens }))
-				if (this.settings.allowMultipleModels || this.settings.secondaryApiEndpoint) {
-					this.loadModels()
+				this.captureProviderSettingsBaseline()
+				this.captureModelSettingsBaseline()
+				this.clearCredentials = []
+				this.syncServiceModes()
+				this.captureSettingsBaseline()
+				if (!this.modelTestSelection && modelSelection.splitModelReference(this.settings.defaultModel)) {
+					this.modelTestSelection = this.settings.defaultModel
 				}
+				this.modelSettingsLoaded = true
+				await this.loadModels()
 				if (this.settings.rateLimitEnabled) {
 					this.loadRateLimitStatus()
 				}
@@ -2203,49 +1108,71 @@ export default {
 				console.error('Failed to load settings:', error)
 			}
 		},
-		onToggleMultiple() {
-			if (this.settings.allowMultipleModels && this.availableModelOptions.length === 0) {
-				this.loadModels()
+		async loadModels(force = false) {
+			if (this.loadingModels) {
+				if (force === true) this.modelReloadPending = true
+				return
 			}
-		},
-		async loadModels() {
+			if (this.hasUnsavedProviderSettings || !this.modelSettingsLoaded) {
+				this.scheduleModelRefresh()
+				return
+			}
 			this.loadingModels = true
 			this.modelLoadError = ''
+			const baseline = this.modelProviderRevision
 			try {
-				const resp = await axios.get(generateUrl('/apps/educai/api/v1/models'))
-				this.availableModelOptions = this.normalizeModelOptions(resp.data?.model_options, resp.data?.models)
-				this.availableModels = this.availableModelOptions.map((option) => option.id)
-				// Adjust visible rows between 12 and 18 depending on list length
-				const n = this.availableModelOptions.length
-				this.modelSelectSize = Math.max(12, Math.min(18, n || 12))
-				// If no selection yet, preselect the default model if present
-				if (this.settings.allowedModels.length === 0 && this.settings.defaultModel) {
-					if (this.availableModels.includes(this.settings.defaultModel)) {
-						this.settings.allowedModels = [this.settings.defaultModel]
-					}
-				}
-			} catch (e) {
-				console.error('Failed to load models', e)
-				this.modelLoadError = getApiErrorMessage(e, t('educai', 'Failed to load models from provider. Check API key and endpoint.'))
+				const response = force === true
+					? await axios.post(generateUrl('/apps/educai/api/v1/models/refresh'))
+					: await axios.get(generateUrl('/apps/educai/api/v1/models'))
+				if (baseline !== this.modelProviderRevision) return
+				this.availableModelOptions = modelSelection.normalizeModelOptions(response.data?.model_options, response.data?.models)
+				this.modelProviders = Array.isArray(response.data?.providers) ? response.data.providers : []
+				this.modelRefreshInterval = response.data?.refresh_interval_seconds || 300
+				await this.refreshSavedModelBindings()
+			} catch (error) {
+				if (baseline !== this.modelProviderRevision) return
+				this.availableModelOptions = this.availableModelOptions.map(option => ({ ...option, availability: 'stale' }))
+				this.modelProviders = this.modelProviders.map(provider => ({ ...provider, status: provider.status === 'ready' ? 'stale' : provider.status }))
+				this.modelLoadError = getApiErrorMessage(error, t('educai', 'Could not update model lists. Previous choices have been preserved.'))
 			} finally {
 				this.loadingModels = false
+				if (this.modelReloadPending) {
+					this.modelReloadPending = false
+					await this.loadModels(true)
+				} else {
+					this.scheduleModelRefresh()
+				}
 			}
 		},
 		async saveSettings() {
+			const providerSettingsChanged = this.hasUnsavedProviderSettings
 			this.saving = true
 			try {
+				if (!this.toEndpointModelId(this.settings.defaultModel)) {
+					showError(t('educai', 'Choose a default model before saving.'))
+					this.setTab('models', 'educai-admin-model-choice')
+					return
+				}
 				const defaultTemperature = this.normalizeTemperatureValue(this.settings.defaultTemperature)
 				if (defaultTemperature === null) {
 					showError(t('educai', 'Default temperature must be between 0.0 and 1.0'))
+					this.setTab('models', 'educai-admin-behaviour')
 					return
 				}
 				const appIconPayload = this.buildAppIconPayload()
 				if (appIconPayload === null) {
+					this.setTab('system', 'educai-admin-appearance')
 					return
 				}
 				const outputTokenPayload = this.buildOutputTokenPayload()
 				if (outputTokenPayload === null) {
-					this.openSections.outputLimits = true
+					const maxValid = Number.isInteger(this.settings.maxOutputTokens) && this.settings.maxOutputTokens >= 1 && this.settings.maxOutputTokens <= 131072
+					if (!maxValid) {
+						this.setTab('models', 'educai-admin-behaviour')
+					} else {
+						this.openDetails.outputOverrides = true
+						this.setTab('models', 'educai-admin-output-overrides')
+					}
 					return
 				}
 
@@ -2265,7 +1192,7 @@ export default {
 					llmModelsTimeout: this.toPositiveInteger(this.settings.llmModelsTimeout, 20),
 					apiProvider: this.settings.apiProvider || 'custom',
 					allowMultipleModels: this.settings.allowMultipleModels,
-					allowedModels: this.settings.allowMultipleModels ? this.settings.allowedModels.map((model) => this.toEndpointModelId(model)) : null,
+					allowedModels: this.settings.allowedModels.map((model) => this.toEndpointModelId(model)),
 					embeddingApiEndpoint: (this.settings.embeddingApiEndpoint || '').trim(),
 					embeddingApiKey: this.settings.embeddingApiKey ? this.settings.embeddingApiKey : null,
 					embeddingModel: (this.settings.embeddingModel || '').trim(),
@@ -2303,7 +1230,14 @@ export default {
 				if (this.settings.webhookSecret && this.settings.webhookSecret.trim() !== '') {
 					payload.webhookSecret = this.settings.webhookSecret
 				}
+				// Removing an optional credential is explicit; an empty field always keeps it.
+				if (this.clearCredentials.length > 0) {
+					payload.clearCredentials = [...this.clearCredentials]
+				}
 
+				// Edits made while the request runs stay unsaved.
+				const submitted = adminSettings.snapshotSettings(this.settings, this.outputTokenOverrides)
+				const submittedClears = [...this.clearCredentials]
 				const embeddingConfigChanged = this.hasEmbeddingConfigChange(payload)
 				if (embeddingConfigChanged) {
 					const proceed = confirm(
@@ -2332,8 +1266,14 @@ export default {
 				const apiKeyUpdated = !!(payload.apiKey && payload.apiKey.trim() !== '')
 				const embeddingKeyUpdated = !!(payload.embeddingApiKey && payload.embeddingApiKey.trim() !== '')
 				const doclingKeyUpdated = !!(payload.doclingApiKey && payload.doclingApiKey.trim() !== '')
-				this.doclingHasStoredApiKey = this.doclingHasStoredApiKey || doclingKeyUpdated
+				const cleared = payload.clearCredentials || []
+				for (const key of adminSettings.SECRET_FIELDS) {
+					if (typeof payload[key] === 'string' && payload[key].trim() !== '') this.storedSecrets[key] = true
+				}
+				for (const key of cleared) this.storedSecrets[key] = false
+				this.doclingHasStoredApiKey = (this.doclingHasStoredApiKey || doclingKeyUpdated) && !cleared.includes('doclingApiKey')
 				this.clearSecretInputs(payload)
+				if (payload.doclingAuthMode === 'none') this.settings.doclingApiKey = ''
 				this.embeddingConfigBaseline = {
 					apiProvider: payload.apiProvider || 'custom',
 					apiEndpoint: payload.apiEndpoint,
@@ -2341,7 +1281,21 @@ export default {
 					embeddingModel: payload.embeddingModel,
 					defaultModel: payload.defaultModel,
 					hasApiKey: this.embeddingConfigBaseline.hasApiKey || apiKeyUpdated,
-					hasEmbeddingApiKey: this.embeddingConfigBaseline.hasEmbeddingApiKey || embeddingKeyUpdated,
+					hasEmbeddingApiKey: (this.embeddingConfigBaseline.hasEmbeddingApiKey || embeddingKeyUpdated) && !cleared.includes('embeddingApiKey'),
+				}
+				this.captureProviderSettingsBaseline(payload)
+				this.captureModelSettingsBaseline(payload)
+				this.settingsBaseline = submitted
+				this.adoptSavedModelBindings(response.data)
+				this.clearCredentials = this.clearCredentials.filter(key => !submittedClears.includes(key))
+				this.secretResetKey++
+				this.syncServiceModes()
+				this.modelSettingsLoaded = true
+				if (providerSettingsChanged) {
+					this.modelTestResult = null
+					this.availableModelOptions = []
+					this.modelProviders = []
+					await this.loadModels(true)
 				}
 			} catch (error) {
 				console.error('Failed to save settings:', error)
@@ -2444,6 +1398,9 @@ export default {
 			}
 		},
 		async deleteTool(tool) {
+			if (!confirm(t('educai', 'Delete tool "{name}"? Bots that use it lose access immediately.', { name: tool.name }))) {
+				return
+			}
 			this.toolSaving = true
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/admin/tools/${tool.id}`))
@@ -2493,7 +1450,6 @@ export default {
 					authentication: authPayload,
 				})
 				this.toolTestResult = JSON.stringify(resp.data?.tools ?? [], null, 2)
-				showSuccess(t('educai', 'Tool connection succeeded'))
 			} catch (error) {
 				console.error('Tool test failed', error)
 				showError(getApiErrorMessage(error, t('educai', 'Failed to test tool connection')))
@@ -2502,48 +1458,50 @@ export default {
 			}
 		},
 		hasEmbeddingConfigChange(payload) {
+			const inheritedModel = reference => (reference || '').trim().replace(/^(primary|secondary):/, '')
 			const nextProvider = (payload.apiProvider || 'custom').trim()
 			const nextApiEndpoint = (payload.apiEndpoint || '').trim()
 			const nextEmbeddingEndpoint = (payload.embeddingApiEndpoint || '').trim()
-			const nextEmbeddingModel = (payload.embeddingModel || payload.defaultModel || '').trim()
+			const nextEmbeddingModel = payload.embeddingModel ? payload.embeddingModel.trim() : inheritedModel(payload.defaultModel)
 			const nextEffectiveEndpoint = this.resolveEffectiveEmbeddingEndpoint(nextApiEndpoint, nextEmbeddingEndpoint)
 
 			const baseProvider = (this.embeddingConfigBaseline.apiProvider || 'custom').trim()
 			const baseApiEndpoint = (this.embeddingConfigBaseline.apiEndpoint || '').trim()
 			const baseEmbeddingEndpoint = (this.embeddingConfigBaseline.embeddingApiEndpoint || '').trim()
-			const baseEmbeddingModel = (this.embeddingConfigBaseline.embeddingModel || this.embeddingConfigBaseline.defaultModel || '').trim()
+			const baseEmbeddingModel = this.embeddingConfigBaseline.embeddingModel ? this.embeddingConfigBaseline.embeddingModel.trim() : inheritedModel(this.embeddingConfigBaseline.defaultModel)
 			const baseEffectiveEndpoint = this.resolveEffectiveEmbeddingEndpoint(baseApiEndpoint, baseEmbeddingEndpoint)
 
 			const embeddingKeyUpdated = !!(payload.embeddingApiKey && payload.embeddingApiKey.trim() !== '')
+			const embeddingKeyRemoved = !embeddingKeyUpdated && this.embeddingConfigBaseline.hasEmbeddingApiKey
+				&& (payload.clearCredentials || []).includes('embeddingApiKey')
 			const mainKeyUpdated = !!(payload.apiKey && payload.apiKey.trim() !== '')
-			const usesMainKeyForEmbeddings = !this.embeddingConfigBaseline.hasEmbeddingApiKey && !embeddingKeyUpdated
+			const usesMainKeyForEmbeddings = (!this.embeddingConfigBaseline.hasEmbeddingApiKey || embeddingKeyRemoved) && !embeddingKeyUpdated
 
 			return (
 				nextProvider !== baseProvider
 				|| nextEmbeddingModel !== baseEmbeddingModel
 				|| nextEffectiveEndpoint !== baseEffectiveEndpoint
 				|| embeddingKeyUpdated
+				|| embeddingKeyRemoved
 				|| (usesMainKeyForEmbeddings && mainKeyUpdated)
 			)
 		},
 		openIndexMaintenance() {
-			this.openSections.rag = true
-			this.$nextTick(() => {
-				this.$refs.embeddingSettings?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-				this.$refs.embeddingSettings?.focus({ preventScroll: true })
-			})
+			this.setTab('knowledge', 'educai-admin-index')
 		},
 		captureIndexSettingsBaseline(saved = this.settings) {
 			Object.keys(this.indexSettingsBaseline).forEach(key => { this.indexSettingsBaseline[key] = saved[key] })
 		},
 		async testCatalogue() {
 			this.catalogueTesting = true
-			this.catalogueTestResult = ''
+			this.catalogueTestResult = null
 			try {
 				const { data } = await axios.post(generateUrl('/apps/educai/api/v1/admin/catalogue/test'), { catalogueApiEndpoint: this.settings.catalogueApiEndpoint.trim() })
-				this.catalogueTestResult = data.success ? t('educai', 'Catalogue connection successful') : getApiErrorMessage(data, t('educai', 'Catalogue connection failed'))
+				this.catalogueTestResult = data.success
+					? { success: true, message: t('educai', 'Catalogue connection successful') }
+					: { success: false, message: getApiErrorMessage(data, t('educai', 'Catalogue connection failed')) }
 			} catch (error) {
-				this.catalogueTestResult = getApiErrorMessage(error, t('educai', 'Catalogue connection failed'))
+				this.catalogueTestResult = { success: false, message: getApiErrorMessage(error, t('educai', 'Catalogue connection failed')) }
 			} finally {
 				this.catalogueTesting = false
 			}
@@ -2554,23 +1512,6 @@ export default {
 				return embeddingEndpoint
 			}
 			return (apiEndpoint || '').trim()
-		},
-		formatTimestamp(timestamp) {
-			if (!timestamp) return t('educai', 'Never')
-			const date = new Date(timestamp * 1000)
-			const now = new Date()
-			const diffMs = now - date
-			const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-			const relativeTime = new Intl.RelativeTimeFormat(getCanonicalLocale(), { numeric: 'auto' })
-			if (diffHours < 1) {
-				const diffMins = Math.floor(diffMs / (1000 * 60))
-				return relativeTime.format(-Math.max(diffMins, 0), 'minute')
-			}
-			if (diffHours < 24) {
-				return relativeTime.format(-diffHours, 'hour')
-			}
-			const diffDays = Math.floor(diffHours / 24)
-			return relativeTime.format(-diffDays, 'day')
 		},
 		changeDoclingProfile() {
 			this.settings.doclingAuthMode = this.settings.doclingApiProfile === 'docling_serve' ? 'x_api_key' : 'bearer'
@@ -2594,11 +1535,6 @@ export default {
 					success: resp.data?.success ?? false,
 					error: getApiErrorMessage(resp, t('educai', 'Connection test failed')),
 				}
-				if (this.doclingTestResult.success) {
-					showSuccess(t('educai', 'Test PDF converted successfully'))
-				} else {
-					showError(this.doclingTestResult.error)
-				}
 			} catch (error) {
 				console.error('Docling test failed', error)
 				const errorMessage = getApiErrorMessage(error, t('educai', 'Failed to test Docling connection'))
@@ -2606,7 +1542,6 @@ export default {
 					success: false,
 					error: errorMessage,
 				}
-				showError(errorMessage)
 			} finally {
 				this.doclingTesting = false
 			}
@@ -2624,11 +1559,6 @@ export default {
 					success: resp.data?.success ?? false,
 					error: getApiErrorMessage(resp, t('educai', 'Vision connection test failed')),
 				}
-				if (this.visionTestResult.success) {
-					showSuccess(t('educai', 'Vision connection successful'))
-				} else {
-					showError(this.visionTestResult.error)
-				}
 			} catch (error) {
 				console.error('Vision test failed', error)
 				const errorMessage = getApiErrorMessage(error, t('educai', 'Failed to test vision connection'))
@@ -2636,7 +1566,6 @@ export default {
 					success: false,
 					error: errorMessage,
 				}
-				showError(errorMessage)
 			} finally {
 				this.visionTesting = false
 			}
@@ -2654,11 +1583,6 @@ export default {
 					success: resp.data?.success ?? false,
 					error: getApiErrorMessage(resp, t('educai', 'Speech connection test failed')),
 				}
-				if (this.speechTestResult.success) {
-					showSuccess(t('educai', 'Speech connection successful'))
-				} else {
-					showError(this.speechTestResult.error)
-				}
 			} catch (error) {
 				console.error('Speech test failed', error)
 				const errorMessage = getApiErrorMessage(error, t('educai', 'Failed to test speech connection'))
@@ -2666,7 +1590,6 @@ export default {
 					success: false,
 					error: errorMessage,
 				}
-				showError(errorMessage)
 			} finally {
 				this.speechTesting = false
 			}
@@ -2717,6 +1640,7 @@ export default {
 			try {
 				const resp = await axios.get(generateUrl('/apps/educai/api/v1/admin/bots'))
 				this.allBots = Array.isArray(resp.data) ? resp.data : []
+				this.allBotsLoaded = true
 			} catch (error) {
 				console.error('Failed to load all bots', error)
 				showError(getApiErrorMessage(error, t('educai', 'Failed to load bots')))
@@ -2789,662 +1713,4 @@ export default {
 }
 </script>
 
-<style scoped>
-.admin-settings {
-	margin-top: 40px;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	overflow: hidden;
-}
-
-.settings-title {
-	margin: 0;
-	padding: 16px 20px;
-	background: var(--color-background-dark);
-	font-size: 16px;
-	font-weight: 600;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.settings-body {
-	padding: 20px;
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-}
-
-.accordion-section {
-	border-top: 1px solid var(--color-border);
-	background: var(--color-main-background);
-}
-
-.settings-title + .settings-body .accordion-section:first-child,
-.admin-settings > .accordion-section:first-of-type {
-	border-top: 0;
-}
-
-.accordion-header {
-	width: 100%;
-	padding: 16px 20px;
-	border: 0;
-	background: transparent;
-	color: var(--color-main-text);
-	cursor: pointer;
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto auto;
-	align-items: center;
-	gap: 16px;
-	text-align: start;
-	font: inherit;
-}
-
-.accordion-header:hover,
-.accordion-header:focus-visible {
-	background: var(--color-background-hover);
-}
-
-.accordion-header:focus-visible {
-	outline: 2px solid var(--color-primary);
-	outline-offset: -2px;
-}
-
-.accordion-heading {
-	min-width: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 3px;
-}
-
-.accordion-title {
-	font-size: 15px;
-	font-weight: 700;
-}
-
-.accordion-description {
-	font-size: 13px;
-	color: var(--color-text-lighter);
-	line-height: 1.35;
-}
-
-.accordion-meta {
-	max-width: 220px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	border-radius: 999px;
-	padding: 3px 9px;
-	background: var(--color-background-dark);
-	color: var(--color-text-lighter);
-	font-size: 12px;
-	font-weight: 600;
-}
-
-.accordion-meta--warning {
-	background: rgba(236, 167, 0, 0.15);
-	color: var(--color-main-text);
-}
-
-.accordion-chevron {
-	font-size: 22px;
-	line-height: 1;
-	color: var(--color-text-lighter);
-	transform: rotate(0deg);
-	transition: transform 120ms ease;
-}
-
-.accordion-section--open .accordion-chevron {
-	transform: rotate(90deg);
-}
-
-.accordion-panel {
-	padding: 4px 20px 20px;
-}
-
-.settings-body .accordion-header,
-.settings-body .accordion-panel {
-	padding-inline: 0;
-}
-
-.settings-body .accordion-section {
-	border-radius: 6px;
-	border: 1px solid var(--color-border);
-}
-
-.settings-body > .button.primary {
-	align-self: flex-start;
-	margin-top: 8px;
-}
-
-.form-group {
-	margin-bottom: 20px;
-}
-
-.form-group label {
-	display: block;
-	margin-bottom: 6px;
-	font-weight: 600;
-}
-
-.form-group input,
-.form-group select {
-	width: 100%;
-	padding: 10px;
-	border: 1px solid var(--color-border);
-	border-radius: 3px;
-	font-family: inherit;
-	font-size: 14px;
-}
-
-.form-group input:focus,
-.form-group select:focus {
-	outline: none;
-	border-color: var(--color-primary);
-}
-
-.hint {
-	margin: 6px 0 0 0;
-	font-size: 13px;
-	color: var(--color-text-lighter);
-}
-
-.button.primary {
-	background-color: var(--color-primary);
-	color: white;
-	border: none;
-	padding: 10px 20px;
-	border-radius: 3px;
-	cursor: pointer;
-	font-size: 14px;
-}
-
-.button.primary:hover:not(:disabled) {
-	background-color: var(--color-primary-element-light);
-}
-
-.button.primary:disabled {
-	opacity: 0.6;
-	cursor: not-allowed;
-}
-
-.app-icon-config {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
-}
-
-.icon-mode-tabs {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
-
-.icon-mode-tab {
-	border: 1px solid var(--color-border);
-	border-radius: 6px;
-	background: var(--color-main-background);
-	color: var(--color-main-text);
-	padding: 8px 12px;
-	font: inherit;
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.icon-mode-tab:hover,
-.icon-mode-tab:focus-visible {
-	border-color: var(--color-primary);
-}
-
-.icon-mode-tab--active {
-	background: var(--color-primary);
-	border-color: var(--color-primary);
-	color: #fff;
-}
-
-.app-icon-preview-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: 12px;
-}
-
-.app-icon-preview-card {
-	border: 1px solid var(--color-border);
-	border-radius: 6px;
-	padding: 12px;
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-}
-
-.app-icon-preview-card--light {
-	background: var(--color-main-background);
-	color: var(--color-main-text);
-}
-
-.app-icon-preview-card--dark {
-	background: #111;
-	color: #fff;
-}
-
-.app-icon-preview-card__label {
-	font-size: 13px;
-	font-weight: 700;
-}
-
-.app-icon-preview-card__frame {
-	width: 52px;
-	height: 52px;
-	border-radius: 6px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	background: rgba(127, 127, 127, 0.12);
-	flex: 0 0 auto;
-}
-
-.app-icon-preview-card__frame img {
-	display: block;
-	max-width: 34px;
-	max-height: 34px;
-	object-fit: contain;
-}
-
-.app-icon-preview-card__missing {
-	font-size: 11px;
-	font-weight: 700;
-	opacity: 0.7;
-}
-
-.app-icon-mode-panel {
-	border-top: 1px solid var(--color-border);
-	padding-top: 16px;
-}
-
-.app-icon-input-row {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	gap: 8px;
-	align-items: center;
-}
-
-.app-icon-file-input {
-	display: none;
-}
-
-.app-icon-actions {
-	margin-bottom: 0;
-}
-
-/* Align checkbox with label text and standardize size */
-.form-group label.checkbox {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.form-group label.checkbox input[type="checkbox"] {
-	width: 16px;
-	height: 16px;
-	margin: 0;
-	vertical-align: middle;
-}
-
-/* Make multi-select taller so more models are visible */
-.form-group select[multiple] {
-	min-height: 240px;
-}
-
-.section-divider {
-	border-top: 1px solid var(--color-border);
-	margin: 28px 0 20px;
-}
-
-.section-heading {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	flex-wrap: wrap;
-	gap: 12px;
-	margin: 0 0 16px;
-}
-
-.section-heading h4 {
-	margin: 0;
-	font-size: 15px;
-	font-weight: 600;
-}
-
-.section-heading .hint {
-	flex-basis: 100%;
-	margin: 0;
-}
-
-.form-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-	gap: 20px;
-}
-
-.section-body {
-	padding: 0 0 20px;
-}
-
-.output-token-limit-row {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 12px;
-
-	.form-group {
-		flex: 1 1 220px;
-	}
-}
-
-.tool-list {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
-}
-
-.tool-row {
-	display: flex;
-	justify-content: space-between;
-	align-items: flex-start;
-	gap: 24px;
-	border: 1px solid var(--color-border);
-	border-radius: 6px;
-	padding: 16px;
-	background: var(--color-background-dark);
-}
-
-.tool-row--disabled {
-	opacity: 0.7;
-}
-
-.tool-info {
-	flex: 1;
-	min-width: 0;
-}
-
-.tool-name {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin-bottom: 6px;
-}
-
-.tool-name__label {
-	font-weight: 600;
-	font-size: 15px;
-}
-
-.badge {
-	display: inline-flex;
-	align-items: center;
-	padding: 2px 8px;
-	border-radius: 999px;
-	font-size: 11px;
-	font-weight: 600;
-}
-
-.badge-success {
-	background: rgba(0, 173, 127, 0.12);
-	color: #009966;
-}
-
-.badge-muted {
-	background: rgba(120, 120, 120, 0.12);
-	color: #555;
-}
-
-.tool-actions {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	min-width: 160px;
-	align-items: flex-end;
-}
-
-.button.danger {
-	background: var(--color-error);
-	color: #fff;
-}
-
-.tool-form {
-	border-top: 1px solid var(--color-border);
-	background: var(--color-main-background);
-	padding: 20px;
-}
-
-.tool-form form {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
-}
-
-.tool-form textarea {
-	font-family: monospace;
-}
-
-.tool-test-result {
-	margin: 16px 20px 20px;
-	padding: 12px;
-	border-radius: 6px;
-	background: var(--color-background-dark);
-	color: var(--color-text);
-	max-height: 240px;
-	overflow: auto;
-	font-size: 12px;
-}
-
-code {
-	font-family: monospace;
-	font-size: 12px;
-	background: rgba(0, 0, 0, 0.05);
-	padding: 1px 4px;
-	border-radius: 4px;
-}
-
-.success-text {
-	color: var(--color-success, #46ba61);
-	font-size: 13px;
-}
-
-.error-text {
-	color: var(--color-error, #e53e3e);
-	font-size: 13px;
-}
-
-.button-row {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	flex-wrap: wrap;
-	margin-bottom: 20px;
-}
-
-.supported-formats {
-	margin-top: 8px;
-	margin-bottom: 16px;
-}
-
-.supported-formats .hint strong {
-	color: var(--color-text);
-}
-
-.embedding-warning {
-	margin: -4px 0 20px;
-	padding: 12px;
-	border: 1px solid var(--color-warning, #eca700);
-	border-radius: 6px;
-	background: rgba(236, 167, 0, 0.12);
-}
-
-.embedding-warning p {
-	margin: 6px 0 0;
-	font-size: 13px;
-	color: var(--color-main-text);
-}
-
-.rate-limit-status {
-	margin: 20px 0;
-}
-
-.rate-limit-hint {
-	margin-top: 16px;
-}
-
-.rate-limit-subsection {
-	margin-top: 20px;
-}
-
-.rate-limit-subsection__header h5 {
-	margin: 0 0 6px;
-	font-size: 14px;
-}
-
-.rate-limit-subsection__header .hint {
-	margin: 0;
-}
-
-.status-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-	gap: 16px;
-	margin-top: 16px;
-}
-
-.status-grid--compact {
-	margin-top: 12px;
-}
-
-.status-card {
-	padding: 16px;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	text-align: center;
-	background: var(--color-background-dark);
-}
-
-.status-card.status-ok {
-	border-color: var(--color-success, #46ba61);
-	background: rgba(70, 186, 97, 0.1);
-}
-
-.status-card.status-limited {
-	border-color: var(--color-warning, #eca700);
-	background: rgba(236, 167, 0, 0.1);
-}
-
-.status-value {
-	font-size: 24px;
-	font-weight: 600;
-	color: var(--color-main-text);
-	margin-bottom: 4px;
-}
-
-.status-label {
-	font-size: 12px;
-	color: var(--color-text-lighter);
-	text-transform: uppercase;
-	letter-spacing: 0.5px;
-}
-
-.bot-table {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-.bot-row {
-	display: grid;
-	grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr 1fr;
-	align-items: center;
-	gap: 8px;
-	padding: 10px 12px;
-	border: 1px solid var(--color-border);
-	border-radius: 6px;
-	background: var(--color-main-background);
-}
-
-.bot-row--header {
-	font-weight: 700;
-	background: var(--color-background-dark);
-}
-
-.actions-col {
-	display: flex;
-	gap: 8px;
-	justify-content: flex-end;
-}
-
-.temperature-presets {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-top: 10px;
-}
-
-.status-pill {
-	padding: 2px 8px;
-	border-radius: 10px;
-	font-size: 12px;
-	text-transform: capitalize;
-	display: inline-block;
-}
-
-.status-pill.status-draft {
-	background: var(--color-background-dark);
-	color: var(--color-text-lighter);
-}
-
-.status-pill.status-pending {
-	background: var(--color-warning);
-	color: #000;
-}
-
-.status-pill.status-approved {
-	background: var(--color-success);
-	color: #000;
-}
-
-.status-pill.status-personal {
-	background: var(--color-primary-element-light);
-	color: var(--color-primary-element-dark);
-}
-
-@media (max-width: 700px) {
-	.accordion-header {
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 10px;
-	}
-
-	.accordion-meta {
-		grid-column: 1 / -1;
-		max-width: 100%;
-		width: fit-content;
-	}
-
-	.tool-row,
-	.bot-row {
-		grid-template-columns: 1fr;
-	}
-
-	.tool-row {
-		flex-direction: column;
-	}
-
-	.app-icon-input-row {
-		grid-template-columns: 1fr;
-	}
-
-	.tool-actions,
-	.actions-col {
-		width: 100%;
-		align-items: stretch;
-		justify-content: flex-start;
-	}
-}
-</style>
+<style src="./admin/adminSettings.css"></style>

@@ -191,7 +191,7 @@ export default {
 .mention-badge {
 	display: inline-block;
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 4px 12px;
 	border-radius: 12px;
 	font-size: 13px;
@@ -215,19 +215,20 @@ export default {
 	font-weight: 600;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .visibility-badge.global {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .visibility-badge.teams {
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .visibility-badge.groups {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .visibility-badge.personal {
@@ -254,8 +255,8 @@ export default {
 }
 
 .approval-badge.pending {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .approval-badge.personal {
@@ -264,13 +265,13 @@ export default {
 }
 
 .button.primary {
-	background-color: var(--color-primary);
-	color: white;
-	border-color: var(--color-primary);
+	background-color: var(--color-primary-element);
+	color: var(--color-primary-element-text);
+	border-color: var(--color-primary-element);
 }
 
 .button.primary:hover {
-	background-color: var(--color-primary-element-light);
+	background-color: var(--color-primary-element-hover);
 }
 
 .button.disabled {
@@ -320,22 +321,12 @@ export default {
 	background: var(--color-background-hover);
 }
 
-.button.error {
-	color: var(--color-error);
-}
-
-.button.error:hover {
-	background: var(--color-error);
-	color: white;
-	border-color: var(--color-error);
-}
-
 .bot-status {
 	position: absolute;
 	top: 10px;
 	inset-inline-end: 10px;
-	background: var(--color-error);
-	color: white;
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
+	color: var(--color-error-text);
 	padding: 4px 10px;
 	border-radius: 12px;
 	font-size: 12px;
