@@ -349,6 +349,37 @@ class ModelCatalogueTest extends TestCase {
 		}
 	}
 
+	public function testPlaceholderEntriesAreNoModelsAndMarkAProviderWithoutAList(): void {
+		// LiteLLM team keys list "all-team-models" instead of their models.
+		$this->models['primary'] = ['all-team-models'];
+		$this->models['secondary'] = ['beta', 'openai/*', '*', 'ALL-PROXY-MODELS'];
+		$catalogue = $this->client()->getModelCatalogue();
+		$this->assertSame(['secondary:beta'], $catalogue['models']);
+		$this->assertSame('ready', $catalogue['providers'][0]['status']);
+		$this->assertSame(0, $catalogue['providers'][0]['model_count']);
+		$this->assertFalse($catalogue['providers'][0]['lists_models']);
+		$this->assertTrue($catalogue['providers'][1]['lists_models']);
+		// Choices are never touched by discovery.
+		$this->assertSame('primary:alpha', $this->settings->getDefaultModel());
+		$this->assertSame('["primary:alpha"]', $this->settings->getAllowedModels());
+
+		// An empty list is still a list.
+		$this->models['primary'] = [];
+		$this->assertTrue($this->client()->getModelCatalogue(true)['providers'][0]['lists_models']);
+	}
+
+	public function testPlaceholderCachedBeforeAnUpgradeIsDroppedWithoutRefreshing(): void {
+		$this->storage['llm_model_catalogue_primary'] = json_encode([
+			'fingerprint' => hash('sha256', "https://primary.invalid/v1/models\0primary-test-key"),
+			'options' => [['id' => 'primary:all-team-models', 'model' => 'all-team-models', 'endpoint' => 'primary', 'first_seen_at' => null]],
+			'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300, 'status' => 'ready', 'error' => null,
+		]);
+		$catalogue = $this->client()->getModelCatalogue();
+		$this->assertSame(['secondary:beta'], $catalogue['models']);
+		$this->assertFalse($catalogue['providers'][0]['lists_models']);
+		$this->assertSame(['secondary'], $this->calls);
+	}
+
 	/**
 	 * @return array<string,?int>
 	 */

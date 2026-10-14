@@ -78,6 +78,28 @@ test('released references without a provider stay in their own group', () => {
 	assert.deepEqual(unbound.items[0].tags, ['missing'])
 })
 
+test('counts only listed models as "of total" and reports the rest separately', () => {
+	const options = [option('primary:alpha'), option('primary:beta')]
+	const [group] = buildAllowListGroups(options, ['primary:alpha', 'primary:gone-1', 'primary:gone-2'], { now })
+	assert.equal(group.total, 2)
+	assert.equal(group.selectedCount, 1, 'Released models outside the list never exceed the list size')
+	assert.equal(group.missingCount, 2)
+	assert.equal(group.manualCount, 0)
+})
+
+test('providers without a model list show released models as manual entries, not as missing', () => {
+	const selected = ['primary:microsoft/gpt-5.4', 'primary:gwdg/qwen3-30b', 'secondary:gone']
+	const groups = buildAllowListGroups([option('secondary:beta')], selected, { now, unlistedEndpoints: ['primary'] })
+	const primary = groups.find(group => group.endpoint === 'primary')
+	assert.equal(primary.total, 0)
+	assert.equal(primary.selectedCount, 0)
+	assert.equal(primary.manualCount, 2)
+	assert.equal(primary.missingCount, 0)
+	assert.deepEqual(primary.items.map(item => item.tags), [[], []])
+	const secondary = groups.find(group => group.endpoint === 'secondary')
+	assert.deepEqual(secondary.items.find(item => item.id === 'secondary:gone').tags, ['missing'], 'Listing providers still flag disappeared models')
+})
+
 test('releasing keeps the order of existing entries and never duplicates', () => {
 	assert.deepEqual(setReleased(['b', 'a'], ['c', 'a', 'c', 'd'], true), ['b', 'a', 'c', 'd'])
 	assert.deepEqual(setReleased(['b', 'a', 'c'], ['a', 'x'], false), ['b', 'c'])

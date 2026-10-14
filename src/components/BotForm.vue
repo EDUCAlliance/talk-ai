@@ -157,6 +157,7 @@
 							id="model-select"
 							v-model="formData.model"
 							:options="selectableModelOptions"
+							:unlisted-endpoints="unlistedEndpoints"
 							:empty-label="t('educai', 'Use administrator default')" />
 						<p class="hint">
 							{{ t('educai', 'The default follows administrator settings. An explicit model stays bound to its provider.') }}
@@ -895,8 +896,11 @@ export default {
 			const allowed = this.settings.allowMultipleModels ? this.settings.allowedModels : []
 			const selected = [this.formData.model, ...allowed].filter(Boolean)
 			// A successful refresh must not make newly discovered models public.
-			return modelSelection.modelOptionsWithCurrent(this.settings.modelOptions, selected)
+			return modelSelection.modelOptionsWithCurrent(this.settings.modelOptions, selected, this.unlistedEndpoints)
 				.filter(option => selected.includes(option.id))
+		},
+		unlistedEndpoints() {
+			return modelSelection.unlistedModelEndpoints(this.modelProviders)
 		},
 		isPersonalBot() {
 			return this.formData.visibility === 'personal'

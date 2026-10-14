@@ -15,7 +15,8 @@
 			<div :key="`${group.endpoint}-head`" class="ta-allow__group">
 				<span>{{ groupLabel(group) }}</span>
 				<span class="ta-allow__group-actions">
-					<button type="button"
+					<button v-if="group.total > 0"
+						type="button"
 						class="ta-btn ta-btn--ghost ta-btn--small"
 						:aria-label="t('educai', 'Release all listed models of {provider}', { provider: providerName(group.endpoint) })"
 						@click="setGroup(group, true)">
@@ -106,6 +107,7 @@ export default {
 		options: { type: Array, default: () => [] },
 		defaultModel: { type: String, default: '' },
 		fallbackModel: { type: String, default: '' },
+		unlistedEndpoints: { type: Array, default: () => [] },
 		providerHosts: { type: Object, default: () => ({}) },
 	},
 	data() {
@@ -118,6 +120,7 @@ export default {
 				defaultModel: this.defaultModel,
 				fallbackModel: this.fallbackModel,
 				expanded: this.expanded,
+				unlistedEndpoints: this.unlistedEndpoints,
 			})
 		},
 	},
@@ -132,9 +135,12 @@ export default {
 		groupLabel(group) {
 			const host = this.providerHosts[group.endpoint]
 			const name = host ? `${this.providerName(group.endpoint)} · ${host}` : this.providerName(group.endpoint)
-			return group.endpoint === 'unbound'
-				? name
-				: t('educai', '{provider} — {selected} of {total}', { provider: name, selected: group.selectedCount, total: group.total })
+			if (group.endpoint === 'unbound') return name
+			const parts = []
+			if (group.total > 0) parts.push(t('educai', '{selected} of {total} released', { selected: group.selectedCount, total: group.total }))
+			if (group.missingCount > 0) parts.push(n('educai', '{count} not in catalogue', '{count} not in catalogue', group.missingCount, { count: group.missingCount }))
+			if (group.manualCount > 0) parts.push(n('educai', '{count} entered manually', '{count} entered manually', group.manualCount, { count: group.manualCount }))
+			return parts.length > 0 ? `${name} — ${parts.join(' · ')}` : name
 		},
 		tagLabel(tag) {
 			switch (tag) {

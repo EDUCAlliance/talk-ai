@@ -77,6 +77,16 @@ test('provider outages are reported without blaming the healthy provider', () =>
 	assert.equal(rows.Secondary, '312 models · out of date')
 })
 
+test('a reachable provider without a model list is not reported as having zero models', () => {
+	const unlisted = { ...ready, model_count: 0, lists_models: false }
+	const overview = deriveOverview(healthy({ providers: [unlisted] }))
+	assert.deepEqual(overview.attention, [])
+	const rows = Object.fromEntries(card(overview, 'models').rows.map(row => [row.label, row.value]))
+	assert.equal(rows.Primary, 'no model list · up to date')
+	const pending = deriveOverview(healthy({ providers: [unlisted], bots: [] }))
+	assert.match(pending.setup.steps[0].detail, /chat-ai\.academiccloud\.de · no model list/)
+})
+
 test('an unconfigured secondary provider is ignored', () => {
 	const overview = deriveOverview(healthy({ providers: [ready, { id: 'secondary', status: 'unconfigured' }] }))
 	assert.deepEqual(overview.attention, [])

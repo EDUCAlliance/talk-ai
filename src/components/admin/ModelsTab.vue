@@ -73,13 +73,14 @@
 
 		<AdminSection anchor="educai-admin-model-choice"
 			:title="t('educai', 'Model choice')"
-			:description="t('educai', 'Which model bots use by default and which models they may choose themselves.')">
+			:description="t('educai', 'Which model bots use by default and which models may be chosen per bot.')">
 			<div class="ta-grid">
 				<div class="ta-field">
 					<label for="default-model" class="ta-label">{{ t('educai', 'Default Model') }}</label>
 					<ModelSelector id="default-model"
 						v-model="admin.settings.defaultModel"
 						:options="admin.availableModelOptions"
+						:unlisted-endpoints="unlistedEndpoints"
 						:empty-label="t('educai', 'Choose a default model')"
 						allow-manual />
 					<p class="ta-hint">
@@ -91,6 +92,7 @@
 					<ModelSelector id="fallback-model"
 						v-model="admin.settings.fallbackModel"
 						:options="admin.availableModelOptions"
+						:unlisted-endpoints="unlistedEndpoints"
 						:empty-label="t('educai', 'No fallback')"
 						allow-manual />
 					<p class="ta-hint">
@@ -101,11 +103,11 @@
 			<div class="ta-field ta-allow-switch">
 				<ToggleSwitch id="allow-multiple-models"
 					v-model="admin.settings.allowMultipleModels"
-					:label="t('educai', 'Bots may choose a released model themselves')" />
+					:label="t('educai', 'Allow Multiple Models (per-bot selection)')" />
 				<p class="ta-hint">
 					{{ admin.settings.allowMultipleModels
-						? t('educai', 'New catalogue models are never released automatically. Existing bots keep their choice.')
-						: t('educai', 'Bots use the default model. Existing explicit choices are kept.') }}
+						? t('educai', 'Whoever creates or edits a bot can choose one of the models released below in the bot settings. New models are never released automatically. Withdrawing a release does not change bots that already use the model.')
+						: t('educai', 'All bots use the default model. Bots that already have their own model keep it.') }}
 				</p>
 			</div>
 			<ModelAllowList v-if="admin.settings.allowMultipleModels"
@@ -113,6 +115,7 @@
 				:options="admin.availableModelOptions"
 				:default-model="admin.settings.defaultModel"
 				:fallback-model="admin.settings.fallbackModel"
+				:unlisted-endpoints="unlistedEndpoints"
 				:provider-hosts="admin.providerHosts" />
 		</AdminSection>
 
@@ -203,6 +206,7 @@
 							<ModelSelector :id="`output-limit-model-${index}`"
 								v-model="override.model"
 								:options="admin.availableModelOptions"
+								:unlisted-endpoints="unlistedEndpoints"
 								:empty-label="t('educai', 'Choose a model')"
 								allow-manual />
 						</div>
@@ -238,6 +242,7 @@
 				<ModelSelector id="test-model"
 					v-model="admin.modelTestSelection"
 					:options="admin.availableModelOptions"
+					:unlisted-endpoints="unlistedEndpoints"
 					:empty-label="t('educai', 'Choose a model to test')"
 					allow-manual
 					:disabled="admin.modelTesting" />
@@ -257,6 +262,7 @@
 import { t, n, getCanonicalLocale } from '../../l10n.js'
 import { TEMPERATURE_PRESETS, temperaturePreset } from '../../utils/adminSettings.js'
 import { formatWhen, providerState } from '../../utils/adminOverview.js'
+import { unlistedModelEndpoints } from '../../utils/modelSelection.js'
 import AdminSection from './AdminSection.vue'
 import ModelAllowList from './ModelAllowList.vue'
 import SecretField from './SecretField.vue'
@@ -272,6 +278,9 @@ export default {
 		return { customTemperature: false }
 	},
 	computed: {
+		unlistedEndpoints() {
+			return unlistedModelEndpoints(this.admin.modelProviders)
+		},
 		providerCards() {
 			return ['primary', 'secondary'].map(id => {
 				const status = this.admin.modelProviders.find(provider => provider.id === id) || null
@@ -282,7 +291,10 @@ export default {
 				let chip
 				let chipClass = ''
 				let meta
-				if (state === 'ready') {
+				if (state === 'ready' && status.lists_models === false) {
+					chip = t('educai', 'No model list')
+					meta = t('educai', 'Reachable, but this provider does not list its models individually. Enter the model IDs manually.')
+				} else if (state === 'ready') {
 					chip = n('educai', '{count} model · {state}', '{count} models · {state}', count, { count: this.formatNumber(count), state: providerState(status) })
 					chipClass = 'ta-chip--ok'
 					meta = status.next_refresh_at

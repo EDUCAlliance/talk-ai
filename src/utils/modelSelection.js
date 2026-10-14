@@ -55,15 +55,24 @@ export function normalizeModelOptions(rawOptions, rawModels) {
 	})
 }
 
+// Providers such as LiteLLM team keys answer with a placeholder instead of their models.
+export function unlistedModelEndpoints(providers) {
+	return (Array.isArray(providers) ? providers : [])
+		.filter(provider => provider?.lists_models === false && ['primary', 'secondary'].includes(provider.id))
+		.map(provider => provider.id)
+}
+
 // Keep the actual stored value selectable; discovery must never change a choice.
-export function modelOptionsWithCurrent(options, current) {
+// Without a provider list there is nothing to compare against, so manual IDs are not "missing".
+export function modelOptionsWithCurrent(options, current, unlistedEndpoints = []) {
 	const result = options.map(option => ({ ...option }))
 	const seen = new Set(result.map(option => option.id))
 	for (const value of Array.isArray(current) ? current : [current]) {
 		const id = modelReference(value)
 		if (!id || seen.has(id)) continue
 		const parts = splitModelReference(id)
-		result.push({ id, model: parts?.model || id, endpoint: parts?.endpoint || null, label: modelLabel(id), availability: 'missing' })
+		const availability = parts && unlistedEndpoints.includes(parts.endpoint) ? 'manual' : 'missing'
+		result.push({ id, model: parts?.model || id, endpoint: parts?.endpoint || null, label: modelLabel(id), availability })
 		seen.add(id)
 	}
 	return result.map(option => ({

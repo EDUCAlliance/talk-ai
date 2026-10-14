@@ -199,7 +199,9 @@ export function deriveOverview({
 	const primaryUsable = primary && ['ready', 'stale'].includes(primary.status)
 	const providerRow = provider => ({
 		value: provider && ['ready', 'stale'].includes(provider.status)
-			? n('educai', '{count} model · {state}', '{count} models · {state}', provider.model_count || 0, { count: formatNumber(provider.model_count || 0), state: providerState(provider) })
+			? (provider.lists_models === false
+				? t('educai', 'no model list · {state}', { state: providerState(provider) })
+				: n('educai', '{count} model · {state}', '{count} models · {state}', provider.model_count || 0, { count: formatNumber(provider.model_count || 0), state: providerState(provider) }))
 			: providerState(provider),
 		tone: provider?.status === 'ready' ? undefined : 'warn',
 	})
@@ -328,7 +330,9 @@ export function deriveOverview({
 					title: t('educai', 'Connect a language model provider'),
 					detail: providerDone
 						? (primaryUsable
-							? n('educai', 'Primary: {host} · {count} model found', 'Primary: {host} · {count} models found', primary.model_count || 0, { host: endpointHost(saved.apiEndpoint), count: formatNumber(primary.model_count || 0) })
+							? (primary.lists_models === false
+								? t('educai', 'Primary: {host} · no model list', { host: endpointHost(saved.apiEndpoint) })
+								: n('educai', 'Primary: {host} · {count} model found', 'Primary: {host} · {count} models found', primary.model_count || 0, { host: endpointHost(saved.apiEndpoint), count: formatNumber(primary.model_count || 0) }))
 							: t('educai', 'Primary: {host}', { host: endpointHost(saved.apiEndpoint) }))
 						: t('educai', 'Enter an OpenAI-compatible endpoint and API key.'),
 					action: { tab: 'models', target: 'educai-admin-providers', label: providerDone ? t('educai', 'Change') : t('educai', 'Connect') },

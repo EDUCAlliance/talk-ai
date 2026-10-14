@@ -441,6 +441,9 @@
 
 /* Switch */
 .educai-admin .ta-switch {
+	/* Keeps the hidden input inside the scrolling settings area. Otherwise
+	   focusing it scrolls Nextcloud's fixed outer container. */
+	position: relative;
 	display: inline-flex;
 	align-items: center;
 	gap: 12px;
@@ -450,8 +453,11 @@
 
 .educai-admin .ta-switch input {
 	position: absolute;
+	inset-block-start: 0;
+	inset-inline-start: 0;
 	width: 1px;
 	height: 1px;
+	margin: 0;
 	opacity: 0;
 }
 

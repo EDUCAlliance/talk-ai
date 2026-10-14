@@ -72,6 +72,7 @@ export default {
 		id: { type: String, required: true },
 		value: { type: String, default: '' },
 		options: { type: Array, default: () => [] },
+		unlistedEndpoints: { type: Array, default: () => [] },
 		emptyLabel: { type: String, default: '' },
 		allowManual: { type: Boolean, default: false },
 		disabled: { type: Boolean, default: false },
@@ -85,7 +86,7 @@ export default {
 			set(value) { this.$emit('input', value) },
 		},
 		choices() {
-			return modelSelection.modelOptionsWithCurrent(this.options, this.value)
+			return modelSelection.modelOptionsWithCurrent(this.options, this.value, this.unlistedEndpoints)
 		},
 		hasProvider() {
 			return !!modelSelection.splitModelReference(this.value)

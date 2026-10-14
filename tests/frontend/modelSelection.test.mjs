@@ -314,3 +314,16 @@ test('selector value follows a newly appended manual option and emits user chang
  state.selectedValue = ''
  assert.deepEqual(state.emitted.at(-1), ['input', ''])
 })
+
+test('stored models of a provider without a model list are manual entries, not missing', () => {
+	const statuses = [{ id: 'primary', status: 'ready', lists_models: false }, { id: 'secondary', status: 'ready', lists_models: true }, { id: 'evil', lists_models: false }]
+	const unlisted = modelSelection.unlistedModelEndpoints(statuses)
+	assert.deepEqual(unlisted, ['primary'])
+	assert.deepEqual(modelSelection.unlistedModelEndpoints(null), [])
+	const choices = modelSelection.modelOptionsWithCurrent([secondary], ['primary:microsoft/gpt-5.4', 'secondary:gone'], unlisted)
+	const byId = Object.fromEntries(choices.map(option => [option.id, option]))
+	assert.equal(byId['primary:microsoft/gpt-5.4'].availability, 'manual')
+	assert.equal(byId['primary:microsoft/gpt-5.4'].label, 'Primary · microsoft/gpt-5.4')
+	assert.equal(byId['secondary:gone'].availability, 'missing')
+	assert.match(byId['secondary:gone'].label, /not in current catalogue/)
+})

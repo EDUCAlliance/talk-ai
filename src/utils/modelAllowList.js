@@ -12,6 +12,7 @@ function byModel(a, b) {
  *
  * Released models are always listed first. Models that disappeared from the
  * catalogue stay visible so an administrator can decide what to do with them.
+ * Providers without a model list only have manual entries; those are not missing.
  *
  * @param {Array} options Normalized catalogue options
  * @param {string[]} selected Released model references
@@ -23,6 +24,7 @@ function byModel(a, b) {
  * @param {number} config.collapsedLimit Unreleased models shown before "Show all"
  * @param {number} config.filterLimit Maximum matches shown while filtering
  * @param {object} config.expanded Providers whose full list is shown
+ * @param {string[]} config.unlistedEndpoints Providers that do not list their models
  * @return {Array}
  */
 export function buildAllowListGroups(options, selected, {
@@ -33,6 +35,7 @@ export function buildAllowListGroups(options, selected, {
 	collapsedLimit = 8,
 	filterLimit = 100,
 	expanded = {},
+	unlistedEndpoints = [],
 } = {}) {
 	const released = new Set((Array.isArray(selected) ? selected : []).map(modelReference).filter(Boolean))
 	const query = String(filter ?? '').trim().toLowerCase()
@@ -52,7 +55,8 @@ export function buildAllowListGroups(options, selected, {
 	for (const id of released) {
 		if (items.has(id)) continue
 		const parts = splitModelReference(id)
-		items.set(id, { id, model: parts?.model || id, endpoint: parts?.endpoint || 'unbound', availability: 'missing', isNew: false })
+		const availability = parts && unlistedEndpoints.includes(parts.endpoint) ? 'manual' : 'missing'
+		items.set(id, { id, model: parts?.model || id, endpoint: parts?.endpoint || 'unbound', availability, isNew: false })
 	}
 
 	const groups = []
@@ -81,10 +85,13 @@ export function buildAllowListGroups(options, selected, {
 		} else {
 			visible = [...chosen, ...others.slice(0, collapsedLimit)]
 		}
+		const listed = decorated.filter(item => item.availability === 'available' || item.availability === 'stale')
 		groups.push({
 			endpoint,
-			total: decorated.filter(item => item.availability !== 'missing').length,
-			selectedCount: decorated.filter(item => item.selected).length,
+			total: listed.length,
+			selectedCount: listed.filter(item => item.selected).length,
+			missingCount: decorated.filter(item => item.selected && item.availability === 'missing').length,
+			manualCount: decorated.filter(item => item.selected && item.availability === 'manual').length,
 			matchIds: matches.map(item => item.id),
 			items: visible,
 			hiddenCount: matches.length - visible.length,

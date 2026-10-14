@@ -2037,7 +2037,7 @@ class LLMClient {
 			if (!$provider['configured']) {
 				$statuses[] = [
 					'id' => $id, 'label' => $provider['label'], 'status' => $provider['credential_error'] ? 'error' : 'unconfigured',
-					'model_count' => 0, 'last_success_at' => null, 'checked_at' => null,
+					'model_count' => 0, 'lists_models' => true, 'last_success_at' => null, 'checked_at' => null,
 					'next_refresh_at' => null,
 					'error' => $provider['credential_error'] ? 'The saved provider credentials could not be read. Save the credentials again.' : null,
 				];
@@ -2046,16 +2046,15 @@ class LLMClient {
 			if ($refresh || (int)($record['next_refresh_at'] ?? 0) <= time()) {
 				$now = time();
 				try {
-					$fetched = $this->withFirstSeenAt(
-						$this->fetchModelOptionsForEndpoint(
-							$id, $provider['label'], $provider['url'], $provider['key'], $timeout,
-							$requestOptions, $modelReference, $streaming
-						),
-						$record,
-						$now,
+					$listed = $this->fetchModelOptionsForEndpoint(
+						$id, $provider['label'], $provider['url'], $provider['key'], $timeout,
+						$requestOptions, $modelReference, $streaming
 					);
+					$models = self::withoutModelListPlaceholders($listed);
+					$fetched = $this->withFirstSeenAt($models, $record, $now);
 					$record = [
 						'fingerprint' => $provider['fingerprint'], 'options' => $fetched,
+						'lists_models' => $models !== [] || $listed === [],
 						'last_success_at' => $now, 'checked_at' => $now,
 						'next_refresh_at' => $now + self::MODEL_OPTIONS_CACHE_TTL,
 						'status' => 'ready', 'error' => null,
@@ -2086,7 +2085,8 @@ class LLMClient {
 			}
 			$statuses[] = [
 				'id' => $id, 'label' => $provider['label'], 'status' => $record['status'] ?? 'error',
-				'model_count' => count($providerOptions), 'last_success_at' => $record['last_success_at'] ?? null,
+				'model_count' => count($providerOptions), 'lists_models' => ($record['lists_models'] ?? true) !== false,
+				'last_success_at' => $record['last_success_at'] ?? null,
 				'checked_at' => $record['checked_at'] ?? null, 'next_refresh_at' => $record['next_refresh_at'] ?? null,
 				'error' => $record['error'] ?? null,
 			];
@@ -2095,6 +2095,20 @@ class LLMClient {
 			'models' => array_column($options, 'id'), 'model_options' => $options,
 			'providers' => $statuses, 'refresh_interval_seconds' => self::MODEL_OPTIONS_CACHE_TTL,
 		];
+	}
+
+	/**
+	 * Some gateways list a placeholder instead of their models, e.g. LiteLLM keys
+	 * with access to "all-team-models". Such entries are not model IDs.
+	 *
+	 * @param array<int,array<string,mixed>> $options
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function withoutModelListPlaceholders(array $options): array {
+		return array_values(array_filter($options, static function (array $option): bool {
+			$model = strtolower(trim((string)($option['model'] ?? '')));
+			return !in_array($model, ['all-team-models', 'all-proxy-models', '*'], true) && !str_ends_with($model, '/*');
+		}));
 	}
 
 	/**
@@ -2177,7 +2191,12 @@ class LLMClient {
 		$raw = $this->config?->getAppValue(Application::APP_ID, self::MODEL_CATALOGUE_CACHE_PREFIX . $id, '') ?? '';
 		$record = json_decode($raw, true);
 		if (is_array($record) && ($record['fingerprint'] ?? '') === $fingerprint && is_array($record['options'] ?? null)) {
-			$record['options'] = array_values(array_filter($this->normalizeCachedModelOptions($record['options']), static fn (array $option): bool => $option['endpoint'] === $id));
+			$options = array_values(array_filter($this->normalizeCachedModelOptions($record['options']), static fn (array $option): bool => $option['endpoint'] === $id));
+			$record['options'] = self::withoutModelListPlaceholders($options);
+			// Lists cached before placeholders were recognised.
+			if ($options !== [] && $record['options'] === []) {
+				$record['lists_models'] = false;
+			}
 		} else {
 			$record = ['fingerprint' => $fingerprint, 'options' => []];
 		}
