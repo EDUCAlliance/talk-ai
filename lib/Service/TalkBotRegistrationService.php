@@ -205,8 +205,14 @@ class TalkBotRegistrationService {
 		return $secret;
 	}
 
-	private function getWebhookUrl(): string {
+	/** Absolute URL of the Talk webhook that the managed bot registration uses. */
+	public function getWebhookUrl(): string {
 		return $this->urlGenerator->linkToRouteAbsolute('educai.webhook.talk');
+	}
+
+	/** Whether a webhook secret is stored; it is neither decrypted nor returned. */
+	public function hasWebhookSecret(): bool {
+		return trim((string)$this->settingsMapper->getSettings()->getWebhookSecret()) !== '';
 	}
 
 	/**

@@ -289,6 +289,73 @@ class ModelCatalogueTest extends TestCase {
 		$this->assertSame([], $this->calls);
 	}
 
+	public function testFirstSuccessfulListIsABaselineAndOnlyLaterAdditionsAreMarkedNew(): void {
+		$client = $this->client();
+		$baseline = $client->getModelCatalogue();
+		$this->assertSame(['primary:alpha' => null, 'secondary:beta' => null], $this->firstSeen($baseline));
+
+		$this->models['primary'][] = 'gamma';
+		$before = time();
+		$refreshed = $this->firstSeen($client->getModelCatalogue(true));
+		$this->assertNull($refreshed['primary:alpha']);
+		$this->assertNull($refreshed['secondary:beta']);
+		$this->assertGreaterThanOrEqual($before, $refreshed['primary:gamma']);
+		$this->assertLessThanOrEqual(time(), $refreshed['primary:gamma']);
+
+		// Later refreshes and other processes keep the first sighting.
+		$this->expire('primary');
+		$this->assertSame($refreshed, $this->firstSeen($this->client()->getModelCatalogue()));
+		$this->assertSame(['primary', 'secondary', 'primary', 'secondary', 'primary'], $this->calls);
+		$stored = json_decode($this->storage['llm_model_catalogue_primary'], true);
+		$this->assertSame([null, $refreshed['primary:gamma']], array_column($stored['options'], 'first_seen_at'));
+	}
+
+	public function testFirstSeenAtSurvivesOutagesAndRestartsWithANewBaselineAfterACredentialChange(): void {
+		$client = $this->client();
+		$client->getModelCatalogue();
+		$this->models['secondary'][] = 'delta';
+		$firstSeen = $this->firstSeen($client->getModelCatalogue(true))['secondary:delta'];
+		$this->assertIsInt($firstSeen);
+
+		$this->failures['secondary'] = new \Exception('unavailable', 503);
+		$stale = $client->getModelCatalogue(true);
+		$this->assertSame('stale', $stale['providers'][1]['status']);
+		$this->assertSame($firstSeen, $this->firstSeen($stale)['secondary:delta']);
+
+		unset($this->failures['secondary']);
+		$this->keys['secondary'] = 'rotated-secondary-key';
+		$this->models['secondary'][] = 'epsilon';
+		$rotated = $this->firstSeen($client->getModelCatalogue());
+		$this->assertSame(['primary:alpha' => null, 'secondary:beta' => null, 'secondary:delta' => null, 'secondary:epsilon' => null], $rotated);
+	}
+
+	public function testCachedFirstSeenAtIsPreservedAndMalformedValuesAreIgnored(): void {
+		$this->storage['llm_model_catalogue_primary'] = json_encode([
+			'fingerprint' => hash('sha256', "https://primary.invalid/v1/models\0primary-test-key"),
+			'options' => [
+				['id' => 'primary:a', 'model' => 'a', 'endpoint' => 'primary', 'first_seen_at' => 1700000000],
+				['id' => 'primary:b', 'model' => 'b', 'endpoint' => 'primary', 'first_seen_at' => 'yesterday'],
+				['id' => 'primary:c', 'model' => 'c', 'endpoint' => 'primary', 'first_seen_at' => -5],
+				['id' => 'primary:d', 'model' => 'd', 'endpoint' => 'primary'],
+			],
+			'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300, 'status' => 'ready', 'error' => null,
+		]);
+		$catalogue = $this->client()->getModelCatalogue();
+		$this->assertSame(['primary:a' => 1700000000, 'primary:b' => null, 'primary:c' => null, 'primary:d' => null, 'secondary:beta' => null],
+			$this->firstSeen($catalogue));
+		$this->assertSame(['secondary'], $this->calls);
+		foreach ($catalogue['model_options'] as $option) {
+			$this->assertArrayHasKey('first_seen_at', $option);
+		}
+	}
+
+	/**
+	 * @return array<string,?int>
+	 */
+	private function firstSeen(array $catalogue): array {
+		return array_column($catalogue['model_options'], 'first_seen_at', 'id');
+	}
+
 	private function expire(string $provider): void {
 		$key = 'llm_model_catalogue_' . $provider;
 		$record = json_decode($this->storage[$key], true);

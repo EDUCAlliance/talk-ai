@@ -259,7 +259,8 @@ class Application extends App implements IBootstrap {
 			return new DoclingClient(
 				$c->get(\OCP\Http\Client\IClientService::class),
 				$c->get(SettingsService::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(\OCP\IL10N::class),
 			);
 		});
 

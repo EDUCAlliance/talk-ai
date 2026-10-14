@@ -430,4 +430,23 @@ class CatalogueClient {
 			'error' => null,
 		];
 	}
+
+	/**
+	 * Fingerprint of the endpoint testConnection() would test. The public API has
+	 * no key; enablement is not part of the target.
+	 *
+	 * @return array{fingerprint: ?string, summary: ?string}
+	 */
+	public function connectionCheckTarget(?string $endpoint = null): array {
+		try {
+			$resolved = rtrim(trim($endpoint ?? $this->getEndpoint()), '/');
+		} catch (\Throwable $e) {
+			return ['fingerprint' => null, 'summary' => null];
+		}
+
+		return [
+			'fingerprint' => ConnectionCheckStore::fingerprint('catalogue', [$resolved], null),
+			'summary' => null,
+		];
+	}
 }

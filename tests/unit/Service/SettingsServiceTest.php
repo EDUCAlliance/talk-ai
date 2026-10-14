@@ -750,6 +750,106 @@ class SettingsServiceTest extends TestCase {
 		$this->assertSame('', $service->getDoclingConfig()['api_key']);
 	}
 
+	public function testClearCredentialsRemovesOptionalKeysAndANewValueInTheSameRequestWins(): void {
+		$settings = new Settings();
+		$settings->setApiKey('encrypted-api-key-existing');
+		$settings->setWebhookSecret('encrypted-webhook-existing');
+		$settings->setEmbeddingApiKey('encrypted-embedding-existing');
+		$settings->setDoclingApiKey('encrypted-docling-existing');
+		$settings->setVisionApiKey('encrypted-vision-existing');
+		$settings->setSpeechApiKey('encrypted-speech-existing');
+		$settings->setSecondaryApiKey('encrypted-secondary-existing');
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->expects($this->once())->method('getSettings')->willReturn($settings);
+		$mapper->expects($this->once())->method('update')->willReturnCallback(static fn (Settings $updated): Settings => $updated);
+		$credentials = $this->createMock(CredentialService::class);
+		$credentials->expects($this->once())->method('encrypt')->with('new-vision-key')->willReturn('encrypted-new-vision');
+		$service = new SettingsService($mapper, $credentials,
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class));
+
+		$result = $service->updateSettings('custom', '', 'https://example.invalid/v1', 'primary:model-a',
+			visionApiKey: 'new-vision-key',
+			clearCredentials: ['secondaryApiKey', 'embeddingApiKey', 'visionApiKey', 'speechApiKey', 'doclingApiKey', 'speechApiKey']);
+
+		$this->assertNull($result->getSecondaryApiKey());
+		$this->assertNull($result->getEmbeddingApiKey());
+		$this->assertNull($result->getSpeechApiKey());
+		$this->assertNull($result->getDoclingApiKey());
+		$this->assertSame('encrypted-new-vision', $result->getVisionApiKey());
+		$this->assertSame('encrypted-api-key-existing', $result->getApiKey());
+		$this->assertSame('encrypted-webhook-existing', $result->getWebhookSecret());
+		$json = $result->jsonSerialize();
+		foreach (['secondary_api_key', 'embedding_api_key', 'speech_api_key', 'docling_api_key'] as $field) {
+			$this->assertSame('', $json[$field], 'A removed key is reported like one that was never set');
+		}
+		$this->assertSame('***', $json['vision_api_key']);
+	}
+
+	public function testOnlyOptionalCredentialsCanBeClearedAndInvalidRequestsChangeNothing(): void {
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->expects($this->never())->method('getSettings');
+		$mapper->expects($this->never())->method('update');
+		$credentials = $this->createMock(CredentialService::class);
+		$credentials->expects($this->never())->method('encrypt');
+		$service = new SettingsService($mapper, $credentials,
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class));
+		foreach ([['apiKey'], ['webhookSecret'], ['catalogueApiKey'], ['visionApiKey', 'unknown'], [1], [['visionApiKey']], [null], ['VisionApiKey']] as $invalid) {
+			try {
+				$service->updateSettings('custom', 'new-key', 'https://new.example', 'primary:model', clearCredentials: $invalid);
+				$this->fail('Invalid credential removal accepted: ' . json_encode($invalid));
+			} catch (\InvalidArgumentException $e) {
+				$this->assertSame('Only optional credentials can be removed', $e->getMessage());
+			}
+		}
+		$this->assertSame([], SettingsService::validateClearCredentials(null));
+		$this->assertSame([], SettingsService::validateClearCredentials([]));
+		$this->assertSame(['doclingApiKey', 'visionApiKey'], SettingsService::validateClearCredentials(['doclingApiKey', 'visionApiKey', 'doclingApiKey']));
+	}
+
+	public function testClearedCredentialsBehaveLikeNeverSetIncludingFallbacksAndReindexReminders(): void {
+		$settings = new Settings();
+		$settings->setDefaultModel('primary:model');
+		$settings->setApiKey('encrypted-main');
+		$settings->setEmbeddingApiKey('encrypted-embedding');
+		$settings->setEmbeddingModel('embedding-model');
+		$settings->setDoclingApiKey('encrypted-docling');
+		$settings->setVisionApiKey('encrypted-vision');
+		$settings->setVisionModel('vision-model');
+		$settings->setSecondaryApiKey('encrypted-secondary');
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->method('getSettings')->willReturn($settings);
+		$mapper->method('update')->willReturnCallback(static fn (Settings $updated): Settings => $updated);
+		$credentials = $this->createMock(CredentialService::class);
+		$credentials->method('decrypt')->willReturnCallback(static fn (?string $value): string => str_replace('encrypted-', '', (string)$value));
+		$appConfig = [];
+		$config = $this->createMock(\OCP\IConfig::class);
+		$config->method('getAppValue')->willReturnCallback(static function (string $app, string $key, string $default = '') use (&$appConfig): string {
+			return $appConfig[$key] ?? $default;
+		});
+		$config->method('setAppValue')->willReturnCallback(static function (string $app, string $key, string $value) use (&$appConfig): void {
+			$appConfig[$key] = $value;
+		});
+		$embeddingConfiguration = new \OCA\EducAI\Service\EmbeddingConfigurationService($config);
+		$service = new SettingsService($mapper, $credentials,
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class), $embeddingConfiguration);
+
+		$service->updateSettings('custom', '', '', 'primary:model', clearCredentials: ['visionApiKey', 'doclingApiKey', 'secondaryApiKey']);
+		$this->assertSame([], $appConfig, 'Keys outside embeddings do not require reindexing');
+		$this->assertNull($service->getVisionApiKey());
+		// Like a never-set key: VisionClient then uses the main key.
+		$this->assertNull($service->getVisionConfig()['api_key']);
+		$this->assertNull($service->getSecondaryApiKey());
+		$this->assertSame('main', $service->getDoclingConfig('legacy', 'bearer')['api_key']);
+		$this->assertNull($service->getDoclingConfig('docling_serve', 'x_api_key')['api_key']);
+
+		$service->updateSettings('custom', '', '', 'primary:model', clearCredentials: ['embeddingApiKey']);
+		$this->assertNull($service->getRagConfig()['embedding_api_key']);
+		$this->assertTrue($embeddingConfiguration->isRequired('rag'), 'Embeddings now use the main key: a key change');
+		$this->assertTrue($embeddingConfiguration->isRequired('catalogue'));
+	}
+
 	public function testInvalidDoclingOptionsFailBeforeAnySettingsOrCredentialMutation(): void {
 		$mapper = $this->createMock(SettingsMapper::class);
 		$mapper->expects($this->never())->method('getSettings');

@@ -11,6 +11,7 @@ use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\EmbeddingAdminService;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\ModelReferenceMigrationService;
@@ -66,6 +67,7 @@ class SettingsController extends Controller {
 		IL10N $l10n,
 		private EmbeddingAdminService $embeddingAdmin,
 		private ?ModelReferenceMigrationService $modelReferenceMigration = null,
+		private ?ConnectionCheckStore $connectionChecks = null,
 	) {
 		parent::__construct($appName, $request);
 		$this->settingsService = $settingsService;
@@ -155,6 +157,7 @@ class SettingsController extends Controller {
 		?string $doclingAuthMode = null,
 		mixed $maxOutputTokens = null,
 		mixed $modelOutputTokenLimits = null,
+		?array $clearCredentials = null,
 	): DataResponse {
 		try {
 			if (trim($defaultModel) === '') {
@@ -162,13 +165,15 @@ class SettingsController extends Controller {
 			}
 			$this->settingsService->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 			$this->settingsService->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
+			$cleared = SettingsService::validateClearCredentials($clearCredentials);
 			$this->logger->info('EducAI Settings Update - catalogueApiEndpoint: ' . var_export($catalogueApiEndpoint, true) . ', catalogueEnabled: ' . var_export($catalogueEnabled, true));
 			$previous = $this->settingsService->getSettings();
 			$connectionsChanged = $apiProvider !== $previous->getApiProvider()
 				|| $apiEndpoint !== $previous->getApiEndpoint()
 				|| ($secondaryApiEndpoint !== null && $secondaryApiEndpoint !== $previous->getSecondaryApiEndpoint())
 				|| ($apiKey !== '' && $apiKey !== '***')
-				|| ($secondaryApiKey !== null && $secondaryApiKey !== '' && $secondaryApiKey !== '***');
+				|| ($secondaryApiKey !== null && $secondaryApiKey !== '' && $secondaryApiKey !== '***')
+				|| in_array('secondaryApiKey', $cleared, true);
 			$defaultModel = $this->normalizeModelChoice($defaultModel, [$previous->getDefaultModel()], $connectionsChanged);
 			if ($fallbackModel !== null) {
 				$fallbackModel = $this->normalizeModelChoice($fallbackModel, [$previous->getFallbackModel()], $connectionsChanged);
@@ -242,6 +247,7 @@ class SettingsController extends Controller {
 				$doclingAuthMode,
 				$maxOutputTokens,
 				$modelOutputTokenLimits,
+				$clearCredentials,
 			);
 
 			$afterRateLimitConfig = $this->extractRateLimitConfig($settings);
@@ -283,21 +289,45 @@ class SettingsController extends Controller {
 			|| !preg_match('/^(primary|secondary):\S+$/D', $model)) {
 			return $this->errorResponse('model_reference_required', $this->l10n->t('Select a model with an explicit provider before testing.'), 400);
 		}
+		$started = microtime(true);
 		try {
 			$result = $this->llmClient->testModelConnection($model);
 			$result['message'] = $this->l10n->t('A real test answer was received from the selected provider.');
+			$this->rememberModelCheck($model, true, is_int($result['latency_ms'] ?? null) ? $result['latency_ms'] : $this->elapsedMs($started), null);
 			return new DataResponse($result);
 		} catch (\Throwable $e) {
 			// Provider errors can contain credentials or upstream response bodies.
 			$this->logger->warning('The explicit model connection test failed');
+			$error = $this->l10n->t('The provider did not return a test answer. Check the saved endpoint, credentials, selected model and available credit.');
+			$this->rememberModelCheck($model, false, $this->elapsedMs($started), $error);
 			return new DataResponse([
 				'success' => false,
 				'errorCode' => 'model_test_failed',
-				'error' => $this->l10n->t('The provider did not return a test answer. Check the saved endpoint, credentials, selected model and available credit.'),
+				'error' => $error,
 				'model' => $model,
 				'checked_at' => time(),
 			], 502);
 		}
+	}
+
+	/**
+	 * Remember the explicit test for the administrator overview. It never changes
+	 * the test response; only the safe message shown to the administrator is kept.
+	 */
+	private function rememberModelCheck(string $reference, bool $success, ?int $durationMs, ?string $error): void {
+		if ($this->connectionChecks === null) {
+			return;
+		}
+		try {
+			$target = $this->llmClient->connectionCheckTarget($reference);
+			$this->connectionChecks->record('model', $success, $durationMs, $target['summary'] ?? $reference, $error, $target['fingerprint'] ?? null);
+		} catch (\Throwable $e) {
+			$this->logger->warning('The connection check result could not be remembered', ['service' => 'model']);
+		}
+	}
+
+	private function elapsedMs(float $started): int {
+		return (int)round((microtime(true) - $started) * 1000);
 	}
 
 	private function modelCatalogueResponse(bool $refresh): DataResponse {

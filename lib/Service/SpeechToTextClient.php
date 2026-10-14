@@ -78,10 +78,7 @@ class SpeechToTextClient {
 	 * @return array{success:bool,error?:string}
 	 */
 	public function testConnection(?string $endpoint = null, ?string $apiKey = null, ?string $model = null): array {
-		$config = $this->settingsService->getSpeechConfig();
-		$resolvedEndpoint = $this->resolveTranscriptionEndpoint($endpoint ?? $config['endpoint'] ?? null);
-		$resolvedKey = $apiKey ?? $config['api_key'] ?? $this->settingsService->getApiKey();
-		$resolvedModel = $model ?? $config['model'] ?? null;
+		[$resolvedEndpoint, $resolvedKey, $resolvedModel] = $this->resolveTestTarget($endpoint, $apiKey, $model);
 
 		if ($resolvedEndpoint === null || $resolvedKey === null || $resolvedKey === '' || $resolvedModel === null || $resolvedModel === '') {
 			return ['success' => false, 'error' => 'Speech endpoint, key or model not configured'];
@@ -103,6 +100,41 @@ class SpeechToTextClient {
 				@unlink($tempPath);
 			}
 		}
+	}
+
+	/**
+	 * Fingerprint and model of what testConnection() would test, with the same
+	 * precedence for unsaved values. Keys are only ever hashed.
+	 *
+	 * @return array{fingerprint: ?string, summary: ?string}
+	 */
+	public function connectionCheckTarget(?string $endpoint = null, ?string $apiKey = null, ?string $model = null): array {
+		try {
+			[$resolvedEndpoint, $resolvedKey, $resolvedModel] = $this->resolveTestTarget($endpoint, $apiKey, $model);
+		} catch (\Throwable $e) {
+			return ['fingerprint' => null, 'summary' => $model];
+		}
+
+		return [
+			'fingerprint' => ConnectionCheckStore::fingerprint('speech', [$resolvedEndpoint, $resolvedModel], $resolvedKey),
+			'summary' => $resolvedModel,
+		];
+	}
+
+	/**
+	 * Unsaved values win over the saved speech settings, which fall back to the
+	 * main endpoint and key.
+	 *
+	 * @return array{0: ?string, 1: ?string, 2: ?string} Endpoint, key and model
+	 */
+	private function resolveTestTarget(?string $endpoint, ?string $apiKey, ?string $model): array {
+		$config = $this->settingsService->getSpeechConfig();
+
+		return [
+			$this->resolveTranscriptionEndpoint($endpoint ?? $config['endpoint'] ?? null),
+			$apiKey ?? $config['api_key'] ?? $this->settingsService->getApiKey(),
+			$model ?? $config['model'] ?? null,
+		];
 	}
 
 	/**

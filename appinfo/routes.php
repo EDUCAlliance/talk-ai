@@ -73,8 +73,10 @@ return [
 
 		// Provider health-check routes
 		['name' => 'tools#testDocling', 'url' => '/api/v1/admin/docling/test', 'verb' => 'POST'],
+		['name' => 'tools#detectDocling', 'url' => '/api/v1/admin/docling/detect', 'verb' => 'POST'],
 		['name' => 'tools#testVision', 'url' => '/api/v1/admin/vision/test', 'verb' => 'POST'],
 		['name' => 'tools#testSpeech', 'url' => '/api/v1/admin/speech/test', 'verb' => 'POST'],
+		['name' => 'admin_status#status', 'url' => '/api/v1/admin/status', 'verb' => 'GET'],
 
 		// Rate limit routes
 		['name' => 'settings#rateLimitStatus', 'url' => '/api/v1/admin/ratelimit/status', 'verb' => 'GET'],

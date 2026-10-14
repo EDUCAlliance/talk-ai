@@ -15,6 +15,11 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class DoclingClientTest extends TestCase {
+	/** @var list<string> */
+	private array $httpViolations = [];
+	/** @var list<array<string,list<IResponse|\Throwable>>> */
+	private array $httpScripts = [];
+
 	public function testBothProfilesShareTheSameUploadAndAdminTestContract(): void {
 		foreach (['legacy', 'docling_serve'] as $profile) {
 			foreach (['bearer', 'x_api_key', 'none'] as $auth) {
@@ -252,6 +257,463 @@ class DoclingClientTest extends TestCase {
 				&& $options['multipart'][0]['filename'] === 'manual.pdf' && $options['multipart'][0]['contents'] === $contents
 		))->willReturn($this->response(['markdown' => 'Long document']));
 		$this->assertSame('Long document', $this->createDoclingClient($client)->convertToMarkdown($file));
+	}
+
+	public function testDetectWithBlankUrlUsesTheAcademicCloudDefaultAndMainKeyFallback(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'POST https://chat-ai.academiccloud.de/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
+		], $calls);
+		$result = $this->detectionClient($http)->detect(null, null);
+		$this->assertDetection([
+			'success' => true, 'profile' => 'legacy', 'auth_mode' => 'bearer', 'service' => 'AcademicCloud / EDUC',
+			'title' => null, 'version' => null, 'source' => 'default', 'endpoint' => '',
+			'conversion_url' => 'https://chat-ai.academiccloud.de/v1/documents/convert', 'error' => null,
+		], $result);
+		$this->assertSame([['POST', 'https://chat-ai.academiccloud.de/v1/documents/convert',
+			['Accept' => 'application/json', 'Authorization' => 'Bearer main-key']]], $calls);
+	}
+
+	public function testDetectRecognisesConversionPathsWithoutDiscovery(): void {
+		foreach ([
+			['https://d.example/prefix/v1/convert/file/', 'docling_serve', 'https://d.example/prefix/v1/convert/file'],
+			['https://d.example/v1/convert', 'docling_serve', 'https://d.example/v1/convert/file'],
+			['https://d.example/prefix/v1/documents/convert', 'legacy', 'https://d.example/prefix/v1/documents/convert'],
+		] as [$input, $profile, $url]) {
+			$calls = [];
+			$http = $this->scriptedHttp(['POST ' . $url => [$this->response($profile === 'legacy'
+				? ['markdown' => '# Test'] : ['status' => 'success', 'document' => ['md_content' => '# Test']])]], $calls);
+			$result = $this->detectionClient($http, 'docling-key')->detect(' ' . $input . ' ', null);
+			$this->assertTrue($result['success'], $input);
+			$this->assertSame($profile, $result['profile']);
+			$this->assertSame($profile === 'legacy' ? 'bearer' : 'x_api_key', $result['auth_mode']);
+			$this->assertSame('path', $result['source']);
+			$this->assertSame($input, $result['endpoint']);
+			$this->assertSame($url, $result['conversion_url']);
+			$this->assertCount(1, $calls, 'A known conversion path needs no discovery request');
+		}
+	}
+
+	public function testDetectReadsOpenApiForDoclingServeAndUsesTheTypedKey(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/convert/file', '/v1/convert/source', '/health']))],
+			'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->detectionClient($http, 'stored-key')->detect('https://d.example/', 'typed-key');
+		$this->assertDetection([
+			'success' => true, 'profile' => 'docling_serve', 'auth_mode' => 'x_api_key', 'service' => 'Docling Serve',
+			'title' => 'Docling Serve', 'version' => '1.36.0', 'source' => 'openapi', 'endpoint' => 'https://d.example/',
+			'conversion_url' => 'https://d.example/v1/convert/file', 'error' => null,
+		], $result);
+		$this->assertSame([
+			['GET', 'https://d.example/openapi.json', ['Accept' => 'application/json']],
+			['POST', 'https://d.example/v1/convert/file', ['Accept' => 'application/json', 'X-Api-Key' => 'typed-key']],
+		], $calls);
+	}
+
+	public function testDetectReadsOpenApiForLegacyAndFallsBackToTheMainKey(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/documents/convert'], 'EDUC Docling API', '0.4'))],
+			'POST https://d.example/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example/v1', null);
+		$this->assertSame('legacy', $result['profile']);
+		$this->assertSame('bearer', $result['auth_mode']);
+		$this->assertSame('AcademicCloud / EDUC', $result['service']);
+		$this->assertSame(['EDUC Docling API', '0.4', 'openapi'], [$result['title'], $result['version'], $result['source']]);
+		$this->assertSame('https://d.example/v1', $result['endpoint']);
+		$this->assertTrue($result['success']);
+		$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[1][2]);
+	}
+
+	public function testDetectCanIgnoreAStoredKeyThatIsBeingRemoved(): void {
+		$settings = $this->createMock(SettingsService::class);
+		$settings->method('getDoclingConfig')->willReturnCallback(static fn (?string $profile = null, ?string $auth = null): array => [
+			'docling_enabled' => true, 'docling_api_endpoint' => null,
+			'docling_api_profile' => $profile ?? 'docling_serve', 'docling_auth_mode' => $auth ?? 'x_api_key',
+			'api_key' => ($auth ?? 'x_api_key') === 'none' ? '' : 'stored-key',
+		]);
+		$settings->method('getApiKey')->willReturn('main-key');
+
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/convert/file']))],
+			'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->createDoclingClient($http, settings: $settings)->detect('https://d.example', null, true);
+		$this->assertTrue($result['success']);
+		$this->assertSame('none', $result['auth_mode'], 'An auth-free server is not credited to a key that is being removed');
+		$this->assertSame(['Accept' => 'application/json'], $calls[0][2]);
+		$this->assertSame(['Accept' => 'application/json'], $calls[1][2]);
+
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'POST https://d.example/educ/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
+		], $calls);
+		$result = $this->createDoclingClient($http, settings: $settings)->detect('https://d.example/educ/v1/documents/convert', '', true);
+		$this->assertTrue($result['success']);
+		$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[0][2],
+			'Legacy Bearer falls back to the main key, never to the removed dedicated key');
+	}
+
+	public function testDetectPrefersDoclingServeWhenOpenApiListsBothRoutes(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/documents/convert', '/v1/convert/file']))],
+			'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example', null);
+		$this->assertSame('docling_serve', $result['profile']);
+		$this->assertSame('none', $result['auth_mode']);
+		$this->assertSame(['Accept' => 'application/json'], $calls[1][2]);
+	}
+
+	public function testDetectUsesTheVersionEndpointWhenOpenApiIsUnavailableOrInconclusive(): void {
+		foreach ([$this->response('missing', 404), $this->response($this->openApi(['/health'])), $this->response('<html>docs</html>')] as $openApi) {
+			$calls = [];
+			$http = $this->scriptedHttp([
+				'GET https://d.example/openapi.json' => [$openApi],
+				'GET https://d.example/version' => [$this->response(['docling-serve' => '1.5.0', 'docling' => '2.40.0'])],
+				'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+			], $calls);
+			$result = $this->detectionClient($http)->detect('https://d.example/openapi.json', null);
+			$this->assertSame(['docling_serve', 'version', '1.5.0', null], [$result['profile'], $result['source'], $result['version'], $result['title']]);
+			$this->assertSame('https://d.example', $result['endpoint'], 'An OpenAPI URL is stored as the server base');
+			$this->assertTrue($result['success']);
+			$this->assertCount(3, $calls);
+		}
+	}
+
+	public function testDetectProbesDoclingServeBeforeLegacyAndOnlyAfterNotFound(): void {
+		foreach ([404, 405] as $status) {
+			$calls = [];
+			$http = $this->scriptedHttp([
+				'GET https://d.example/openapi.json' => [$this->response('missing', 404)],
+				'GET https://d.example/version' => [$this->response('missing', 404)],
+				'POST https://d.example/v1/convert/file' => [$this->response(['detail' => 'Not Found'], $status)],
+				'POST https://d.example/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
+			], $calls);
+			$result = $this->detectionClient($http)->detect('https://d.example', null);
+			$this->assertSame(['legacy', 'bearer', 'probe', true], [$result['profile'], $result['auth_mode'], $result['source'], $result['success']]);
+			$this->assertSame('https://d.example/v1/documents/convert', $result['conversion_url']);
+			$this->assertSame(['Accept' => 'application/json'], $calls[2][2]);
+			$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[3][2]);
+		}
+	}
+
+	public function testDetectNeverProbesLegacyAfterServeTimeoutServerErrorOrAuthenticationFailure(): void {
+		foreach ([
+			[new Exception('cURL error 28: Operation timed out for https://d.example/?token=private-secret'), null, 'timed out'],
+			[$this->response(['detail' => 'private-body'], 500), 'docling_serve', 'HTTP 500'],
+			[$this->response(['detail' => 'private-body'], 503), 'docling_serve', 'HTTP 503'],
+			[$this->response(['detail' => 'private-body'], 401), 'docling_serve', 'authentication failed'],
+		] as [$serveAnswer, $profile, $message]) {
+			$calls = [];
+			$http = $this->scriptedHttp([
+				'GET https://d.example/openapi.json' => [$this->response('missing', 404)],
+				'GET https://d.example/version' => [$this->response('missing', 404)],
+				'POST https://d.example/v1/convert/file' => [$serveAnswer],
+			], $calls);
+			$result = $this->detectionClient($http)->detect('https://d.example', null);
+			$this->assertCount(3, $calls, 'Legacy must not be probed after ' . $message);
+			$this->assertFalse($result['success']);
+			$this->assertSame($profile, $result['profile']);
+			$this->assertSame($profile === null ? null : 'probe', $result['source']);
+			$this->assertStringContainsString($message, $result['error']);
+			$this->assertStringNotContainsString('private', json_encode($result));
+		}
+	}
+
+	public function testDetectReportsUndetectableServerWhenNoRouteExists(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/prefix/openapi.json' => [$this->response('missing', 404)],
+			'GET https://d.example/prefix/version' => [$this->response(['version' => 'other service'])],
+			'POST https://d.example/prefix/v1/convert/file' => [$this->response('missing', 404)],
+			'POST https://d.example/prefix' => [$this->response('missing', 405)],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example/prefix', null);
+		$this->assertDetection([
+			'success' => false, 'profile' => null, 'auth_mode' => null, 'service' => null, 'title' => null,
+			'version' => null, 'source' => null, 'endpoint' => 'https://d.example/prefix',
+			'conversion_url' => 'https://d.example/prefix',
+			'error' => 'No Docling API was detected at this address. Check the URL or enter the full conversion endpoint.',
+		], $result);
+		$this->assertCount(4, $calls);
+	}
+
+	public function testDetectSelectsDoclingServeAuthentication(): void {
+		$url = 'https://d.example/v1/convert/file';
+		$noKey = ['Accept' => 'application/json'];
+		$apiKey = ['Accept' => 'application/json', 'X-Api-Key' => 'docling-key'];
+		$bearer = ['Accept' => 'application/json', 'Authorization' => 'Bearer docling-key'];
+		foreach ([
+			'no key' => [null, [$this->response($this->serveSuccess())], [$noKey], 'none', true, null],
+			'stored key' => ['docling-key', [$this->response($this->serveSuccess())], [$apiKey], 'x_api_key', true, null],
+			'bearer gateway' => ['docling-key', [$this->response([], 401), $this->response($this->serveSuccess())], [$apiKey, $bearer], 'bearer', true, null],
+			'wrong key' => ['docling-key', [$this->response([], 403), $this->response([], 401)], [$apiKey, $bearer], 'x_api_key', false, 'authentication failed (HTTP 403)'],
+			'bearer accepted, conversion failed' => ['docling-key', [$this->response([], 401), $this->response([], 500)], [$apiKey, $bearer], 'bearer', false, 'HTTP 500'],
+			'no retry after other failures' => ['docling-key', [$this->response([], 500)], [$apiKey], 'x_api_key', false, 'HTTP 500'],
+		] as $case => [$storedKey, $answers, $headers, $authMode, $success, $message]) {
+			$calls = [];
+			$result = $this->detectionClient($this->scriptedHttp(['POST ' . $url => $answers], $calls), $storedKey)->detect($url, null);
+			$this->assertSame($headers, array_column($calls, 2), $case);
+			$this->assertSame('docling_serve', $result['profile'], $case);
+			$this->assertSame($authMode, $result['auth_mode'], $case);
+			$this->assertSame($success, $result['success'], $case);
+			$message === null ? $this->assertNull($result['error']) : $this->assertStringContainsString($message, $result['error'], $case);
+		}
+	}
+
+	public function testDetectRetriesAnAuthenticatedOpenApiDocumentOnlyWhenAKeyIsAvailable(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response([], 401), $this->response([], 403), $this->response($this->openApi(['/v1/convert/file']))],
+			'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example', 'typed-key');
+		$this->assertSame(['openapi', 'x_api_key', true], [$result['source'], $result['auth_mode'], $result['success']]);
+		$this->assertSame([
+			['Accept' => 'application/json'],
+			['Accept' => 'application/json', 'X-Api-Key' => 'typed-key'],
+			['Accept' => 'application/json', 'Authorization' => 'Bearer typed-key'],
+		], array_column(array_slice($calls, 0, 3), 2));
+		foreach (array_slice($calls, 0, 3) as $call) {
+			$this->assertSame('GET', $call[0]);
+		}
+
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response([], 401)],
+			'GET https://d.example/version' => [$this->response([], 401)],
+			'POST https://d.example/v1/convert/file' => [$this->response([], 401)],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example', null);
+		$this->assertCount(3, $calls, 'Without a key there is nothing to retry');
+		$this->assertSame(['docling_serve', 'none', 'probe', false], [$result['profile'], $result['auth_mode'], $result['source'], $result['success']]);
+		$this->assertStringContainsString('authentication failed', $result['error']);
+	}
+
+	public function testDetectSanitizesRemoteTitleAndVersion(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/convert/file'],
+				"\u{0000}Docling\u{001B}[31m Serve\u{202E}\n", str_repeat('9', 200)))],
+			'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example', null);
+		$this->assertSame('Docling[31m Serve', $result['title']);
+		$this->assertSame(str_repeat('9', 80), $result['version']);
+
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response(['paths' => ['/v1/convert/file' => []], 'info' => ['title' => ['x'], 'version' => "\u{0007}"]])],
+			'POST https://d.example/v1/convert/file' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example', null);
+		$this->assertNull($result['title']);
+		$this->assertNull($result['version']);
+	}
+
+	public function testDetectStoresAReachableEndpointForPrefixedServers(): void {
+		foreach ([
+			'legacy behind a prefix' => ['https://d.example/prefix', ['/v1/documents/convert'], 'https://d.example/prefix/v1/documents/convert', 'https://d.example/prefix/v1/documents/convert'],
+			'legacy prefix route' => ['https://d.example/prefix/', ['/api/v1/documents/convert'], 'https://d.example/prefix/api/v1/documents/convert', 'https://d.example/prefix/api/v1/documents/convert'],
+			'unsafe remote route' => ['https://d.example/prefix', ['/../evil/v1/documents/convert'], 'https://d.example/prefix/v1/documents/convert', 'https://d.example/prefix/v1/documents/convert'],
+			'expandable legacy base' => ['https://d.example/prefix/v1', ['/v1/documents/convert'], 'https://d.example/prefix/v1', 'https://d.example/prefix/v1/documents/convert'],
+			'serve docs page' => ['https://d.example/prefix/docs', ['/v1/convert/file'], 'https://d.example/prefix', 'https://d.example/prefix/v1/convert/file'],
+			'serve prefix' => ['https://d.example/prefix', ['/v1/convert/file'], 'https://d.example/prefix', 'https://d.example/prefix/v1/convert/file'],
+			'query retained' => ['https://d.example/prefix?tenant=a', ['/v1/documents/convert'], 'https://d.example/prefix/v1/documents/convert?tenant=a', 'https://d.example/prefix/v1/documents/convert?tenant=a'],
+		] as $case => [$input, $routes, $endpoint, $postUrl]) {
+			$calls = [];
+			$legacy = str_contains($postUrl, '/documents/');
+			$http = $this->scriptedHttp([
+				'GET https://d.example/prefix/openapi.json' => [$this->response($this->openApi($routes))],
+				'POST ' . $postUrl => [$this->response($legacy ? ['markdown' => '# Test'] : $this->serveSuccess())],
+			], $calls);
+			$result = $this->detectionClient($http)->detect($input, null);
+			$this->assertTrue($result['success'], $case);
+			$this->assertSame($endpoint, $result['endpoint'], $case);
+			$this->assertSame(strtok($postUrl, '?'), $result['conversion_url'], $case);
+		}
+	}
+
+	public function testDetectKeepsTheQueryForStorageButNeverReturnsItInTheConversionUrl(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'POST https://d.example/v1/convert/file?token=private-secret' => [$this->response($this->serveSuccess())],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://d.example/v1/convert/file?token=private-secret', null);
+		$this->assertSame('https://d.example/v1/convert/file?token=private-secret', $result['endpoint']);
+		$this->assertSame('https://d.example/v1/convert/file', $result['conversion_url']);
+	}
+
+	public function testDetectRejectsInvalidInputBeforeAnyRequest(): void {
+		foreach ([
+			['/relative', null, 'HTTP(S) URL'],
+			['file:///tmp/document', null, 'HTTP(S) URL'],
+			['ftp://d.example/', null, 'HTTP(S) URL'],
+			['https://user:private-secret@d.example/', null, 'embedded credentials'],
+			['https://d.example/#fragment', null, 'fragment'],
+			['https://d.example/v1/convert/source', null, 'expects JSON'],
+			['https://d.example/v1/convert/source/async', null, 'expects JSON'],
+			['https://d.example/v1/convert/file/async', null, 'Async Docling'],
+			['https://d.example', "private\r\nsecret", 'control characters'],
+		] as [$endpoint, $key, $message]) {
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->never())->method('get');
+			$client->expects($this->never())->method('post');
+			$settings = $this->createMock(SettingsService::class);
+			$settings->expects($this->never())->method('getDoclingConfig');
+			try {
+				$this->createDoclingClient($client, settings: $settings)->detect($endpoint, $key);
+				$this->fail('Invalid input accepted: ' . $endpoint);
+			} catch (\InvalidArgumentException $e) {
+				$this->assertStringContainsString($message, $e->getMessage());
+				$this->assertStringNotContainsString('private', $e->getMessage());
+				$this->assertStringNotContainsString('d.example', $e->getMessage());
+			}
+		}
+	}
+
+	public function testDetectNeverReturnsUpstreamBodiesTransportDetailsOrKeys(): void {
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [new Exception('Connection refused for https://d.example/?key=private-secret private-body')],
+		], $calls);
+		$result = $this->detectionClient($http, 'private-key')->detect('https://d.example', null);
+		$this->assertCount(1, $calls, 'An unreachable server is neither queried again nor probed');
+		$this->assertSame(['success' => false, 'profile' => null, 'source' => null, 'conversion_url' => null, 'duration_ms' => null],
+			array_intersect_key($result, array_flip(['success', 'profile', 'source', 'conversion_url', 'duration_ms'])));
+		$this->assertSame('Docling could not be reached. Check the server address, connectivity and TLS configuration.', $result['error']);
+
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'GET https://d.example/openapi.json' => [$this->response('private-body', 500)],
+			'GET https://d.example/version' => [$this->response(['docling-serve' => ['private-body']])],
+			'POST https://d.example/v1/convert/file' => [$this->response(['detail' => 'private-body', 'errors' => ['private-body']])],
+		], $calls);
+		$result = $this->detectionClient($http, 'private-key')->detect('https://d.example', null);
+		$this->assertSame(['docling_serve', 'probe', false], [$result['profile'], $result['source'], $result['success']]);
+		$this->assertStringContainsString('conversion errors', $result['error']);
+		$this->assertStringNotContainsString('private', json_encode($result));
+	}
+
+	public function testDetectReportsUnreadableSettingsWithoutAnyRequest(): void {
+		$settings = $this->createMock(SettingsService::class);
+		$settings->method('getDoclingConfig')->willThrowException(new \RuntimeException('cannot decrypt private-secret'));
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->never())->method('get');
+		$client->expects($this->never())->method('post');
+		$result = $this->createDoclingClient($client, settings: $settings)->detect('https://d.example', null);
+		$this->assertFalse($result['success']);
+		$this->assertNull($result['profile']);
+		$this->assertSame('Unable to read Docling settings. Check the saved configuration.', $result['error']);
+	}
+
+	public function testConnectionCheckTargetMatchesOnlyTheSameEffectiveTarget(): void {
+		$saved = ['docling_enabled' => true, 'docling_api_endpoint' => 'https://d.example/', 'docling_api_profile' => 'docling_serve',
+			'docling_auth_mode' => 'x_api_key', 'api_key' => 'saved-key'];
+		$settings = $this->createMock(SettingsService::class);
+		$settings->method('getDoclingConfig')->willReturnCallback(static fn (?string $profile = null, ?string $auth = null): array
+			=> ['docling_api_profile' => $profile ?? $saved['docling_api_profile'], 'docling_auth_mode' => $auth ?? $saved['docling_auth_mode'],
+				'api_key' => ($auth ?? $saved['docling_auth_mode']) === 'none' ? '' : $saved['api_key']] + $saved);
+		$docling = $this->createDoclingClient($this->createMock(IClient::class), settings: $settings);
+		$current = $docling->connectionCheckTarget();
+		$this->assertSame('Docling Serve · x_api_key', $current['summary']);
+		$this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $current['fingerprint']);
+		$this->assertSame($current, $docling->connectionCheckTarget('https://d.example/v1/convert/file', 'saved-key', 'docling_serve', 'x_api_key'));
+		$this->assertNotSame($current['fingerprint'], $docling->connectionCheckTarget(null, 'typed-key')['fingerprint']);
+		$this->assertNotSame($current['fingerprint'], $docling->connectionCheckTarget('https://other.example')['fingerprint']);
+		$this->assertNotSame($current['fingerprint'], $docling->connectionCheckTarget(null, null, null, 'bearer')['fingerprint']);
+		$none = $docling->connectionCheckTarget(null, 'ignored-key', null, 'none');
+		$this->assertSame($none, $docling->connectionCheckTarget(null, null, null, 'none'), 'No-auth tests do not depend on a key');
+		$this->assertStringNotContainsString('saved-key', json_encode([$current, $none]));
+	}
+
+	protected function assertPostConditions(): void {
+		// The client catches transport exceptions, so violations are collected instead of asserted inline.
+		$this->assertSame([], $this->httpViolations);
+		foreach ($this->httpScripts as $script) {
+			$this->assertSame([], array_filter($script), 'Every scripted answer must be requested');
+		}
+	}
+
+	/**
+	 * @param array<string,list<IResponse|\Throwable>> $script "METHOD url" => answers in request order
+	 * @param array<int,array{0:string,1:string,2:array<string,string>}> $calls
+	 */
+	private function scriptedHttp(array $script, array &$calls): IClient {
+		$this->httpScripts[] = &$script;
+		$client = $this->createMock(IClient::class);
+		$answer = function (string $method, string $url, array $options) use (&$script, &$calls): IResponse {
+			$calls[] = [$method, $url, $options['headers'] ?? []];
+			$key = $method . ' ' . $url;
+			if (($options['allow_redirects'] ?? true) !== false || ($options['http_errors'] ?? true) !== false
+				|| ($options['timeout'] ?? PHP_INT_MAX) > ($method === 'GET' ? 10 : 60)) {
+				$this->httpViolations[] = 'Unbounded or redirecting request: ' . $key;
+			}
+			if (($script[$key] ?? []) === []) {
+				$this->httpViolations[] = 'Unexpected request: ' . $key;
+				throw new \RuntimeException('Unexpected request');
+			}
+			$next = array_shift($script[$key]);
+			if ($next instanceof \Throwable) {
+				throw $next;
+			}
+			return $next;
+		};
+		$client->method('get')->willReturnCallback(static fn (string $url, array $options = []): IResponse => $answer('GET', $url, $options));
+		$client->method('post')->willReturnCallback(static fn (string $url, array $options = []): IResponse => $answer('POST', $url, $options));
+		return $client;
+	}
+
+	/**
+	 * Saved settings without an endpoint: a dedicated key (if any) and a main API key.
+	 */
+	private function detectionClient(IClient $client, ?string $dedicatedKey = null): DoclingClient {
+		$settings = $this->createMock(SettingsService::class);
+		$settings->method('getDoclingConfig')->willReturnCallback(static function (?string $profile = null, ?string $auth = null) use ($dedicatedKey): array {
+			$profile ??= 'legacy';
+			$auth ??= 'bearer';
+			return [
+				'docling_enabled' => false, 'docling_api_endpoint' => null,
+				'docling_api_profile' => $profile, 'docling_auth_mode' => $auth,
+				'api_key' => $auth === 'none' ? '' : ($dedicatedKey ?? ($profile === 'legacy' && $auth === 'bearer' ? 'main-key' : null)),
+			];
+		});
+		return $this->createDoclingClient($client, settings: $settings);
+	}
+
+	/**
+	 * @param array<string,mixed> $expected
+	 * @param array<string,mixed> $result
+	 */
+	private function assertDetection(array $expected, array $result): void {
+		$this->assertIsInt($result['duration_ms']);
+		$this->assertGreaterThanOrEqual(0, $result['duration_ms']);
+		unset($result['duration_ms']);
+		ksort($expected);
+		ksort($result);
+		$this->assertSame($expected, $result);
+	}
+
+	/**
+	 * @param list<string> $routes
+	 * @return array<string,mixed>
+	 */
+	private function openApi(array $routes, string $title = 'Docling Serve', string $version = '1.36.0'): array {
+		return ['openapi' => '3.1.0', 'info' => ['title' => $title, 'version' => $version],
+			'paths' => array_fill_keys($routes, ['post' => ['summary' => 'private-body']])];
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function serveSuccess(): array {
+		return ['status' => 'success', 'document' => ['md_content' => '# Test'], 'errors' => []];
 	}
 
 	private function response(mixed $payload, int $status = 200): IResponse {

@@ -716,6 +716,41 @@ class LLMClient {
 	}
 
 	/**
+	 * Fingerprint of the saved provider endpoint and key that an explicit model
+	 * test of $reference uses, without discovery or network access. Keys are
+	 * only hashed. The fingerprint is null for a reference without a provider.
+	 *
+	 * @return array{fingerprint: ?string, summary: string}
+	 */
+	public function connectionCheckTarget(string $reference): array {
+		$reference = trim($reference);
+		if (strlen($reference) > self::MAX_MODEL_REFERENCE_LENGTH || preg_match('/[\x00-\x1f\x7f]/', $reference) === 1
+			|| preg_match('/^(primary|secondary):(\S.*)$/', $reference, $matches) !== 1) {
+			return ['fingerprint' => null, 'summary' => $reference];
+		}
+		$endpointKey = $matches[1];
+		$model = trim($matches[2]);
+		try {
+			// Mirrors resolveModelConfig(), but an incomplete provider still has a stable fingerprint.
+			$settings = $this->settingsService->getSettings();
+			if ($endpointKey === 'secondary') {
+				$url = trim((string)$settings->getSecondaryApiEndpoint());
+				$key = (string)($this->settingsService->getSecondaryApiKey() ?? '');
+			} else {
+				$url = $this->getEndpoint($settings->getApiProvider(), $settings->getApiEndpoint());
+				$key = $this->settingsService->getApiKey();
+			}
+		} catch (\Throwable $e) {
+			return ['fingerprint' => null, 'summary' => $endpointKey . ':' . $model];
+		}
+
+		return [
+			'fingerprint' => ConnectionCheckStore::fingerprint('model', [$endpointKey, $url, $model], $key),
+			'summary' => $endpointKey . ':' . $model,
+		];
+	}
+
+	/**
 	 * @param array{id:string} $currentModelConfig
 	 * @return array{id:string,endpoint_key:string,endpoint:string,api_key:string,model:string}|null
 	 */
@@ -2011,9 +2046,13 @@ class LLMClient {
 			if ($refresh || (int)($record['next_refresh_at'] ?? 0) <= time()) {
 				$now = time();
 				try {
-					$fetched = $this->fetchModelOptionsForEndpoint(
-						$id, $provider['label'], $provider['url'], $provider['key'], $timeout,
-						$requestOptions, $modelReference, $streaming
+					$fetched = $this->withFirstSeenAt(
+						$this->fetchModelOptionsForEndpoint(
+							$id, $provider['label'], $provider['url'], $provider['key'], $timeout,
+							$requestOptions, $modelReference, $streaming
+						),
+						$record,
+						$now,
 					);
 					$record = [
 						'fingerprint' => $provider['fingerprint'], 'options' => $fetched,
@@ -2056,6 +2095,32 @@ class LLMClient {
 			'models' => array_column($options, 'id'), 'model_options' => $options,
 			'providers' => $statuses, 'refresh_interval_seconds' => self::MODEL_OPTIONS_CACHE_TTL,
 		];
+	}
+
+	/**
+	 * Models keep the time they were first listed for this provider fingerprint.
+	 * The first successful list is a baseline (null), so nothing is flagged as new
+	 * after an upgrade, a new provider or a credential change.
+	 *
+	 * @param array<int,array<string,mixed>> $options
+	 * @param array<string,mixed> $previous Last record for the same fingerprint
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function withFirstSeenAt(array $options, array $previous, int $now): array {
+		$baseline = !isset($previous['last_success_at']);
+		$known = [];
+		foreach ($previous['options'] ?? [] as $option) {
+			if (is_array($option) && is_string($option['id'] ?? null)) {
+				$known[$option['id']] = is_int($option['first_seen_at'] ?? null) ? $option['first_seen_at'] : null;
+			}
+		}
+		foreach ($options as &$option) {
+			$option['first_seen_at'] = $baseline ? null
+				: (array_key_exists($option['id'], $known) ? $known[$option['id']] : $now);
+		}
+		unset($option);
+
+		return $options;
 	}
 
 	/** Never expose provider response bodies, keys, or private URLs in discovery status. */
@@ -2137,7 +2202,7 @@ class LLMClient {
 
 	/**
 	 * @param array<mixed> $options
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
+	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int},first_seen_at:?int}>
 	 */
 	private function normalizeCachedModelOptions(array $options): array {
 		$normalized = [];
@@ -2153,12 +2218,14 @@ class LLMClient {
 			}
 
 			$limits = ModelOutputBudget::normalize(is_array($option['limits'] ?? null) ? $option['limits'] : []);
+			$firstSeenAt = $option['first_seen_at'] ?? null;
 			$normalized[] = [
 				'id' => $endpoint . ':' . $model,
 				'label' => (string)($option['label'] ?? (($endpoint === 'secondary' ? 'Secondary' : 'Primary') . ' · ' . $model)),
 				'model' => $model,
 				'endpoint' => $endpoint,
-			] + ($limits === [] ? [] : ['limits' => $limits]);
+			] + ($limits === [] ? [] : ['limits' => $limits])
+				+ ['first_seen_at' => is_int($firstSeenAt) && $firstSeenAt > 0 ? $firstSeenAt : null];
 		}
 
 		return $normalized;

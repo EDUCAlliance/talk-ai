@@ -9,6 +9,7 @@ use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\CatalogueClient;
+use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\McpClient;
@@ -38,6 +39,7 @@ class ToolsController extends Controller {
     private IL10N $l10n;
     private BuiltInToolUiService $builtInToolUiService;
     private CatalogueClient $catalogueClient;
+    private ?ConnectionCheckStore $connectionChecks;
 
     public function __construct(
         string $appName,
@@ -56,6 +58,7 @@ class ToolsController extends Controller {
         IL10N $l10n,
         BuiltInToolUiService $builtInToolUiService,
         CatalogueClient $catalogueClient,
+        ?ConnectionCheckStore $connectionChecks = null,
     ) {
         parent::__construct($appName, $request);
         $this->toolMapper = $toolMapper;
@@ -72,6 +75,7 @@ class ToolsController extends Controller {
         $this->l10n = $l10n;
         $this->builtInToolUiService = $builtInToolUiService;
         $this->catalogueClient = $catalogueClient;
+        $this->connectionChecks = $connectionChecks;
     }
 
     /**
@@ -351,6 +355,11 @@ class ToolsController extends Controller {
             fn (): array => $this->catalogueClient->testConnection($catalogueApiEndpoint),
             'catalogue_connection_failed',
             $this->l10n->t('Catalogue connection test failed'),
+            check: 'catalogue',
+            checkTarget: fn (array $result): array => [
+                'summary' => is_string($result['version'] ?? null) && trim($result['version']) !== ''
+                    ? 'Catalogue API ' . mb_substr(trim($result['version']), 0, 80) : null,
+            ] + $this->catalogueClient->connectionCheckTarget($catalogueApiEndpoint),
         );
     }
 
@@ -371,7 +380,55 @@ class ToolsController extends Controller {
             'docling_connection_failed',
             $this->l10n->t('Docling connection test failed'),
             true, // DoclingClient returns only fixed, safe diagnostics, never upstream bodies.
+            check: 'docling',
+            checkTarget: fn (): array => $this->doclingClient->connectionCheckTarget($doclingApiEndpoint, $doclingApiKey, $doclingApiProfile, $doclingAuthMode),
         );
+    }
+
+    /**
+     * @AdminRequired
+     * Detect the Docling API profile and authentication of a saved or unsaved URL
+     * and prove it with one small test conversion. Settings are never changed.
+     *
+     * HTTP 200 whenever detection ran, including a failed conversion; HTTP 400 only for invalid input.
+     */
+    public function detectDocling(
+        ?string $doclingApiEndpoint = null,
+        ?string $doclingApiKey = null,
+        bool $ignoreStoredKey = false,
+    ): DataResponse {
+        try {
+            // $ignoreStoredKey: the administrator is removing the stored key, so test without it.
+            $result = $this->doclingClient->detect($doclingApiEndpoint, $doclingApiKey, $ignoreStoredKey);
+        } catch (\InvalidArgumentException $e) {
+            // DoclingClient validation messages are fixed and never echo the URL or key.
+            return new DataResponse([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'errorCode' => 'docling_detection_invalid',
+            ], 400);
+        } catch (\Throwable $e) {
+            // Only the type: traces of the conversion adapter could carry credentials.
+            $this->logger->error('Docling detection failed unexpectedly', [
+                'exception_class' => get_class($e),
+            ]);
+            return new DataResponse([
+                'success' => false,
+                'error' => $this->l10n->t('Docling detection failed'),
+                'errorCode' => 'docling_detection_failed',
+            ], 500);
+        }
+
+        if (!$result['success']) {
+            $this->logger->warning('Docling detection did not complete a test conversion', [
+                'profile' => $result['profile'],
+                'source' => $result['source'],
+                'details' => $result['error'],
+            ]);
+        }
+        $this->rememberDetection($result, $doclingApiKey, $ignoreStoredKey);
+
+        return new DataResponse($result);
     }
 
     /**
@@ -388,6 +445,8 @@ class ToolsController extends Controller {
             fn (): array => $this->visionClient->testConnection($visionApiEndpoint, $visionApiKey, $visionModel),
             'vision_connection_failed',
             $this->l10n->t('Vision connection test failed'),
+            check: 'vision',
+            checkTarget: fn (): array => $this->visionClient->connectionCheckTarget($visionApiEndpoint, $visionApiKey, $visionModel),
         );
     }
 
@@ -405,11 +464,14 @@ class ToolsController extends Controller {
             fn (): array => $this->speechToTextClient->testConnection($speechApiEndpoint, $speechApiKey, $speechModel),
             'speech_connection_failed',
             $this->l10n->t('Speech connection test failed'),
+            check: 'speech',
+            checkTarget: fn (): array => $this->speechToTextClient->connectionCheckTarget($speechApiEndpoint, $speechApiKey, $speechModel),
         );
     }
 
     /**
      * @param callable():array{success:bool,error?:string} $testConnection
+     * @param (callable(array<string,mixed>):array{fingerprint?:?string,summary?:?string})|null $checkTarget
      */
     private function runConnectionTest(
         string $serviceName,
@@ -418,10 +480,14 @@ class ToolsController extends Controller {
         string $errorCode,
         string $failureMessage,
         bool $useSafeError = false,
+        ?string $check = null,
+        ?callable $checkTarget = null,
     ): DataResponse {
+        $started = microtime(true);
         try {
             $result = $testConnection();
             if ($result['success']) {
+                $this->rememberCheck($check, $checkTarget, $result, null, $started);
                 return new DataResponse([
                     'success' => true,
                     'error' => null,
@@ -432,9 +498,11 @@ class ToolsController extends Controller {
                 'endpoint' => $endpoint ?? 'null',
                 'details' => $result['error'] ?? null,
             ]);
+            $error = $useSafeError ? ($result['error'] ?? $failureMessage) : $failureMessage;
+            $this->rememberCheck($check, $checkTarget, $result, $error, $started);
             return new DataResponse([
                 'success' => false,
-                'error' => $useSafeError ? ($result['error'] ?? $failureMessage) : $failureMessage,
+                'error' => $error,
                 'errorCode' => $errorCode,
             ], 400);
         } catch (Exception $e) {
@@ -442,11 +510,77 @@ class ToolsController extends Controller {
                 'endpoint' => $endpoint ?? 'null',
                 'exception' => $e,
             ]);
+            $this->rememberCheck($check, $checkTarget, ['success' => false], $failureMessage, $started);
             return new DataResponse([
                 'success' => false,
                 'error' => $failureMessage,
                 'errorCode' => $errorCode,
             ], 400);
+        }
+    }
+
+    /**
+     * Remember an explicit check for the administrator overview. Only the error
+     * already returned to the administrator is stored, never upstream details.
+     *
+     * @param (callable(array<string,mixed>):array{fingerprint?:?string,summary?:?string})|null $checkTarget
+     * @param array<string,mixed> $result
+     */
+    private function rememberCheck(?string $check, ?callable $checkTarget, array $result, ?string $error, float $started): void {
+        if ($check === null || $this->connectionChecks === null) {
+            return;
+        }
+        $durationMs = (int)round((microtime(true) - $started) * 1000);
+        try {
+            $target = $checkTarget !== null ? $checkTarget($result) : [];
+        } catch (\Throwable $e) {
+            // Without a fingerprint the check is remembered, but never reported as current.
+            $target = [];
+        }
+        try {
+            $this->connectionChecks->record(
+                $check,
+                ($result['success'] ?? false) === true,
+                $durationMs,
+                $target['summary'] ?? null,
+                $error,
+                $target['fingerprint'] ?? null,
+            );
+        } catch (\Throwable $e) {
+            $this->logger->warning('The connection check result could not be remembered', ['service' => $check]);
+        }
+    }
+
+    /**
+     * @param array{success: bool, profile: ?string, auth_mode: ?string, service: ?string, version: ?string, endpoint: string, duration_ms: ?int, error: ?string} $result
+     */
+    private function rememberDetection(array $result, ?string $typedKey, bool $ignoreStoredKey = false): void {
+        if ($this->connectionChecks === null) {
+            return;
+        }
+        $fingerprint = null;
+        $summary = null;
+        if ($result['profile'] !== null) {
+            $summary = $result['service'] . ($result['version'] !== null ? ' ' . $result['version'] : '')
+                . ' · ' . $result['auth_mode'];
+            try {
+                // Same precedence as the detection: a typed key, otherwise the stored key.
+                $typedKey = trim((string)$typedKey);
+                $fingerprint = $this->doclingClient->connectionCheckTarget(
+                    $result['endpoint'],
+                    $typedKey !== '' ? $typedKey : null,
+                    $result['profile'],
+                    $result['auth_mode'],
+                    $ignoreStoredKey,
+                )['fingerprint'] ?? null;
+            } catch (\Throwable $e) {
+                // Without a fingerprint the check is remembered, but never reported as current.
+            }
+        }
+        try {
+            $this->connectionChecks->record('docling', $result['success'], $result['duration_ms'], $summary, $result['error'], $fingerprint);
+        } catch (\Throwable $e) {
+            $this->logger->warning('The connection check result could not be remembered', ['service' => 'docling']);
         }
     }
 
