@@ -577,7 +577,7 @@ class LLMClient {
 			return [
 				'id' => 'secondary:' . $model,
 				'endpoint_key' => 'secondary',
-				'endpoint' => $endpoint,
+				'endpoint' => self::chatCompletionsUrl($endpoint),
 				'api_key' => $apiKey,
 				'model' => $model,
 			];
@@ -734,7 +734,7 @@ class LLMClient {
 			// Mirrors resolveModelConfig(), but an incomplete provider still has a stable fingerprint.
 			$settings = $this->settingsService->getSettings();
 			if ($endpointKey === 'secondary') {
-				$url = trim((string)$settings->getSecondaryApiEndpoint());
+				$url = self::chatCompletionsUrl(trim((string)$settings->getSecondaryApiEndpoint()));
 				$key = (string)($this->settingsService->getSecondaryApiKey() ?? '');
 			} else {
 				$url = $this->getEndpoint($settings->getApiProvider(), $settings->getApiEndpoint());
@@ -1985,12 +1985,22 @@ class LLMClient {
 			case 'gwdg':
 				return self::GWDG_CHAT_COMPLETIONS_ENDPOINT;
 			case 'azure':
-				return $customEndpoint ?? ''; // Azure requires custom endpoint
+				return self::chatCompletionsUrl($customEndpoint ?? ''); // Azure requires custom endpoint
 			case 'custom':
-				return $customEndpoint ?? '';
+				return self::chatCompletionsUrl($customEndpoint ?? '');
 			default:
 				throw new \Exception('Unknown or unconfigured API provider: ' . $provider);
 		}
+	}
+
+	/**
+	 * Chat URL for a configured endpoint. Providers document a base URL ending in /v1;
+	 * model discovery, embeddings and speech already derive their paths from it.
+	 * Any other address is used unchanged.
+	 */
+	public static function chatCompletionsUrl(string $endpoint): string {
+		$base = rtrim(trim($endpoint), '/');
+		return preg_match('#/v1$#', $base) === 1 ? $base . '/chat/completions' : $endpoint;
 	}
 
 	/**

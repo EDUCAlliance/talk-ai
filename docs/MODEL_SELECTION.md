@@ -4,7 +4,7 @@ Talk AI 2.43.0 keeps model discovery, administrator approval and inference testi
 
 ## Administrator workflow
 
-1. Save the primary and optional secondary provider settings in **Model Endpoints**.
+1. Save the primary and optional secondary provider settings in **Model Endpoints**. An endpoint is either the provider's base URL ending in `/v1` (for example `https://llm-proxy.educ-alliance.org/v1`) or the full `…/chat/completions` address. Chat, image understanding, the model list, embeddings and speech derive their paths from a `/v1` base URL; any other address is used as entered.
 2. Review each provider's catalogue status and last successful update. **Refresh model lists** explicitly retries discovery; ordinary refreshes use a five-minute cache and a one-minute retry cooldown after failure.
 3. Select the **Default Model** for bots that inherit the administrator default. A global default is required. Models not listed by a provider can be entered manually with an explicit provider and model ID.
 4. If **Allow Multiple Models** is enabled, explicitly select the models users may choose. New discoveries never expand this list. Turning it off preserves existing bot selections; new bots inherit the default.

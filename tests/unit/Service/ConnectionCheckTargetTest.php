@@ -100,6 +100,16 @@ class ConnectionCheckTargetTest extends TestCase {
 		$this->assertStringNotContainsString('main-key', json_encode([$primary, $secondary]));
 	}
 
+	public function testBaseUrlAndFullChatUrlAreTheSameEffectiveEndpoint(): void {
+		$llm = new LLMClient($this->http(), $this->settingsService(), $this->createMock(LoggerInterface::class));
+		$vision = new VisionClient($this->http(), $this->settingsService(), $this->createMock(LoggerInterface::class));
+		$targets = fn (): array => [$llm->connectionCheckTarget('primary:alpha'), $llm->connectionCheckTarget('secondary:beta'), $vision->connectionCheckTarget()];
+		$full = $targets();
+		$this->settings->setApiEndpoint('https://main.example/v1');
+		$this->settings->setSecondaryApiEndpoint('https://secondary.example/v1/');
+		$this->assertSame($full, $targets());
+	}
+
 	private function settingsService(): SettingsService {
 		$service = $this->createMock(SettingsService::class);
 		$service->method('getSettings')->willReturnCallback(fn (): Settings => $this->settings);

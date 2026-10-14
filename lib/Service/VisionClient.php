@@ -258,6 +258,6 @@ class VisionClient {
 			return null;
 		}
 
-		return rtrim($endpoint, '/');
+		return LLMClient::chatCompletionsUrl(rtrim($endpoint, '/'));
 	}
 }

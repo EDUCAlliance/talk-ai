@@ -90,6 +90,52 @@ class LLMClientTest extends TestCase {
 		$this->assertSame(16384, $calls[1]['max_completion_tokens']);
 	}
 
+	#[DataProvider('chatEndpointForms')]
+	public function testChatCompletionsUrlCompletesBaseUrlsAndKeepsOtherAddresses(string $configured, string $expected): void {
+		$this->assertSame($expected, LLMClient::chatCompletionsUrl($configured));
+	}
+
+	public static function chatEndpointForms(): array {
+		return [
+			'base url' => ['https://llm-proxy.educ-alliance.org/v1', 'https://llm-proxy.educ-alliance.org/v1/chat/completions'],
+			'base url with slash and spaces' => [' https://openrouter.ai/api/v1/ ', 'https://openrouter.ai/api/v1/chat/completions'],
+			'full chat url' => ['https://chat-ai.academiccloud.de/v1/chat/completions', 'https://chat-ai.academiccloud.de/v1/chat/completions'],
+			'azure deployment' => [
+				'https://res.openai.azure.com/openai/deployments/gpt/chat/completions?api-version=2024-10-21',
+				'https://res.openai.azure.com/openai/deployments/gpt/chat/completions?api-version=2024-10-21',
+			],
+			'other path' => ['https://llm.example/gateway/', 'https://llm.example/gateway/'],
+			'v1 inside a segment' => ['https://llm.example/apiv1', 'https://llm.example/apiv1'],
+			'empty' => ['', ''],
+		];
+	}
+
+	public function testBaseUrlEndpointsSendChatRequestsToChatCompletions(): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/');
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
+		$settingsService->method('normalizePositiveInteger')->willReturn(90);
+		$settingsService->method('getMaxOutputTokens')->willReturn(1024);
+		$urls = [];
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url) use (&$urls): IResponse {
+			$urls[] = $url;
+			return $this->jsonResponse(['choices' => [['message' => ['content' => 'Answer'], 'finish_reason' => 'stop']]]);
+		});
+		$llm = new LLMClient($this->clientService($client), $settingsService, $this->logger());
+		$llm->sendAgentTurn('system', [], [], 'primary:model-a');
+		$llm->sendAgentTurn('system', [], [], 'secondary:model-b');
+		$this->assertSame([
+			'https://primary.example.invalid/v1/chat/completions',
+			'https://secondary.example.invalid/v1/chat/completions',
+		], $urls);
+	}
+
 	#[DataProvider('contextLengthErrorResponses')]
 	public function testContextOverflowDoesNotRetryUnchangedRequest(
 		array|string $body,
