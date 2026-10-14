@@ -635,10 +635,6 @@ export default {
 
 .button.primary:hover { background-color: var(--color-primary-element-hover); }
 
-.button.error { color: var(--color-error); }
-
-.button.error:hover { background: var(--color-error); color: white; border-color: var(--color-error); }
-
 /* Approval Section */
 .approval-section {
 	margin-top: 40px;
@@ -659,9 +655,10 @@ export default {
 	font-weight: 600;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .section-header .badge {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 	padding: 2px 10px;
 	border-radius: 12px;
 	font-size: 13px;
@@ -733,8 +730,8 @@ export default {
 }
 
 .visibility-badge.global {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .visibility-badge.teams {
@@ -743,8 +740,8 @@ export default {
 }
 
 .visibility-badge.groups {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .visibility-badge.personal {
@@ -769,8 +766,8 @@ export default {
 	border-radius: 10px;
 	font-size: 11px;
 	font-weight: 600;
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 	margin-inline-start: 6px;
 }
 
@@ -930,6 +927,6 @@ export default {
 }
 
 .error-text {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 </style>

@@ -315,9 +315,10 @@ export default {
 	font-weight: 600;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .visibility-badge.global {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .visibility-badge.personal {
@@ -331,8 +332,8 @@ export default {
 }
 
 .visibility-badge.groups {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .access-reason {

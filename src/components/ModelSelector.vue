@@ -153,6 +153,6 @@ export default {
 }
 
 .model-selector__error {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 </style>

@@ -2127,19 +2127,20 @@ export default {
 	text-transform: uppercase;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .status-ready {
-	background: var(--color-success);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-success, var(--color-success)) 15%, transparent);
+	color: var(--color-success-text);
 }
 
 .status-pending {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .status-error {
-	background: var(--color-error);
-	color: #fff;
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
+	color: var(--color-error-text);
 }
 
 .source-meta {
@@ -2149,7 +2150,7 @@ export default {
 }
 
 .source-meta.source-error {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 
 .source-actions {
@@ -2225,7 +2226,7 @@ export default {
 }
 
 .tool-unavailable {
-	color: var(--color-error);
+	color: var(--color-error-text);
 }
 
 .tool-endpoint {
@@ -2349,8 +2350,8 @@ export default {
 	gap: 8px;
 	margin-top: 10px;
 	padding: 10px 14px;
-	background: var(--color-warning-light, #fff3cd);
-	border: 1px solid var(--color-warning);
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	border: 1px solid var(--color-element-warning, var(--color-warning));
 	border-radius: 6px;
 	font-size: 13px;
 	color: var(--color-warning-text, #856404);
@@ -2544,7 +2545,7 @@ select.answer-next {
 
 .inline-error {
 	margin: 0;
-	color: var(--color-error);
+	color: var(--color-error-text);
 	font-size: 13px;
 	font-weight: 600;
 }
@@ -2552,8 +2553,8 @@ select.answer-next {
 .onboarding-error {
 	margin-top: 12px;
 	padding: 10px 14px;
-	background: var(--color-error-light, #fdecea);
-	border: 1px solid color-mix(in srgb, var(--color-error, #b91c1c) 65%, #000 35%);
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
+	border: 1px solid var(--color-element-error, var(--color-error));
 	border-radius: 6px;
 	font-size: 13px;
 	color: var(--color-main-text, #111);

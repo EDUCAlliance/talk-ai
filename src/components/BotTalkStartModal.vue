@@ -454,15 +454,16 @@ textarea {
 	gap: 8px;
 }
 
+/* Nextcloud 32+ turned the status colours into pale surfaces: tint the element colour and use the status text colour so this reads on 30-35. */
 .error-state {
-	background: var(--color-error-hover);
+	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
 	color: var(--color-error-text);
-	border: 1px solid var(--color-error);
+	border: 1px solid var(--color-element-error, var(--color-error));
 }
 
 .warning-state {
-	background: var(--color-warning);
-	color: #000;
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .room-list {
