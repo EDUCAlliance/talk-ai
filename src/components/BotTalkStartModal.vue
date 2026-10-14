@@ -574,11 +574,11 @@ textarea {
 .button.primary {
 	background: var(--color-primary-element);
 	border-color: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .button.primary:hover:not(:disabled) {
-	background: var(--color-primary-element-light);
+	background: var(--color-primary-element-hover);
 }
 
 .button:disabled {

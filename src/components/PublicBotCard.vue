@@ -338,14 +338,16 @@ export default {
 	transition: background 0.2s, border-color 0.2s;
 }
 
-.primary-button {
+/* Nextcloud core lightens every focused <button>; keep the primary colours after a click. */
+.primary-button,
+.primary-button:focus {
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	border: 1px solid var(--color-primary-element);
 }
 
 .primary-button:hover {
-	background: var(--color-primary-element-light);
+	background: var(--color-primary-element-hover);
 }
 
 .secondary-button {
