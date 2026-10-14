@@ -202,7 +202,7 @@ export default {
 .mention-badge {
 	display: inline-block;
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 4px 12px;
 	border-radius: 16px;
 	font-size: 13px;
@@ -253,7 +253,7 @@ export default {
 
 .visibility-badge.teams {
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .visibility-badge.groups {

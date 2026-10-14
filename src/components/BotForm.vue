@@ -2018,13 +2018,13 @@ export default {
 }
 
 .button.primary {
-	background-color: var(--color-primary);
-	color: white;
-	border-color: var(--color-primary);
+	background-color: var(--color-primary-element);
+	color: var(--color-primary-element-text);
+	border-color: var(--color-primary-element);
 }
 
 .button.primary:hover {
-	background-color: var(--color-primary-element-light);
+	background-color: var(--color-primary-element-hover);
 }
 
 /* Align checkbox with label text and standardize size */
@@ -2434,7 +2434,7 @@ export default {
 
 .question-badge {
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 2px 8px;
 	border-radius: 4px;
 	font-size: 12px;

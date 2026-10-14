@@ -631,9 +631,9 @@ export default {
 
 .button:hover { background: var(--color-background-hover); }
 
-.button.primary { background-color: var(--color-primary); color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 14px; }
+.button.primary { background-color: var(--color-primary-element); color: var(--color-primary-element-text); border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 14px; }
 
-.button.primary:hover { background-color: var(--color-primary-element-light); }
+.button.primary:hover { background-color: var(--color-primary-element-hover); }
 
 .button.error { color: var(--color-error); }
 
@@ -707,7 +707,7 @@ export default {
 .approval-info .mention-badge {
 	display: inline-block;
 	background: var(--color-primary-element);
-	color: white;
+	color: var(--color-primary-element-text);
 	padding: 2px 10px;
 	border-radius: 10px;
 	font-size: 12px;
@@ -739,7 +739,7 @@ export default {
 
 .visibility-badge.teams {
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 }
 
 .visibility-badge.groups {
@@ -759,7 +759,7 @@ export default {
 	font-size: 11px;
 	font-weight: 600;
 	background: var(--color-primary-element);
-	color: #fff;
+	color: var(--color-primary-element-text);
 	margin-inline-start: 6px;
 }
 
