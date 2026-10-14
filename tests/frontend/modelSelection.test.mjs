@@ -5,6 +5,8 @@ import vm from 'node:vm'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
 import { normalizeToolSelectionAliases } from '../../src/utils/toolAliases.js'
 import * as modelSelection from '../../src/utils/modelSelection.js'
+import * as adminSettings from '../../src/utils/adminSettings.js'
+import { deriveOverview } from '../../src/utils/adminOverview.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
 
 const primary = { id: 'primary:shared', model: 'shared', endpoint: 'primary', availability: 'available' }
@@ -18,7 +20,7 @@ function component(name, axios = {}, props = {}, globals = {}) {
 	const errors = []
 	const emitted = []
 	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', WIKI_ROOT_FOLDER: 'Talk AI',
-		BotForm: {}, EmbeddingMaintenance: {}, ModelSelector: {}, NcProgressBar: {},
+		BotForm: {}, EmbeddingMaintenance: {}, ModelSelector: {}, NcProgressBar: {}, adminComponents: {}, adminSettings, deriveOverview,
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage, modelSelection, normalizeToolSelectionAliases,
 		applyEducAiRuntimeIconPayload() {}, showSuccess() {}, showError: error => errors.push(error), confirm: () => true,
 		console: { error: (...args) => errors.push(args), log() {}, warn() {} }, ...globals }
@@ -290,7 +292,7 @@ test('empty global default is rejected before settings are submitted', async () 
  state.settings.defaultModel = ''
  await state.saveSettings()
  assert.match(state.errors[0], /Choose a default model/)
- assert.equal(state.openSections.modelEndpoints, true)
+ assert.equal(state.activeTab, 'models')
  assert.equal(state.saving, false)
 })
 

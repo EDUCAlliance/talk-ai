@@ -38,7 +38,7 @@ It connects Talk messages, per-bot system prompts, any **OpenAI-compatible** mod
 |---|---|
 | ![Multi-bot manager](docs/screenshots/multi-bot-manager.png) | ![Create a bot](docs/screenshots/create-bot.png) |
 
-| Admin settings (providers, appearance) | Bot discovery (member view) |
+| Admin settings (overview) | Bot discovery (member view) |
 |---|---|
 | ![Admin settings](docs/screenshots/admin-settings.png) | ![Bot discovery](docs/screenshots/bot-discovery.png) |
 
@@ -61,11 +61,13 @@ sudo -u www-data php occ app:enable educai
 
 > **Why `educai`?** The app's internal identifier is `educai` — Talk AI began as the AI assistant of the **EDUC** university alliance, and the id is kept stable so existing deployments upgrade seamlessly (the routes, database tables and `occ` commands all use it). "Talk AI" is the product name; `educai` is the package name underneath.
 
-**3. Configure** under **Administration settings → Talk AI**:
+**3. Configure** under **Administration settings → Talk AI**. On a new installation, the **Overview** tab shows a short setup checklist:
 
-- Primary API endpoint + API key (any OpenAI-compatible provider)
-- A default model or an allowed model list (fetched from `/v1/models`)
-- Webhook secret
+- **Models:** primary API endpoint + API key (any OpenAI-compatible provider), then a default model from the automatically loaded model list
+- **Models → Test a model response:** one short real request confirms access and credit
+- **System:** the webhook secret is created automatically during installation; replace it here if needed
+
+See [Administrator settings](docs/ADMIN_SETTINGS.md) for all tabs.
 
 **4. Register the Talk bot** (Talk AI attempts this automatically; if your environment blocks it, do it manually):
 
@@ -91,7 +93,8 @@ Discovery does not automatically release models to users or change existing sele
 - [Feature guide](docs/FEATURES.md) · [Architecture](docs/ARCHITECTURE.md) · [Bot setup](docs/BOT_SETUP_GUIDE.md)
 - [Quick start](docs/QUICK_START.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Development](docs/DEVELOPMENT.md)
 - [RAG tool guide](docs/RAG_TOOL_GUIDE.md) · [RAG background jobs](docs/RAG_BACKGROUND_JOBS_GUIDE.md)
-- [Docling setup](docs/DOCLING.md) — official Docling Serve and AcademicCloud / EDUC compatibility
+- [Administrator settings](docs/ADMIN_SETTINGS.md) — tabs, saving, keys, remembered checks
+- [Docling setup](docs/DOCLING.md) — official Docling Serve and AcademicCloud / EDUC compatibility, automatic detection
 - [Tool-provider extension point](docs/TOOL_PROVIDERS.md) — how companion apps add their own bot tools
 
 ## Development

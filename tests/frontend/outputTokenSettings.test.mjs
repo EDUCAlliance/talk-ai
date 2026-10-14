@@ -5,12 +5,14 @@ import vm from 'node:vm'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
 import * as modelSelection from '../../src/utils/modelSelection.js'
+import * as adminSettings from '../../src/utils/adminSettings.js'
+import { deriveOverview } from '../../src/utils/adminOverview.js'
 
 function admin(axios) {
 	const source = readFileSync(new URL('../../src/components/AdminSettings.vue', import.meta.url), 'utf8')
 	const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .+$/gm, '').replace('export default', 'globalThis.component =')
 	const errors = []
-	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', BotForm: {}, EmbeddingMaintenance: {}, ModelSelector: {}, modelSelection,
+	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', BotForm: {}, adminComponents: {}, modelSelection, adminSettings, deriveOverview,
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage,
 		applyEducAiRuntimeIconPayload() {}, showSuccess() {}, showError: error => errors.push(error), confirm: () => true,
 		console: { ...console, error: (...args) => errors.push(args) } }
@@ -18,6 +20,7 @@ function admin(axios) {
 	const component = scope.component
 	const state = component.data()
 	state.errors = errors
+	state.$nextTick = callback => callback()
 	for (const [name, method] of Object.entries(component.methods)) state[name] = method.bind(state)
 	for (const [name, computed] of Object.entries(component.computed)) Object.defineProperty(state, name, { get: computed.bind(state) })
 	return state
@@ -53,13 +56,20 @@ test('invalid output limits prevent saving and open the relevant section', async
 	let calls = 0
 	const state = admin({ put: async () => { calls++; return { data: {} } } })
 	for (const value of [0, -1, 131073, 4096.5, true, '']) {
+		state.activeTab = 'overview'
 		state.settings.maxOutputTokens = value
 		await state.saveSettings()
 		assert.equal(state.saving, false)
-		assert.equal(state.openSections.outputLimits, true)
+		assert.equal(state.activeTab, 'models')
+		assert.equal(state.openDetails.outputOverrides, false, 'The global limit is not inside the exceptions')
 	}
 	assert.equal(calls, 0)
 	assert.equal(state.errors.length, 6)
+	state.settings.maxOutputTokens = 4096
+	state.outputTokenOverrides = [{ model: 'unqualified', tokens: 1024 }]
+	await state.saveSettings()
+	assert.equal(state.openDetails.outputOverrides, true, 'Invalid exceptions open their disclosure')
+	assert.equal(calls, 0)
 })
 
 test('model overrides require qualified unique references and integer limits', () => {

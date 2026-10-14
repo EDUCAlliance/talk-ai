@@ -1,0 +1,9 @@
+// Components used directly by AdminSettings.vue.
+export { default as AdminDialog } from './AdminDialog.vue'
+export { default as BotsTab } from './BotsTab.vue'
+export { default as CapabilitiesTab } from './CapabilitiesTab.vue'
+export { default as KnowledgeTab } from './KnowledgeTab.vue'
+export { default as ModelsTab } from './ModelsTab.vue'
+export { default as OverviewTab } from './OverviewTab.vue'
+export { default as SaveBar } from './SaveBar.vue'
+export { default as SystemTab } from './SystemTab.vue'
