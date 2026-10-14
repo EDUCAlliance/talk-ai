@@ -144,3 +144,22 @@ test('durations switch from milliseconds to seconds', () => {
 	assert.equal(formatDuration(2004), '2 s')
 	assert.equal(formatDuration(12345), `${new Intl.NumberFormat(getCanonicalLocale(), { maximumFractionDigits: 1 }).format(12.3)} s`)
 })
+
+test('the test answer names the model that was actually tested', () => {
+	const overview = deriveOverview(healthy({ checks: { model: { success: true, current: true, checked_at: now - 300, duration_ms: 299, summary: 'secondary:gemma-31b' } } }))
+	const testRow = card(overview, 'models').rows.find(row => row.label === 'Test answer')
+	assert.match(testRow.value, /^gemma-31b · 299 ms · today /)
+	const outdated = deriveOverview(healthy({ checks: { model: { success: true, current: false, checked_at: now - 300, summary: 'primary:old' } } }))
+	assert.equal(card(outdated, 'models').rows.find(row => row.label === 'Test answer').value, 'last test used other settings')
+})
+
+test('saved model names without a provider are listed with the place to fix them', () => {
+	const inSettings = deriveOverview(healthy({ saved: saved({ defaultModel: 'gpt-4o' }), unqualifiedModels: ['gpt-4o', 'a', 'b', 'c'] }))
+	const item = inSettings.attention.find(entry => entry.id === 'unqualified-models')
+	assert.match(item.text, /gpt-4o, a, b, …/)
+	assert.match(item.text, /keep working as before/)
+	assert.equal(item.action.tab, 'models')
+	const inBots = deriveOverview(healthy({ unqualifiedModels: ['bot-model'] }))
+	assert.equal(inBots.attention.find(entry => entry.id === 'unqualified-models').action.tab, 'bots')
+	assert.equal(deriveOverview(healthy({ unqualifiedModels: [] })).attention.length, 0)
+})

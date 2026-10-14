@@ -7,8 +7,6 @@ function formatNumber(value) {
 }
 
 /**
- * Short timestamp for status rows: "today 10:42" or a short date.
- *
  * @param {number|null} unix Seconds since epoch
  * @param {number} now Seconds since epoch
  * @return {string}
@@ -77,8 +75,6 @@ const chip = {
 }
 
 /**
- * Derive the overview from saved settings and live status data.
- *
  * Only saved values are shown: unsaved form edits are not active yet.
  *
  * @param {object} input Status sources
@@ -90,6 +86,7 @@ const chip = {
  * @param {object|null} input.queue Rate-limit queue status
  * @param {Array|null} input.bots All bots, or null while loading
  * @param {Array} input.tools Registered MCP tools
+ * @param {Array} input.unqualifiedModels Saved model names without a provider
  * @param {number} input.now Current time in seconds
  * @param {string} input.appName Product name shown to users
  * @return {{setup: object|null, attention: Array, cards: Array}}
@@ -103,6 +100,7 @@ export function deriveOverview({
 	queue = null,
 	bots = null,
 	tools = [],
+	unqualifiedModels = [],
 	now = Math.floor(Date.now() / 1000),
 	appName = 'Talk AI',
 } = {}) {
@@ -123,6 +121,19 @@ export function deriveOverview({
 				? t('educai', 'The model catalogue of the {provider} has been unreachable since {time}. The last known list is still used.', { provider: name, time: formatWhen(provider.checked_at ?? provider.last_success_at, now) })
 				: t('educai', 'The model catalogue of the {provider} is unavailable. No models are known for it.', { provider: name }),
 			action: { tab: 'models', target: 'educai-admin-providers', label: t('educai', 'Check provider') },
+		})
+	}
+	if (Array.isArray(unqualifiedModels) && unqualifiedModels.length > 0) {
+		const inSettings = [saved.defaultModel, saved.fallbackModel, ...(Array.isArray(saved.allowedModels) ? saved.allowedModels : [])]
+			.some(reference => unqualifiedModels.includes(reference))
+		const shown = unqualifiedModels.slice(0, 3).join(', ') + (unqualifiedModels.length > 3 ? ', …' : '')
+		attention.push({
+			id: 'unqualified-models',
+			tone: 'info',
+			text: n('educai', 'The saved model name {models} has no provider yet. It keeps working as before. Select it again with its provider to pin it.', 'The saved model names {models} have no provider yet. They keep working as before. Select them again with their provider to pin them.', unqualifiedModels.length, { models: shown }),
+			action: inSettings
+				? { tab: 'models', target: 'educai-admin-model-choice', label: t('educai', 'Open model choice') }
+				: { tab: 'bots', target: 'educai-admin-bots', label: t('educai', 'Show bots') },
 		})
 	}
 	if (modelCheck && modelCheck.current && !modelCheck.success) {
@@ -195,7 +206,6 @@ export function deriveOverview({
 		})
 	}
 
-	// Cards
 	const primaryUsable = primary && ['ready', 'stale'].includes(primary.status)
 	const providerRow = provider => ({
 		value: provider && ['ready', 'stale'].includes(provider.status)
@@ -208,7 +218,9 @@ export function deriveOverview({
 	const modelsRows = [{ label: t('educai', 'Primary'), ...providerRow(primary) }]
 	if (secondaryConfigured) modelsRows.push({ label: t('educai', 'Secondary'), ...providerRow(secondary) })
 	modelsRows.push({ label: t('educai', 'Default'), value: splitModelReference(saved.defaultModel)?.model || modelLabel(saved.defaultModel) || t('educai', 'not selected') })
-	modelsRows.push({ label: t('educai', 'Test answer'), ...checkValue(modelCheck, now) })
+	const testedModel = splitModelReference(modelCheck?.summary)?.model
+	const testRow = checkValue(modelCheck, now)
+	modelsRows.push({ label: t('educai', 'Test answer'), ...testRow, value: testedModel && modelCheck?.current ? `${testedModel} · ${testRow.value}` : testRow.value })
 	const degraded = [primary, secondaryConfigured ? secondary : null].some(provider => provider && provider.status !== 'ready')
 	const cards = [{
 		id: 'models',
@@ -315,7 +327,6 @@ export function deriveOverview({
 		action: { tab: 'system', target: 'educai-admin-rate-limits', label: t('educai', 'Open system') },
 	})
 
-	// First-run checklist until the essentials and a first bot exist.
 	const providerDone = String(saved.apiEndpoint ?? '').trim() !== '' && !!stored.apiKey
 	const modelDone = !!splitModelReference(saved.defaultModel)
 	const testDone = !!modelCheck?.success && !!modelCheck.current

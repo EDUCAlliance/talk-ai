@@ -371,3 +371,89 @@ test('the overview is derived from saved settings only', async () => {
 	state.settings.visionModel = ''
 	assert.equal(JSON.stringify(state.overview.cards), before, 'Unsaved edits do not change the status')
 })
+
+test('edits made while a save is running stay unsaved', async () => {
+	let finish
+	const puts = []
+	const state = admin({
+		get: async url => url.endsWith('/settings') ? { data: savedSettings() } : { data: { model_options: [], providers: [] } },
+		put: (url, payload) => { puts.push(payload); return new Promise(resolve => { finish = () => resolve({ data: {} }) }) },
+	})
+	await state.loadSettings()
+	state.settings.ragChunkSize = 800
+	const saving = state.saveSettings()
+	state.settings.ragChunkSize = 900
+	state.setSecretRemoval('speechApiKey', true)
+	finish()
+	await saving
+	assert.equal(puts[0].ragChunkSize, 800)
+	assert.deepEqual(plain(state.changedKeys), ['ragChunkSize', 'speechApiKey'], 'The later edit and removal are still pending')
+	assert.deepEqual(plain(state.clearCredentials), ['speechApiKey'])
+	assert.equal(state.settingsBaseline.ragChunkSize, 800)
+})
+
+test('removing the secondary key blocks provider tests until saved and then reloads the catalogue', async () => {
+	const requests = []
+	const { state } = await loadedAdmin({}, {
+		get: async url => { requests.push(['get', url]); return url.endsWith('/settings') ? { data: savedSettings() } : { data: { model_options: [], providers: [] } } },
+		post: async url => { requests.push(['post', url]); return { data: { model_options: [], providers: [] } } },
+	})
+	state.modelTestSelection = 'secondary:beta'
+	state.modelTestResult = { success: true }
+	assert.equal(state.canTestModel, true)
+	state.setSecretRemoval('secondaryApiKey', true)
+	assert.equal(state.hasUnsavedProviderSettings, true)
+	assert.equal(state.canTestModel, false)
+	requests.length = 0
+	await state.saveSettings()
+	assert.equal(state.modelTestResult, null)
+	assert.deepEqual(requests.filter(([method]) => method === 'post'), [['post', '/apps/educai/api/v1/models/refresh']])
+	assert.equal(state.hasUnsavedProviderSettings, false)
+})
+
+test('a capability test waits for a saved source switch or key removal', async () => {
+	const { state } = await loadedAdmin()
+	assert.equal(state.capabilityTestBlocked('vision'), false)
+	state.setServiceMode('vision', 'inherit')
+	assert.equal(state.capabilityTestBlocked('vision'), true, 'The test would still reach the saved own endpoint')
+	state.setServiceMode('vision', 'custom')
+	assert.equal(state.capabilityTestBlocked('vision'), false)
+	state.setSecretRemoval('visionApiKey', true)
+	assert.equal(state.capabilityTestBlocked('vision'), true)
+	await state.saveSettings()
+	assert.equal(state.capabilityTestBlocked('vision'), false)
+	assert.equal(state.capabilityTestBlocked('speech'), false)
+})
+
+test('failed or outdated Docling detections never change the form', async () => {
+	const answers = []
+	const state = admin({
+		get: async url => url.endsWith('/settings') ? { data: savedSettings() } : { data: { model_options: [], providers: [] } },
+		post: () => new Promise(resolve => answers.push(resolve)),
+	})
+	await state.loadSettings()
+	state.settings.doclingApiEndpoint = 'https://a.example'
+	state.settings.doclingApiProfile = 'legacy'
+	state.settings.doclingAuthMode = 'bearer'
+	const first = state.detectDocling()
+	state.settings.doclingApiEndpoint = 'https://b.example'
+	state.resetDoclingResults()
+	answers[0]({ data: { success: true, profile: 'docling_serve', auth_mode: 'none', endpoint: 'https://a.example' } })
+	await first
+	assert.equal(state.settings.doclingApiEndpoint, 'https://b.example', 'An answer for an older address is dropped')
+	assert.equal(state.settings.doclingApiProfile, 'legacy')
+	assert.equal(state.doclingDetection, null)
+
+	const second = state.detectDocling()
+	answers[1]({ data: { success: false, profile: 'docling_serve', auth_mode: 'x_api_key', service: 'Docling Serve', endpoint: 'https://b.example', error: 'Docling authentication failed (HTTP 401).' } })
+	await second
+	assert.equal(state.doclingDetection.success, false)
+	assert.equal(state.settings.doclingApiProfile, 'legacy', 'A failed test does not switch a working profile')
+	assert.equal(state.settings.doclingAuthMode, 'bearer')
+
+	const third = state.detectDocling()
+	state.discardChanges()
+	answers[2]({ data: { success: true, profile: 'docling_serve', auth_mode: 'none', endpoint: 'https://b.example' } })
+	await third
+	assert.equal(state.doclingDetection, null, 'Discarding drops a pending detection')
+})

@@ -28,7 +28,6 @@ use OCA\EducAI\Jobs\CleanupRoomDocumentsJob;
 use OCA\EducAI\Jobs\ProcessQueuedRequestsJob;
 use OCA\EducAI\Jobs\RebuildWikiRootRegistryJob;
 use OCA\EducAI\Jobs\ReindexBotSourceJob;
-use OCA\EducAI\Jobs\RefreshModelCatalogueJob;
 use OCA\EducAI\Jobs\SyncWikiRootIndexJob;
 use OCA\EducAI\Listener\BotPickerListener;
 use OCA\EducAI\Listener\TalkEnabledListener;
@@ -691,12 +690,6 @@ class Application extends App implements IBootstrap {
 	}
 
 	public function boot(IBootContext $context): void {
-		$context->injectFn(function (IJobList $jobList): void {
-			// Also register for existing installations before the next app release.
-			if (!$jobList->has(RefreshModelCatalogueJob::class, null)) {
-				$jobList->add(RefreshModelCatalogueJob::class);
-			}
-		});
 		$context->injectFn(function (IInitialState $initialState, BrandingService $brandingService): void {
 			$initialState->provideLazyInitialState('branding', static fn (): array => $brandingService->getPublicState());
 		});

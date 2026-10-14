@@ -18,6 +18,7 @@ use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
+use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
@@ -127,8 +128,7 @@ class BotService {
 		$this->wikiPathService = $wikiPathService ?? new WikiPathService($this->brandingService);
 	}
 
-	/** Discovery is not authorization: only administrator-released choices are selectable. */
-	private function normalizeBotModelSelection(?string $reference, ?string $previous = null): ?string {
+	private function authorizeModelSelection(?string $reference, ?string $previous = null): ?string {
 		LLMClient::validateModelReference($reference);
 		$reference = trim((string)$reference);
 		if ($reference === '') {
@@ -137,8 +137,7 @@ class BotService {
 		if ($this->llmClient === null) {
 			return $reference;
 		}
-		// Unrelated edits must remain possible during an outage or after a model
-		// was removed from discovery/allowlist. Never unbind an existing choice.
+		// An unchanged choice stays valid when discovery or the allowlist no longer contain it.
 		if ($previous !== null && $reference === trim($previous)) {
 			try {
 				return $this->llmClient->canonicalizeModelReference($reference);
@@ -147,18 +146,20 @@ class BotService {
 			}
 		}
 		$canonical = $this->llmClient->canonicalizeModelReference($reference);
+		if ($previous !== null && preg_match('/^(primary|secondary):(.+)$/', (string)$canonical, $parts) === 1 && $parts[2] === trim($previous)) {
+			return $canonical;
+		}
 		if ($previous !== null) {
 			try {
 				if ($canonical === $this->llmClient->canonicalizeModelReference($previous)) {
 					return $canonical;
 				}
 			} catch (\InvalidArgumentException $e) {
-				// A genuinely changed choice still has to be authorized below.
 			}
 		}
 		$settings = $this->settingsService->getSettings();
 		if (!$settings->getAllowMultipleModels()) {
-			throw new AuthorizationException('Individual model selection is disabled. Use the administrator default.');
+			throw new ModelNotReleasedException(true);
 		}
 		$allowed = json_decode((string)$settings->getAllowedModels(), true);
 		foreach (is_array($allowed) ? $allowed : [] as $candidate) {
@@ -170,10 +171,9 @@ class BotService {
 					return $canonical;
 				}
 			} catch (\InvalidArgumentException $e) {
-				// An ambiguous old allowlist entry does not grant both providers.
 			}
 		}
-		throw new AuthorizationException('This model has not been released by the administrator.');
+		throw new ModelNotReleasedException(false);
 	}
 
 	/**
@@ -302,7 +302,7 @@ class BotService {
 		$bot->setMentionName($mentionName);
 		$bot->setSystemPrompt($systemPrompt);
 		if ($model !== null && $model !== '') {
-			$bot->setModel($this->normalizeBotModelSelection($model));
+			$bot->setModel($this->authorizeModelSelection($model));
 		}
 		$bot->setTemperature($this->settingsService->normalizeTemperatureValue($temperature, true));
 		$bot->setIsActive(true);
@@ -389,7 +389,7 @@ class BotService {
 			? $this->normalizeIdArray($allowedTeams ?? $editableState['allowed_teams'])
 			: [];
 		$targetModel = $model !== null
-			? $this->normalizeBotModelSelection($model, $editableState['model'])
+			? $this->authorizeModelSelection($model, $editableState['model'])
 			: $editableState['model'];
 		$targetTemperature = $temperature !== self::TEMPERATURE_NOT_PROVIDED
 			? $this->settingsService->normalizeTemperatureValue($temperature, true)

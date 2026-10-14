@@ -6,10 +6,10 @@ namespace OCA\EducAI\Service;
 
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\SettingsMapper;
+use OCP\AppFramework\Db\DoesNotExistException;
 
 /**
- * Pin old, unqualified selections without changing their meaning. Unresolved
- * values are deliberately kept for the administrator to select explicitly.
+ * Pins old, unqualified selections without changing their meaning.
  * Separate from SettingsService to avoid a SettingsService/LLMClient DI cycle.
  */
 class ModelReferenceMigrationService {
@@ -20,75 +20,108 @@ class ModelReferenceMigrationService {
 	) {
 	}
 
-	/** @return array{settings:int,bots:int,unresolved:int} */
+	/**
+	 * Resolving may wait for discovery, so the mapping is applied to rows read
+	 * afterwards. Edits saved in the meantime are kept.
+	 *
+	 * @return array{settings:int,bots:int,unresolved:int}
+	 */
 	public function migrate(): array {
-		$resolved = [];
-		$unresolved = [];
-		$resolve = function (?string $reference) use (&$resolved, &$unresolved): ?string {
-			if ($reference === null || trim($reference) === '' || preg_match('/^(primary|secondary):\S/', $reference) === 1) {
-				return $reference;
-			}
-			if (array_key_exists($reference, $resolved)) {
-				return $resolved[$reference];
-			}
+		$found = $this->findUnqualifiedReferences();
+		$mapping = [];
+		foreach (array_keys($found['references']) as $reference) {
 			try {
-				$resolved[$reference] = $this->llmClient->canonicalizeModelReference($reference);
+				$mapping[$reference] = $this->llmClient->canonicalizeModelReference($reference);
 			} catch (\InvalidArgumentException $e) {
-				$unresolved[$reference] = true;
-				$resolved[$reference] = $reference;
 			}
-			return $resolved[$reference];
-		};
+		}
+		$unresolved = count($found['references']) - count($mapping);
+		if ($mapping === []) {
+			return ['settings' => 0, 'bots' => 0, 'unresolved' => $unresolved];
+		}
+		$pin = static fn (mixed $reference): mixed => is_string($reference) && isset($mapping[$reference]) ? $mapping[$reference] : $reference;
 
-		$settings = $this->settingsMapper->getSettings();
-		$settingsChanged = false;
-		foreach (['DefaultModel', 'FallbackModel'] as $field) {
-			$previous = $settings->{'get' . $field}();
-			$next = $resolve($previous);
-			if ($next !== $previous) {
-				$settings->{'set' . $field}($next);
-				$settingsChanged = true;
+		$settingsChanged = 0;
+		if ($found['settings']) {
+			$settings = $this->settingsMapper->getSettings();
+			foreach (['DefaultModel', 'FallbackModel'] as $field) {
+				$previous = $settings->{'get' . $field}();
+				if ($pin($previous) !== $previous) {
+					$settings->{'set' . $field}($pin($previous));
+					$settingsChanged = 1;
+				}
 			}
-		}
-		$allowed = json_decode((string)$settings->getAllowedModels(), true);
-		if (is_array($allowed)) {
-			$nextAllowed = array_map(static fn ($reference) => is_string($reference) ? $resolve($reference) : $reference, $allowed);
-			if ($nextAllowed !== $allowed) {
-				$settings->setAllowedModels(json_encode($nextAllowed, JSON_THROW_ON_ERROR));
-				$settingsChanged = true;
+			$allowed = json_decode((string)$settings->getAllowedModels(), true);
+			if (is_array($allowed) && array_map($pin, $allowed) !== $allowed) {
+				$settings->setAllowedModels(json_encode(array_map($pin, $allowed), JSON_THROW_ON_ERROR));
+				$settingsChanged = 1;
 			}
-		}
-		// Output-limit overrides already require exact provider-qualified keys.
-		// Rewriting an old raw key would newly activate a previously ignored cap;
-		// leave that map untouched until an explicit administrator edit.
-		if ($settingsChanged) {
-			$this->settingsMapper->update($settings);
+			// Output-limit overrides already require exact provider-qualified keys.
+			// Rewriting an old raw key would newly activate a previously ignored cap.
+			if ($settingsChanged === 1) {
+				$this->settingsMapper->update($settings);
+			}
 		}
 
 		$botsChanged = 0;
-		foreach ($this->botMapper->findAll() as $bot) {
+		foreach ($found['bots'] as $botId) {
+			try {
+				$bot = $this->botMapper->findById($botId);
+			} catch (DoesNotExistException $e) {
+				continue;
+			}
 			$changed = false;
-			$previous = $bot->getModel();
-			$next = $resolve($previous);
-			if ($next !== $previous) {
-				$bot->setModel($next);
+			if ($pin($bot->getModel()) !== $bot->getModel()) {
+				$bot->setModel($pin($bot->getModel()));
 				$changed = true;
 			}
 			$pending = $bot->getPendingChangesArray();
-			if (is_array($pending) && is_string($pending['model'] ?? null)) {
-				$next = $resolve($pending['model']);
-				if ($next !== $pending['model']) {
-					$pending['model'] = $next;
-					$bot->setPendingChangesArray($pending);
-					$changed = true;
-				}
+			if (is_array($pending) && $pin($pending['model'] ?? null) !== ($pending['model'] ?? null)) {
+				$pending['model'] = $pin($pending['model']);
+				$bot->setPendingChangesArray($pending);
+				$changed = true;
 			}
 			if ($changed) {
-				// Do not change approval state, user content or timestamps.
 				$this->botMapper->update($bot);
 				$botsChanged++;
 			}
 		}
-		return ['settings' => $settingsChanged ? 1 : 0, 'bots' => $botsChanged, 'unresolved' => count($unresolved)];
+		return ['settings' => $settingsChanged, 'bots' => $botsChanged, 'unresolved' => $unresolved];
+	}
+
+	/** @return list<string> Saved model names without a provider, sorted */
+	public function unqualifiedReferences(): array {
+		$references = array_keys($this->findUnqualifiedReferences()['references']);
+		sort($references);
+		return $references;
+	}
+
+	/** @return array{references:array<string,true>,settings:bool,bots:list<int>} */
+	private function findUnqualifiedReferences(): array {
+		$references = [];
+		$settings = $this->settingsMapper->getSettings();
+		$allowed = json_decode((string)$settings->getAllowedModels(), true);
+		$inSettings = false;
+		foreach ([$settings->getDefaultModel(), $settings->getFallbackModel(), ...(is_array($allowed) ? $allowed : [])] as $reference) {
+			if (self::isUnqualified($reference)) {
+				$references[$reference] = true;
+				$inSettings = true;
+			}
+		}
+		$bots = [];
+		foreach ($this->botMapper->findAll() as $bot) {
+			$pending = $bot->getPendingChangesArray();
+			foreach ([$bot->getModel(), is_array($pending) ? ($pending['model'] ?? null) : null] as $reference) {
+				if (self::isUnqualified($reference)) {
+					$references[$reference] = true;
+					$bots[$bot->getId()] = true;
+				}
+			}
+		}
+		return ['references' => $references, 'settings' => $inSettings, 'bots' => array_keys($bots)];
+	}
+
+	private static function isUnqualified(mixed $reference): bool {
+		return is_string($reference) && trim($reference) !== '' && preg_match('/^(primary|secondary):\S/', $reference) !== 1;
 	}
 }

@@ -69,8 +69,10 @@ while the stored key is marked for removal. It never changes settings:
 
 Docling Serve uses X-Api-Key when a key is available (otherwise no
 authentication) and retries an authentication rejection once with Bearer. The
-legacy profile uses Bearer, falling back to the main API key like the saved
-configuration. The result is proven by the same small PDF conversion as the
+legacy profile uses Bearer with the typed or stored Docling key. Without one it
+uses the main API key only for the AcademicCloud default and the saved legacy
+endpoint, where the saved configuration already sends it; any other address is
+probed without authentication. The result is proven by the same small PDF conversion as the
 test button. The response is HTTP 200 whenever detection ran, including a
 detected server whose conversion failed, and contains `success`, `profile`,
 `auth_mode`, `service`, `title`, `version`, `source`, the `endpoint` to store,
@@ -79,8 +81,9 @@ the `conversion_url` without its query string, `duration_ms` and a fixed
 returned; remote titles and versions are stripped of control characters and
 limited to 80 characters.
 
-In the settings page, **Detect and test** fills in the detected profile and
-authentication as unsaved changes. The manual profile and authentication fields
+In the settings page, a successful **Detect and test** fills in the detected
+profile and authentication as unsaved changes. A failed detection, or one
+answered after the address was edited, does not change the form. The manual profile and authentication fields
 remain available under **Set profile manually**. Diagnostics are translated
 when a translation exists.
 

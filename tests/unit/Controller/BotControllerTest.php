@@ -6,6 +6,7 @@ namespace OCA\EducAI\Tests\Unit\Controller;
 
 use OCA\EducAI\Controller\BotController;
 use OCA\EducAI\Exception\AuthorizationException;
+use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\PermissionService;
@@ -41,6 +42,23 @@ class BotControllerTest extends TestCase {
 		$this->assertSame('forbidden', $response->getData()['errorCode']);
 		$this->assertSame('You do not have permission to update this bot', $response->getData()['error']);
 		$this->assertStringNotContainsString('internal', $response->getData()['error']);
+	}
+
+	public function testModelSelectionRefusalsExplainTheModelInsteadOfClaimingMissingRights(): void {
+		foreach ([
+			[false, 'This model has not been released for bots. Choose a released model or the administrator default.'],
+			[true, 'Choosing a model per bot is turned off. The bot uses the administrator default model.'],
+		] as [$selectionDisabled, $message]) {
+			$botService = $this->createMock(BotService::class);
+			$botService->method('updateBot')->willThrowException(new ModelNotReleasedException($selectionDisabled));
+			$botService->method('createBot')->willThrowException(new ModelNotReleasedException($selectionDisabled));
+			$controller = $this->createController($botService);
+			foreach ([$controller->update(42, 'Test bot', 'Test prompt', model: 'secondary:x'), $controller->create('Test bot', 'test', 'Test prompt', model: 'secondary:x')] as $response) {
+				$this->assertSame(400, $response->getStatus());
+				$this->assertSame('model_not_released', $response->getData()['errorCode']);
+				$this->assertSame($message, $response->getData()['error']);
+			}
+		}
 	}
 
 	public function testDestroyMapsTypedAuthorizationFailureToForbidden(): void {

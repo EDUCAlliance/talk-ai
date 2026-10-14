@@ -108,7 +108,6 @@ export default {
 		meta(bot) {
 			const name = String(bot.mention_name || '')
 			const parts = [name.startsWith('@') ? name : `@${name}`, t('educai', 'Owner: {owner}', { owner: bot.user_id })]
-			// The status chip already says "Personal" for personal bots.
 			if (bot.visibility !== 'personal') parts.push(this.admin.formatVisibility(bot.visibility))
 			return parts.join(' · ')
 		},

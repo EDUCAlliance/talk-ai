@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Tests\Unit\Service;
 
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\SettingsService;
 use OCP\Http\Client\IClient;
@@ -160,26 +161,26 @@ class ModelCatalogueTest extends TestCase {
 		$this->assertCount(4, $this->calls);
 	}
 
-	public function testPartialColdDiscoveryDoesNotGuessAProviderAndRecoversAfterExplicitRefresh(): void {
+	public function testPartialColdDiscoveryKeepsPrimaryRoutingAndPinsOnlyAfterRecovery(): void {
 		$this->failures['primary'] = new \Exception('offline');
 		$client = $this->client();
-		$this->http->expects($this->never())->method('post');
+		$this->http->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url, array $options): IResponse {
+			$this->assertSame('https://primary.invalid/v1/chat/completions', $url);
+			$this->assertSame('beta', $options['json']['model']);
+			return $this->response(['choices' => [['message' => ['content' => 'as before'], 'finish_reason' => 'stop']]]);
+		});
 		for ($i = 0; $i < 2; $i++) {
-			try {
-				$client->sendChatCompletion('', [], 'beta');
-				$this->fail('Cold partial discovery cannot establish uniqueness');
-			} catch (\InvalidArgumentException $e) {
-				$this->assertStringContainsString('Select an explicit', $e->getMessage());
-			}
+			$this->assertSame('primary:beta', $client->sendChatCompletion('', [], 'beta')['model_reference']);
 		}
 		$this->assertCount(2, $this->calls);
+		$this->assertArrayNotHasKey('llm_model_reference_bindings', $this->storage);
 		unset($this->failures['primary']);
 		$client->getModelCatalogue(true);
 		$this->assertSame('secondary:beta', $client->canonicalizeModelReference('beta'));
 		$this->assertCount(4, $this->calls);
 	}
 
-	public function testAmbiguousMissingAndUnconfiguredProviderReferencesAreNotGuessed(): void {
+	public function testAmbiguousAndMissingReferencesAreNotPinnedAndAnUnkeyedProviderCannotContradict(): void {
 		$this->models['primary'][] = 'beta';
 		$client = $this->client();
 		foreach (['beta', 'missing'] as $reference) {
@@ -191,8 +192,14 @@ class ModelCatalogueTest extends TestCase {
 			}
 		}
 		$this->keys['secondary'] = '';
-		$this->expectException(\InvalidArgumentException::class);
-		$this->client()->canonicalizeModelReference('alpha');
+		$this->assertSame('primary:alpha', $this->client()->canonicalizeModelReference('alpha'));
+	}
+
+	public function testBindingsFromWeakerEvidenceAreDroppedAndProvenOnesStoreOnlyTheSlot(): void {
+		$this->storage['llm_model_reference_bindings'] = json_encode(['beta' => ['endpoint' => 'primary', 'fingerprint' => 'stale']]);
+		$client = $this->client();
+		$this->assertSame('secondary:beta', $client->canonicalizeModelReference('beta'));
+		$this->assertSame('{"beta":"secondary"}', $this->storage['llm_model_reference_bindings']);
 	}
 
 	public function testOldCacheWithoutCredentialFingerprintCannotLeakIntoNewCatalogue(): void {
@@ -331,7 +338,7 @@ class ModelCatalogueTest extends TestCase {
 
 	public function testCachedFirstSeenAtIsPreservedAndMalformedValuesAreIgnored(): void {
 		$this->storage['llm_model_catalogue_primary'] = json_encode([
-			'fingerprint' => hash('sha256', "https://primary.invalid/v1/models\0primary-test-key"),
+			'fingerprint' => ConnectionCheckStore::fingerprint('provider', ['https://primary.invalid/v1/models'], 'primary-test-key'),
 			'options' => [
 				['id' => 'primary:a', 'model' => 'a', 'endpoint' => 'primary', 'first_seen_at' => 1700000000],
 				['id' => 'primary:b', 'model' => 'b', 'endpoint' => 'primary', 'first_seen_at' => 'yesterday'],
@@ -366,18 +373,6 @@ class ModelCatalogueTest extends TestCase {
 		// An empty list is still a list.
 		$this->models['primary'] = [];
 		$this->assertTrue($this->client()->getModelCatalogue(true)['providers'][0]['lists_models']);
-	}
-
-	public function testPlaceholderCachedBeforeAnUpgradeIsDroppedWithoutRefreshing(): void {
-		$this->storage['llm_model_catalogue_primary'] = json_encode([
-			'fingerprint' => hash('sha256', "https://primary.invalid/v1/models\0primary-test-key"),
-			'options' => [['id' => 'primary:all-team-models', 'model' => 'all-team-models', 'endpoint' => 'primary', 'first_seen_at' => null]],
-			'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300, 'status' => 'ready', 'error' => null,
-		]);
-		$catalogue = $this->client()->getModelCatalogue();
-		$this->assertSame(['secondary:beta'], $catalogue['models']);
-		$this->assertFalse($catalogue['providers'][0]['lists_models']);
-		$this->assertSame(['secondary'], $this->calls);
 	}
 
 	/**

@@ -8,6 +8,7 @@ use OCA\EducAI\Service\CatalogueClient;
 use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\LLMClient;
+use OCA\EducAI\Service\ModelReferenceMigrationService;
 use OCA\EducAI\Service\SpeechToTextClient;
 use OCA\EducAI\Service\TalkBotRegistrationService;
 use OCA\EducAI\Service\VisionClient;
@@ -17,9 +18,6 @@ use OCP\IL10N;
 use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
-/**
- * Read-only data for the administrator overview. It never contacts a provider.
- */
 class AdminStatusController extends Controller {
 	public function __construct(
 		string $appName,
@@ -33,14 +31,13 @@ class AdminStatusController extends Controller {
 		private TalkBotRegistrationService $talkBotRegistration,
 		private LoggerInterface $logger,
 		private IL10N $l10n,
+		private ?ModelReferenceMigrationService $modelReferences = null,
 	) {
 		parent::__construct($appName, $request);
 	}
 
 	/**
 	 * @AdminRequired
-	 * Remembered connection checks and Talk webhook facts. A check is "current"
-	 * while the saved settings still resolve to exactly what was tested.
 	 */
 	public function status(): DataResponse {
 		try {
@@ -54,6 +51,7 @@ class AdminStatusController extends Controller {
 
 			return new DataResponse([
 				'checks' => $checks,
+				'unqualified_models' => $this->modelReferences?->unqualifiedReferences() ?? [],
 				'talk' => [
 					'webhook_url' => $this->talkBotRegistration->getWebhookUrl(),
 					'secret_configured' => $this->talkBotRegistration->hasWebhookSecret(),
@@ -68,15 +66,10 @@ class AdminStatusController extends Controller {
 		}
 	}
 
-	/**
-	 * The fingerprint the saved settings produce for the same kind of test.
-	 *
-	 * @param array{summary: ?string} $record
-	 */
+	/** @param array{summary: ?string} $record */
 	private function currentFingerprint(string $service, array $record): ?string {
 		try {
 			$target = match ($service) {
-				// A model test always uses the saved provider of the reference it tested.
 				'model' => $record['summary'] !== null ? $this->llmClient->connectionCheckTarget($record['summary']) : [],
 				'docling' => $this->doclingClient->connectionCheckTarget(),
 				'vision' => $this->visionClient->connectionCheckTarget(),

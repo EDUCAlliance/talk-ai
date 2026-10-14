@@ -203,7 +203,6 @@ export default {
 		...adminComponents,
 	},
 	provide() {
-		// Tab components read and change the shared form state through this controller.
 		return { admin: this }
 	},
 	data() {
@@ -285,11 +284,10 @@ export default {
 			embeddingStatus: null,
 			doclingDetecting: false,
 			doclingDetection: null,
-			availableModels: [],
+			doclingRevision: 0,
 			availableModelOptions: [],
 			loadingModels: false,
 			modelLoadError: '',
-			modelSelectSize: 12,
 			modelProviders: [],
 			modelRefreshInterval: 300,
 			modelRefreshTimer: null,
@@ -302,7 +300,6 @@ export default {
 			modelTestSelection: '',
 			modelTesting: false,
 			modelTestResult: null,
-			manualAllowedModel: '',
 			loadingTools: false,
 			toolSaving: false,
 			toolTesting: false,
@@ -394,6 +391,7 @@ export default {
 				queue: this.rateLimitStatus,
 				bots: this.allBotsLoaded ? this.allBots : null,
 				tools: this.tools,
+				unqualifiedModels: this.adminStatus?.unqualified_models || [],
 				appName: APP_DISPLAY_NAME,
 			})
 		},
@@ -427,6 +425,7 @@ export default {
 			if (!this.providerSettingsBaseline) return false
 			return ['apiProvider', 'apiEndpoint', 'secondaryApiEndpoint', 'llmModelsTimeout'].some(key => String(this.settings[key] || '').trim() !== String(this.providerSettingsBaseline[key] || '').trim())
 				|| !!(this.settings.apiKey || '').trim() || !!(this.settings.secondaryApiKey || '').trim()
+				|| this.clearCredentials.includes('secondaryApiKey')
 		},
 		canTestModel() {
 			return this.modelSettingsLoaded && !this.hasUnsavedProviderSettings && !this.modelTesting && !this.saving && !!modelSelection.splitModelReference(this.modelTestSelection)
@@ -503,12 +502,6 @@ export default {
 				: t('educai', 'Only needed if the server requires a key. The primary API key is not sent.')
 		},
 
-		modelOptionMap() {
-			return this.availableModelOptions.reduce((map, option) => {
-				map[option.id] = option
-				return map
-			}, {})
-		},
 	},
 	watch: {
 		hasUnsavedProviderSettings(changed) {
@@ -517,7 +510,6 @@ export default {
 		modelTestSelection() {
 			this.modelTestResult = null
 		},
-		// Tests and saves change what the overview should report.
 		modelTestResult(value) { if (value) this.loadAdminStatus() },
 		doclingTestResult(value) { if (value) this.loadAdminStatus() },
 		doclingDetection(value) { if (value) this.loadAdminStatus() },
@@ -600,8 +592,7 @@ export default {
 			this.clearCredentials = []
 			this.secretResetKey++
 			this.syncServiceModes()
-			this.doclingDetection = null
-			this.doclingTestResult = null
+			this.resetDoclingResults()
 			this.visionTestResult = null
 			this.speechTestResult = null
 			this.catalogueTestResult = null
@@ -637,6 +628,12 @@ export default {
 				this.setSecretRemoval(fields.key, false)
 			}
 			this.serviceModes = { ...this.serviceModes, [service]: mode === 'inherit' ? 'inherit' : 'custom' }
+		},
+		capabilityTestBlocked(service) {
+			const fields = SERVICE_FIELDS[service]
+			if (!fields || !this.settingsBaseline) return false
+			const switchedToInherit = !String(this.settings[fields.endpoint] || '').trim() && !!String(this.settingsBaseline[fields.endpoint] || '').trim()
+			return switchedToInherit || this.clearCredentials.includes(fields.key)
 		},
 		syncServiceModes() {
 			const modes = {}
@@ -683,6 +680,7 @@ export default {
 			if (status?.rag) this.embeddingStatus = status
 		},
 		resetDoclingResults() {
+			this.doclingRevision++
 			this.doclingDetection = null
 			this.doclingTestResult = null
 		},
@@ -690,16 +688,17 @@ export default {
 			if (this.doclingDetecting) return
 			this.doclingDetecting = true
 			this.resetDoclingResults()
+			const revision = this.doclingRevision
 			try {
 				const typedKey = (this.settings.doclingApiKey || '').trim()
 				const { data } = await axios.post(generateUrl('/apps/educai/api/v1/admin/docling/detect'), {
 					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
 					doclingApiKey: typedKey || null,
-					// A stored key marked for removal must not make an auth-free server look authenticated.
 					ignoreStoredKey: !typedKey && this.clearCredentials.includes('doclingApiKey'),
 				})
-				this.applyDoclingDetection(data)
+				if (revision === this.doclingRevision) this.applyDoclingDetection(data)
 			} catch (error) {
+				if (revision !== this.doclingRevision) return
 				this.doclingDetection = {
 					success: false,
 					profile: null,
@@ -712,6 +711,7 @@ export default {
 		applyDoclingDetection(result) {
 			const data = result && typeof result === 'object' ? result : {}
 			this.doclingDetection = { ...data, success: !!data.success }
+			if (!data.success) return
 			if (['docling_serve', 'legacy'].includes(data.profile)) this.settings.doclingApiProfile = data.profile
 			if (['x_api_key', 'bearer', 'none'].includes(data.auth_mode)) this.settings.doclingAuthMode = data.auth_mode
 			if (typeof data.endpoint === 'string' && data.endpoint.trim() !== (this.settings.doclingApiEndpoint || '').trim()) {
@@ -911,22 +911,6 @@ export default {
 		formatModelLabel(model) {
 			return modelSelection.modelLabel(model)
 		},
-		availableModelOptionsWithCurrent(current) {
-			return modelSelection.modelOptionsWithCurrent(this.availableModelOptions, current)
-		},
-		providerStatusLabel(status) {
-			return {
-				ready: t('educai', 'Catalogue up to date'),
-				stale: t('educai', 'Using last known catalogue'),
-				error: t('educai', 'Catalogue unavailable'),
-				unconfigured: t('educai', 'Not configured'),
-			}[status] || t('educai', 'Not checked')
-		},
-		formatModelTimestamp(value) {
-			if (!value) return t('educai', 'Never')
-			const date = new Date(typeof value === 'number' ? value * 1000 : value)
-			return Number.isNaN(date.getTime()) ? t('educai', 'Unknown') : date.toLocaleString(getCanonicalLocale())
-		},
 		captureProviderSettingsBaseline(saved = this.settings) {
 			this.modelProviderRevision++
 			this.providerSettingsBaseline = Object.fromEntries(['apiProvider', 'apiEndpoint', 'secondaryApiEndpoint', 'llmModelsTimeout'].map(key => [key, saved[key]]))
@@ -963,12 +947,6 @@ export default {
 				if (baseline === this.modelProviderRevision) this.adoptSavedModelBindings(response.data)
 			} catch (error) {
 				// This optional reconciliation must not hide a successfully loaded catalogue.
-			}
-		},
-		addAllowedModel(reference) {
-			this.manualAllowedModel = reference
-			if (modelSelection.splitModelReference(reference) && !this.settings.allowedModels.includes(reference)) {
-				this.settings.allowedModels = [...this.settings.allowedModels, reference]
 			}
 		},
 		scheduleModelRefresh() {
@@ -1130,9 +1108,6 @@ export default {
 				console.error('Failed to load settings:', error)
 			}
 		},
-		onToggleMultiple() {
-			// Releasing models is an explicit administrator decision, never a discovery side effect.
-		},
 		async loadModels(force = false) {
 			if (this.loadingModels) {
 				if (force === true) this.modelReloadPending = true
@@ -1151,14 +1126,11 @@ export default {
 					: await axios.get(generateUrl('/apps/educai/api/v1/models'))
 				if (baseline !== this.modelProviderRevision) return
 				this.availableModelOptions = modelSelection.normalizeModelOptions(response.data?.model_options, response.data?.models)
-				this.availableModels = this.availableModelOptions.map(option => option.id)
 				this.modelProviders = Array.isArray(response.data?.providers) ? response.data.providers : []
 				this.modelRefreshInterval = response.data?.refresh_interval_seconds || 300
-				this.modelSelectSize = Math.max(4, Math.min(12, this.availableModelOptions.length || 4))
 				await this.refreshSavedModelBindings()
 			} catch (error) {
 				if (baseline !== this.modelProviderRevision) return
-				// Keep previous options: an HTTP failure must not erase a user's current selection.
 				this.availableModelOptions = this.availableModelOptions.map(option => ({ ...option, availability: 'stale' }))
 				this.modelProviders = this.modelProviders.map(provider => ({ ...provider, status: provider.status === 'ready' ? 'stale' : provider.status }))
 				this.modelLoadError = getApiErrorMessage(error, t('educai', 'Could not update model lists. Previous choices have been preserved.'))
@@ -1263,6 +1235,9 @@ export default {
 					payload.clearCredentials = [...this.clearCredentials]
 				}
 
+				// Edits made while the request runs stay unsaved.
+				const submitted = adminSettings.snapshotSettings(this.settings, this.outputTokenOverrides)
+				const submittedClears = [...this.clearCredentials]
 				const embeddingConfigChanged = this.hasEmbeddingConfigChange(payload)
 				if (embeddingConfigChanged) {
 					const proceed = confirm(
@@ -1310,11 +1285,11 @@ export default {
 				}
 				this.captureProviderSettingsBaseline(payload)
 				this.captureModelSettingsBaseline(payload)
+				this.settingsBaseline = submitted
 				this.adoptSavedModelBindings(response.data)
-				this.clearCredentials = []
+				this.clearCredentials = this.clearCredentials.filter(key => !submittedClears.includes(key))
 				this.secretResetKey++
 				this.syncServiceModes()
-				this.captureSettingsBaseline()
 				this.modelSettingsLoaded = true
 				if (providerSettingsChanged) {
 					this.modelTestResult = null

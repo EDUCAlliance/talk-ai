@@ -93,7 +93,7 @@ class EmbeddingConfigurationServiceTest extends TestCase {
 		$config = $this->createMock(IConfig::class);
 		$config->method('setAppValue')->willReturnCallback(function (string $app, string $key, string $value) use (&$marked): void {
 			$this->assertSame('educai', $app);
-			$this->assertSame('1', $value);
+			$this->assertGreaterThan(0, (int)$value);
 			$marked[] = $key;
 		});
 		(new EmbeddingConfigurationService($config))->recordChange($before, $after);

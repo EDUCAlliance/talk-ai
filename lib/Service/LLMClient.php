@@ -47,7 +47,7 @@ class LLMClient {
 	private ProviderResponseNormalizer $responseNormalizer;
 	/** @var array<string,array<string,mixed>> */
 	private array $providerCatalogueCache = [];
-	/** @var array<string,array{endpoint:string,fingerprint:string}>|null */
+	/** @var array<string,string>|null Unqualified model name => proven provider slot */
 	private ?array $modelReferenceBindings = null;
 
 	public function __construct(
@@ -554,6 +554,7 @@ class LLMClient {
 				$reference,
 				$requestOptions,
 				$streaming,
+				false,
 			);
 		}
 
@@ -597,51 +598,62 @@ class LLMClient {
 		];
 	}
 
+	/**
+	 * Proof: the only provider listing the model in the current lists of every
+	 * provider that could serve it. Without proof, routing stays as before 2.43.0.
+	 */
 	private function resolveEndpointKeyForUnprefixedModel(
 		$settings,
 		string $model,
 		array $requestOptions,
 		bool $streaming,
+		bool $requireProof,
 	): string {
 		$providers = $this->configuredModelProviders($settings);
-		$binding = $this->readModelReferenceBindings()[$model] ?? null;
-		// A proven selection belongs to its provider slot, just like an explicit
-		// reference. Credential/URL changes invalidate discovery, not that choice.
-		if (is_array($binding) && isset($providers[$binding['endpoint'] ?? ''])) {
-			return $binding['endpoint'];
+		$bound = $this->readModelReferenceBindings()[$model] ?? null;
+		if ($bound !== null && $providers[$bound]['url'] !== '') {
+			return $bound;
+		}
+		if ($providers['secondary']['url'] === '') {
+			return $this->bindModelReference($model, 'primary');
 		}
 
 		$catalogue = $this->buildModelCatalogue($settings, false, $requestOptions, $model, $streaming);
-		$matches = [];
+		$listedBy = [];
 		foreach ($catalogue['model_options'] as $option) {
 			if ($option['model'] === $model) {
-				$matches[$option['endpoint']] = true;
+				$listedBy[$option['endpoint']] = true;
 			}
 		}
-		// A missing snapshot of another configured provider is not proof of uniqueness.
-		$complete = true;
+		$current = true;
+		$enumerated = true;
 		foreach ($catalogue['providers'] as $provider) {
-			if ($providers[$provider['id']]['url'] !== '' && $provider['last_success_at'] === null) {
-				$complete = false;
+			$slot = $providers[$provider['id']];
+			if ($slot['url'] === '' || ($slot['key'] === '' && !$slot['credential_error'])) {
+				continue;
 			}
+			$current = $current && $provider['status'] === 'ready';
+			$enumerated = $enumerated && $provider['lists_models'];
 		}
-		if (count($matches) !== 1 || !$complete) {
+		if ($current && $enumerated && count($listedBy) === 1) {
+			return $this->bindModelReference($model, (string)array_key_first($listedBy));
+		}
+		if ($requireProof) {
 			throw new \InvalidArgumentException('The provider for this saved model could not be determined. Select an explicit Primary or Secondary model.');
 		}
-		$endpoint = (string)array_key_first($matches);
-		$this->modelReferenceBindings[$model] = [
-			'endpoint' => $endpoint,
-			'fingerprint' => $providers[$endpoint]['fingerprint'],
-		];
-		$this->config?->setAppValue(Application::APP_ID, self::MODEL_BINDINGS_CACHE_KEY, json_encode($this->modelReferenceBindings) ?: '{}');
+		return $current && !isset($listedBy['primary']) && isset($listedBy['secondary']) ? 'secondary' : 'primary';
+	}
+
+	private function bindModelReference(string $model, string $endpoint): string {
+		$bindings = $this->readModelReferenceBindings();
+		if (($bindings[$model] ?? null) !== $endpoint) {
+			$this->modelReferenceBindings[$model] = $endpoint;
+			$this->config?->setAppValue(Application::APP_ID, self::MODEL_BINDINGS_CACHE_KEY, json_encode($this->modelReferenceBindings) ?: '{}');
+		}
 		return $endpoint;
 	}
 
-	/**
-	 * Canonical references retain their provider even when discovery is offline.
-	 * Null represents inheritance (for a bot) or no configured fallback.
-	 * Legacy references are upgraded only with evidence, never by guessing primary.
-	 */
+	/** Null means inheritance (bot) or no fallback. */
 	public function canonicalizeModelReference(?string $reference): ?string {
 		self::validateModelReference($reference);
 		$reference = trim((string)$reference);
@@ -657,12 +669,11 @@ class LLMClient {
 		if (str_starts_with($reference, 'primary:') || str_starts_with($reference, 'secondary:')) {
 			throw new \InvalidArgumentException('Select a model after the provider name.');
 		}
-		$canonical = $this->resolveEndpointKeyForUnprefixedModel($this->settingsService->getSettings(), $reference, [], false) . ':' . $reference;
+		$canonical = $this->resolveEndpointKeyForUnprefixedModel($this->settingsService->getSettings(), $reference, [], false, true) . ':' . $reference;
 		self::validateModelReference($canonical);
 		return $canonical;
 	}
 
-	/** Validate before persistence or any provider request, without echoing raw input. */
 	public static function validateModelReference(?string $reference): void {
 		if ($reference !== null && (strlen(trim($reference)) > self::MAX_MODEL_REFERENCE_LENGTH
 			|| preg_match('/[\x00-\x1f\x7f]/', $reference) === 1)) {
@@ -675,18 +686,15 @@ class LLMClient {
 			$raw = $this->config?->getAppValue(Application::APP_ID, self::MODEL_BINDINGS_CACHE_KEY, '') ?? '';
 			$decoded = json_decode($raw, true);
 			$this->modelReferenceBindings = [];
-			foreach (is_array($decoded) ? $decoded : [] as $model => $binding) {
-				if (is_string($model) && is_array($binding)
-					&& in_array($binding['endpoint'] ?? null, ['primary', 'secondary'], true)
-					&& is_string($binding['fingerprint'] ?? null)) {
-					$this->modelReferenceBindings[$model] = $binding;
+			foreach (is_array($decoded) ? $decoded : [] as $model => $endpoint) {
+				if (is_string($model) && in_array($endpoint, ['primary', 'secondary'], true)) {
+					$this->modelReferenceBindings[$model] = $endpoint;
 				}
 			}
 		}
 		return $this->modelReferenceBindings;
 	}
 
-	/** A deliberate, bounded inference probe of exactly the selected provider. */
 	public function testModelConnection(string $reference): array {
 		self::validateModelReference($reference);
 		if (preg_match('/^(primary|secondary):\S.*$/', trim($reference)) !== 1) {
@@ -715,13 +723,7 @@ class LLMClient {
 		];
 	}
 
-	/**
-	 * Fingerprint of the saved provider endpoint and key that an explicit model
-	 * test of $reference uses, without discovery or network access. Keys are
-	 * only hashed. The fingerprint is null for a reference without a provider.
-	 *
-	 * @return array{fingerprint: ?string, summary: string}
-	 */
+	/** @return array{fingerprint: ?string, summary: string} */
 	public function connectionCheckTarget(string $reference): array {
 		$reference = trim($reference);
 		if (strlen($reference) > self::MAX_MODEL_REFERENCE_LENGTH || preg_match('/[\x00-\x1f\x7f]/', $reference) === 1
@@ -731,7 +733,6 @@ class LLMClient {
 		$endpointKey = $matches[1];
 		$model = trim($matches[2]);
 		try {
-			// Mirrors resolveModelConfig(), but an incomplete provider still has a stable fingerprint.
 			$settings = $this->settingsService->getSettings();
 			if ($endpointKey === 'secondary') {
 				$url = self::chatCompletionsUrl(trim((string)$settings->getSecondaryApiEndpoint()));
@@ -1362,7 +1363,7 @@ class LLMClient {
 
 	/** Last-known advertised limits are advisory; chat never depends on a new /models request. */
 	private function knownModelLimits(string $reference): array {
-		$options = $this->readModelOptionsCache($this->settingsService->getSettings(), false) ?? [];
+		$options = $this->readModelOptionsCache($this->settingsService->getSettings());
 		foreach ($options as $option) {
 			if ($option['id'] === $reference) {
 				return $option['limits'] ?? [];
@@ -1993,39 +1994,12 @@ class LLMClient {
 		}
 	}
 
-	/**
-	 * Chat URL for a configured endpoint. Providers document a base URL ending in /v1;
-	 * model discovery, embeddings and speech already derive their paths from it.
-	 * Any other address is used unchanged.
-	 */
+	/** Providers document a base URL ending in /v1; any other address is used unchanged. */
 	public static function chatCompletionsUrl(string $endpoint): string {
 		$base = rtrim(trim($endpoint), '/');
 		return preg_match('#/v1$#', $base) === 1 ? $base . '/chat/completions' : $endpoint;
 	}
 
-	/**
-	 * List available endpoint-specific model identifiers.
-	 *
-	 * @return array<int,string>
-	 */
-	public function listModels(): array {
-		return array_map(
-			static fn (array $option): string => $option['id'],
-			$this->listModelOptions()
-		);
-	}
-
-	/**
-	 * @return array<int,array{id:string,label:string,model:string,endpoint:string,limits?:array{output_tokens?:int,context_tokens?:int}}>
-	 */
-	public function listModelOptions(): array {
-		return $this->getModelCatalogue()['model_options'];
-	}
-
-	/**
-	 * Discovery is independent for each provider. A failed provider retains its
-	 * last-known list; discovery never grants access or changes selected models.
-	 */
 	public function getModelCatalogue(bool $refresh = false): array {
 		return $this->buildModelCatalogue($this->settingsService->getSettings(), $refresh);
 	}
@@ -2070,7 +2044,6 @@ class LLMClient {
 						'status' => 'ready', 'error' => null,
 					];
 				} catch (\Throwable $e) {
-					// Cancellation and the agent's shared attempt budget are hard limits.
 					if ($e instanceof \Exception && $this->isNonRetryableProviderException($e)) {
 						throw $e;
 					}
@@ -2108,8 +2081,7 @@ class LLMClient {
 	}
 
 	/**
-	 * Some gateways list a placeholder instead of their models, e.g. LiteLLM keys
-	 * with access to "all-team-models". Such entries are not model IDs.
+	 * LiteLLM keys with access to "all-team-models" list that placeholder instead of their models.
 	 *
 	 * @param array<int,array<string,mixed>> $options
 	 * @return array<int,array<string,mixed>>
@@ -2122,9 +2094,7 @@ class LLMClient {
 	}
 
 	/**
-	 * Models keep the time they were first listed for this provider fingerprint.
-	 * The first successful list is a baseline (null), so nothing is flagged as new
-	 * after an upgrade, a new provider or a credential change.
+	 * The first successful list is a baseline: nothing in it counts as new.
 	 *
 	 * @param array<int,array<string,mixed>> $options
 	 * @param array<string,mixed> $previous Last record for the same fingerprint
@@ -2147,7 +2117,6 @@ class LLMClient {
 		return $options;
 	}
 
-	/** Never expose provider response bodies, keys, or private URLs in discovery status. */
 	private function modelDiscoveryErrorMessage(\Exception $exception): string {
 		$status = $this->httpStatusFromException($exception);
 		return match ($status) {
@@ -2163,7 +2132,6 @@ class LLMClient {
 		try {
 			$primaryUrl = $this->getModelsEndpoint($settings->getApiProvider(), $settings->getApiEndpoint());
 		} catch (\Exception $e) {
-			// An incomplete initial setup is not a provider outage.
 		}
 		$secondaryEndpoint = trim((string)$settings->getSecondaryApiEndpoint());
 		$providers = [
@@ -2183,12 +2151,10 @@ class LLMClient {
 						: (string)($this->settingsService->getSecondaryApiKey() ?? '');
 				}
 			} catch (\Throwable $e) {
-				// Credential problems belong to one provider, not the whole catalogue
-				// or an inference request explicitly bound to the healthy provider.
 				$provider['credential_error'] = true;
 			}
 			$provider['configured'] = $provider['url'] !== '' && $provider['key'] !== '';
-			$provider['fingerprint'] = hash('sha256', $provider['url'] . "\0" . ($provider['credential_error'] ? 'unreadable-credential' : $provider['key']));
+			$provider['fingerprint'] = ConnectionCheckStore::fingerprint('provider', [$provider['url']], $provider['credential_error'] ? 'unreadable-credential' : $provider['key']);
 		}
 		unset($provider);
 		return $providers;
@@ -2201,12 +2167,7 @@ class LLMClient {
 		$raw = $this->config?->getAppValue(Application::APP_ID, self::MODEL_CATALOGUE_CACHE_PREFIX . $id, '') ?? '';
 		$record = json_decode($raw, true);
 		if (is_array($record) && ($record['fingerprint'] ?? '') === $fingerprint && is_array($record['options'] ?? null)) {
-			$options = array_values(array_filter($this->normalizeCachedModelOptions($record['options']), static fn (array $option): bool => $option['endpoint'] === $id));
-			$record['options'] = self::withoutModelListPlaceholders($options);
-			// Lists cached before placeholders were recognised.
-			if ($options !== [] && $record['options'] === []) {
-				$record['lists_models'] = false;
-			}
+			$record['options'] = array_values(array_filter($this->normalizeCachedModelOptions($record['options']), static fn (array $option): bool => $option['endpoint'] === $id));
 		} else {
 			$record = ['fingerprint' => $fingerprint, 'options' => []];
 		}
@@ -2214,16 +2175,11 @@ class LLMClient {
 		return $record;
 	}
 
-	/** Last-known capacity data is usable without starting discovery. */
-	private function readModelOptionsCache($settings, bool $requireFresh): ?array {
+	private function readModelOptionsCache($settings): array {
 		$options = [];
 		foreach ($this->configuredModelProviders($settings) as $id => $provider) {
-			if (!$provider['configured']) {
-				continue;
-			}
-			$record = $this->readProviderCatalogue($settings, $id, $provider['fingerprint']);
-			if (!$requireFresh || ($record['next_refresh_at'] ?? 0) > time()) {
-				$options = array_merge($options, $record['options']);
+			if ($provider['configured']) {
+				$options = array_merge($options, $this->readProviderCatalogue($settings, $id, $provider['fingerprint'])['options']);
 			}
 		}
 		return $options;

@@ -108,12 +108,7 @@ class VisionClient {
 		}
 	}
 
-	/**
-	 * Fingerprint and model of what testConnection() would test, with the same
-	 * precedence for unsaved values. Keys are only ever hashed.
-	 *
-	 * @return array{fingerprint: ?string, summary: ?string}
-	 */
+	/** @return array{fingerprint: ?string, summary: ?string} */
 	public function connectionCheckTarget(?string $endpoint = null, ?string $apiKey = null, ?string $model = null): array {
 		try {
 			[$resolvedEndpoint, $resolvedKey, $resolvedModel] = $this->resolveTestTarget($endpoint, $apiKey, $model);
@@ -127,12 +122,7 @@ class VisionClient {
 		];
 	}
 
-	/**
-	 * Unsaved values win over the saved vision settings, which fall back to the
-	 * main endpoint and key.
-	 *
-	 * @return array{0: ?string, 1: ?string, 2: ?string} Endpoint, key and model
-	 */
+	/** @return array{0: ?string, 1: ?string, 2: ?string} Endpoint, key and model */
 	private function resolveTestTarget(?string $endpoint, ?string $apiKey, ?string $model): array {
 		$config = $this->settingsService->getVisionConfig();
 

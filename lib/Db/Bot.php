@@ -203,8 +203,8 @@ class Bot extends Entity implements JsonSerializable {
 		if (isset($changes['description'])) {
 			$this->setDescription($changes['description']);
 		}
-		if (isset($changes['model'])) {
-			$this->setModel($changes['model']);
+		if (array_key_exists('model', $changes)) {
+			$this->setModel(is_string($changes['model']) && $changes['model'] !== '' ? $changes['model'] : null);
 		}
 		if (array_key_exists('temperature', $changes)) {
 			$this->setTemperature(is_numeric($changes['temperature']) ? (float)$changes['temperature'] : null);

@@ -65,8 +65,9 @@
 			<TestAction :label="service.testLabel"
 				:busy-label="t('educai', 'Testing…')"
 				:busy="service.testing"
-				:result="service.result"
-				:idle-text="service.idle"
+				:disabled="service.blocked"
+				:result="service.blocked ? null : service.result"
+				:idle-text="service.blocked ? t('educai', 'Save first. Until then a test would still use the saved provider.') : service.idle"
 				@run="service.test()" />
 		</AdminSection>
 
@@ -172,6 +173,7 @@ export default {
 				testing: admin.visionTesting,
 				result: display(admin.visionTestResult, t('educai', 'Vision connection successful')),
 				idle: idle(admin.adminStatus?.checks?.vision),
+				blocked: admin.capabilityTestBlocked('vision'),
 				test: () => admin.testVisionConnection(),
 			}, {
 				id: 'speech',
@@ -195,6 +197,7 @@ export default {
 				testing: admin.speechTesting,
 				result: display(admin.speechTestResult, t('educai', 'Speech connection successful')),
 				idle: idle(admin.adminStatus?.checks?.speech),
+				blocked: admin.capabilityTestBlocked('speech'),
 				test: () => admin.testSpeechConnection(),
 			}]
 		},

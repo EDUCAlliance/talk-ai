@@ -6,10 +6,8 @@ export function normalizeAdminTab(value) {
 	return ADMIN_TABS.includes(value) ? value : 'overview'
 }
 
-// Secrets are never loaded into the form; a non-empty input is a pending change.
 export const SECRET_FIELDS = ['apiKey', 'secondaryApiKey', 'webhookSecret', 'embeddingApiKey', 'doclingApiKey', 'visionApiKey', 'speechApiKey']
 
-// Optional credentials the server can remove; required ones can only be replaced.
 export const CLEARABLE_SECRETS = ['secondaryApiKey', 'embeddingApiKey', 'visionApiKey', 'speechApiKey', 'doclingApiKey']
 
 // API field names that report a stored secret as "***".
@@ -23,7 +21,6 @@ export const STORED_SECRET_FIELDS = {
 	speechApiKey: 'speech_api_key',
 }
 
-// Every saved setting, mapped to the tab that edits it.
 export const SETTING_TABS = {
 	apiEndpoint: 'models',
 	apiKey: 'models',
@@ -86,8 +83,6 @@ const NUMBER_FIELDS = new Set([
 ])
 
 /**
- * Human-readable names for the unsaved-changes bar. Related fields share a name.
- *
  * @param {string} key Setting key
  * @return {string}
  */
@@ -168,8 +163,6 @@ function comparable(key, value) {
 }
 
 /**
- * Copy the comparable part of the form. Secrets are excluded on purpose.
- *
  * @param {object} settings Form settings
  * @param {Array} outputTokenOverrides Model-specific output limits
  * @return {object}
@@ -184,8 +177,6 @@ export function snapshotSettings(settings, outputTokenOverrides = []) {
 }
 
 /**
- * Keys whose form value differs from the last saved state.
- *
  * @param {object} settings Form settings
  * @param {Array} outputTokenOverrides Model-specific output limits
  * @param {object|null} baseline Snapshot taken after loading or saving
@@ -204,8 +195,6 @@ export function changedSettingKeys(settings, outputTokenOverrides, baseline, cle
 }
 
 /**
- * Write a snapshot back into the form and return the restored output limits.
- *
  * @param {object} settings Form settings, changed in place
  * @param {object} baseline Snapshot
  * @return {Array}
@@ -256,8 +245,6 @@ export function temperaturePreset(value) {
 }
 
 /**
- * A capability uses the primary provider unless it has its own endpoint or key.
- *
  * @param {object} state Saved and typed values of one capability
  * @param {string} state.endpoint Own endpoint, empty to use the primary one
  * @param {boolean} state.hasStoredKey A separate key is stored

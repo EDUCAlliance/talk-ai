@@ -373,7 +373,7 @@ export default {
 				return { tone: 'ok', headline: t('educai', '{service} detected', { service }), lines }
 			}
 			if (result.profile && service) {
-				return { tone: 'warn', headline: t('educai', '{service} detected, but the test failed', { service }), lines: [result.error, ...lines].filter(Boolean) }
+				return { tone: 'warn', headline: t('educai', '{service} detected, but the test failed', { service }), lines: [result.error, ...lines, t('educai', 'The settings were not changed.')].filter(Boolean) }
 			}
 			return { tone: 'error', headline: t('educai', 'No Docling service detected'), lines: [result.error].filter(Boolean) }
 		},

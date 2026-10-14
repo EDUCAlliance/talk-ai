@@ -894,10 +894,15 @@ export default {
 		},
 		selectableModelOptions() {
 			const allowed = this.settings.allowMultipleModels ? this.settings.allowedModels : []
-			const selected = [this.formData.model, ...allowed].filter(Boolean)
-			// A successful refresh must not make newly discovered models public.
+			const selected = [this.formData.model, ...this.qualifiedCurrentModel, ...allowed].filter(Boolean)
 			return modelSelection.modelOptionsWithCurrent(this.settings.modelOptions, selected, this.unlistedEndpoints)
 				.filter(option => selected.includes(option.id))
+		},
+		qualifiedCurrentModel() {
+			const current = this.formData.model
+			if (!current || modelSelection.splitModelReference(current)) return []
+			const providers = this.modelProviders.filter(provider => provider.status && provider.status !== 'unconfigured').map(provider => provider.id)
+			return (providers.length > 0 ? providers : ['primary']).map(provider => `${provider}:${current}`)
 		},
 		unlistedEndpoints() {
 			return modelSelection.unlistedModelEndpoints(this.modelProviders)

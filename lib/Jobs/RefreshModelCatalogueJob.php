@@ -24,11 +24,10 @@ class RefreshModelCatalogueJob extends TimedJob {
 
 	protected function run($arguments): void {
 		try {
-			// Respect per-provider TTL and retry cooldowns, even after a cron delay.
 			$this->llmClient->getModelCatalogue();
 			$this->migration->migrate();
 		} catch (\Throwable $e) {
-			$this->logger->warning('Automatic model catalogue refresh failed');
+			$this->logger->warning('Automatic model catalogue refresh failed', ['exception_class' => $e::class]);
 		}
 	}
 }

@@ -13,6 +13,7 @@ use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\LLMClient;
+use OCA\EducAI\Service\ModelReferenceMigrationService;
 use OCA\EducAI\Service\SpeechToTextClient;
 use OCA\EducAI\Service\TalkBotRegistrationService;
 use OCA\EducAI\Service\VisionClient;
@@ -76,7 +77,8 @@ class AdminStatusControllerTest extends TestCase {
 
 		$this->assertSame(200, $response->getStatus());
 		$data = $response->getData();
-		$this->assertSame(['checks', 'talk'], array_keys($data));
+		$this->assertSame(['checks', 'unqualified_models', 'talk'], array_keys($data));
+		$this->assertSame(['gpt-4o'], $data['unqualified_models']);
 		$this->assertSame(ConnectionCheckStore::SERVICES, array_keys($data['checks']));
 		foreach (['model', 'docling', 'vision', 'catalogue'] as $service) {
 			$this->assertIsInt($data['checks'][$service]['checked_at']);
@@ -92,6 +94,7 @@ class AdminStatusControllerTest extends TestCase {
 				'speech' => null,
 				'catalogue' => ['success' => true, 'duration_ms' => 30, 'summary' => 'Catalogue API 2.4.1', 'error' => null, 'current' => false],
 			],
+			'unqualified_models' => ['gpt-4o'],
 			'talk' => ['webhook_url' => self::WEBHOOK_URL, 'secret_configured' => true],
 		], $data);
 		$this->assertStringNotContainsString('fingerprint', json_encode($response->getData()));
@@ -167,9 +170,13 @@ class AdminStatusControllerTest extends TestCase {
 		$l10n = $l10nBuilder->getMock();
 		$l10n->method('t')->willReturnCallback(static fn (string $text): string => 'translated:' . $text);
 
+		$modelReferences = $this->createMock(ModelReferenceMigrationService::class);
+		$modelReferences->method('unqualifiedReferences')->willReturn(['gpt-4o']);
+		$modelReferences->expects($this->never())->method('migrate');
+
 		return new AdminStatusController('educai', $this->createMock(IRequest::class), $this->store, $this->llm,
 			$this->docling, $this->vision, $this->speech, $this->catalogue, $this->talk,
-			$this->createMock(LoggerInterface::class), $l10n);
+			$this->createMock(LoggerInterface::class), $l10n, $modelReferences);
 	}
 
 	/** Reading the status must never start a provider test. */

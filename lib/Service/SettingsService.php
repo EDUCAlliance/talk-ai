@@ -20,7 +20,6 @@ class SettingsService {
 	public const APP_ICON_MODE_DEFAULT = 'default';
 	public const APP_ICON_MODE_CUSTOM = 'custom';
 	public const APP_ICON_UPLOAD_PREFIX = 'educai-upload://';
-	/** Optional credentials an administrator may remove; required ones can only be replaced. */
 	public const CLEARABLE_CREDENTIALS = ['secondaryApiKey', 'embeddingApiKey', 'visionApiKey', 'speechApiKey', 'doclingApiKey'];
 
 	private SettingsMapper $mapper;
@@ -242,7 +241,6 @@ class SettingsService {
 		}
 		$this->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
 		$this->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
-		// A removed credential is stored as null, exactly like one that was never set.
 		$clear = array_fill_keys(self::validateClearCredentials($clearCredentials), true);
 		$settings = $this->mapper->getSettings();
 		$previousSettings = clone $settings;
@@ -299,7 +297,6 @@ class SettingsService {
 			// Encrypt embedding API key before storing
 			$settings->setEmbeddingApiKey($this->credentialService->encrypt($embeddingApiKey));
 		} elseif (isset($clear['embeddingApiKey'])) {
-			// Embeddings then use the main key; the configuration fingerprint flags a reindex.
 			$settings->setEmbeddingApiKey(null);
 		}
 		if ($embeddingModel !== null) {
@@ -813,11 +810,7 @@ class SettingsService {
 		];
 	}
 
-	/**
-	 * Validate before any settings or encrypted credentials can be changed.
-	 *
-	 * @return array<int,string> Unique names of the credentials to remove
-	 */
+	/** @return array<int,string> Unique names of the credentials to remove */
 	public static function validateClearCredentials(mixed $clearCredentials): array {
 		if ($clearCredentials === null) {
 			return [];

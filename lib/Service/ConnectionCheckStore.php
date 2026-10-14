@@ -6,22 +6,20 @@ namespace OCA\EducAI\Service;
 
 use OCA\EducAI\AppInfo\Application;
 use OCP\IConfig;
+use OCP\Server;
 use Psr\Log\LoggerInterface;
 
 /**
- * Remembers the last explicit administrator connection check per service.
- *
- * Only safe display fields and a fingerprint are stored. The fingerprint hashes
- * the effective target and a hash of the effective key, so a check can later be
- * compared with the saved settings without storing or revealing a credential.
+ * The last explicit administrator connection check per service. Fingerprints are
+ * HMACs with the instance secret, so a database copy cannot verify guessed keys.
  */
 class ConnectionCheckStore {
 	public const SERVICES = ['model', 'docling', 'vision', 'speech', 'catalogue'];
 
 	private const KEY_PREFIX = 'connection_check_';
-	// Model references may be up to 512 bytes and are used as the model summary.
 	private const MAX_SUMMARY_LENGTH = 512;
 	private const MAX_ERROR_LENGTH = 500;
+	private static ?string $instanceSecret = null;
 
 	public function __construct(
 		private IConfig $config,
@@ -34,12 +32,20 @@ class ConnectionCheckStore {
 	 */
 	public static function fingerprint(string $service, array $target, ?string $secret): string {
 		$encoded = json_encode($target, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-		return hash('sha256', $service . "\0" . ($encoded === false ? '' : $encoded) . "\0" . hash('sha256', (string)$secret));
+		return hash_hmac('sha256', $service . "\0" . ($encoded === false ? '' : $encoded) . "\0" . (string)$secret, self::instanceSecret());
 	}
 
-	/**
-	 * Remember a check. A storage failure never changes the reported test result.
-	 */
+	private static function instanceSecret(): string {
+		if (self::$instanceSecret === null) {
+			try {
+				self::$instanceSecret = Server::get(IConfig::class)->getSystemValueString('secret');
+			} catch (\Throwable $e) {
+				self::$instanceSecret = '';
+			}
+		}
+		return self::$instanceSecret;
+	}
+
 	public function record(string $service, bool $success, ?int $durationMs, ?string $summary, ?string $error, ?string $fingerprint): void {
 		if (!in_array($service, self::SERVICES, true)) {
 			throw new \InvalidArgumentException('Unknown connection check service');
@@ -83,8 +89,7 @@ class ConnectionCheckStore {
 	}
 
 	/**
-	 * Public check shape. "current" means the saved settings still resolve to
-	 * exactly the endpoint, options and key that were tested.
+	 * "current": the saved settings still resolve to exactly what was tested.
 	 *
 	 * @param array{success:bool,checked_at:int,duration_ms:?int,summary:?string,error:?string,fingerprint:?string} $record
 	 * @return array{success:bool,checked_at:int,duration_ms:?int,summary:?string,error:?string,current:bool}

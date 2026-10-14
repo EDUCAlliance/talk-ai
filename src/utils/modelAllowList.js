@@ -8,12 +8,6 @@ function byModel(a, b) {
 }
 
 /**
- * Group catalogue models per provider for the release checklist.
- *
- * Released models are always listed first. Models that disappeared from the
- * catalogue stay visible so an administrator can decide what to do with them.
- * Providers without a model list only have manual entries; those are not missing.
- *
  * @param {Array} options Normalized catalogue options
  * @param {string[]} selected Released model references
  * @param {object} config Display options
@@ -101,8 +95,6 @@ export function buildAllowListGroups(options, selected, {
 }
 
 /**
- * Add or remove references without reordering the remaining selection.
- *
  * @param {string[]} selected Current selection
  * @param {string[]} ids References to change
  * @param {boolean} release Whether the references should be released

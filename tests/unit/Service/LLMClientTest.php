@@ -13,6 +13,7 @@ use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Exception\ProviderContractException;
 use OCA\EducAI\Service\AgentRunControl;
 use OCA\EducAI\Service\AgentTurn;
+use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\ProviderAttemptBudget;
 use OCA\EducAI\Service\ProviderResponseNormalizer;
@@ -297,7 +298,7 @@ class LLMClientTest extends TestCase {
 			$this->recordingTraceService($events),
 		);
 
-		$options = $llmClient->listModelOptions();
+		$options = $llmClient->getModelCatalogue()['model_options'];
 
 		$this->assertSame([
 			'primary:model-a',
@@ -705,7 +706,67 @@ class LLMClientTest extends TestCase {
 		$this->assertSame('secondary:model-c', $result['model_reference']);
 	}
 
-	public function testAmbiguousUnprefixedModelNeverGuessesPrimary(): void {
+	/** @return array<string,array{0:string,1:?string,2:array<string,array<string,mixed>>}> */
+	public static function unqualifiedNamesOutsideAnyListProvider(): array {
+		$listed = static fn (string $model): array => ['id' => 'primary:' . $model, 'label' => 'Primary · ' . $model, 'model' => $model, 'endpoint' => 'primary'];
+		return [
+			'placeholder list, one provider' => ['microsoft/gpt-5.4', null, ['primary' => ['options' => [], 'lists_models' => false]]],
+			'unlisted model, one provider' => ['gpt-4o', null, ['primary' => ['options' => [$listed('gpt-4.1')], 'lists_models' => true]]],
+			'secondary URL without key' => ['gpt-4o', '', ['primary' => ['options' => [$listed('gpt-4o')], 'lists_models' => true]]],
+			'no model list endpoint' => ['gpt-4o', null, []],
+		];
+	}
+
+	#[DataProvider('unqualifiedNamesOutsideAnyListProvider')]
+	public function testUnqualifiedNamesKeepReachingThePrimaryProviderAfterTheUpgrade(string $model, ?string $secondaryKey, array $records): void {
+		$settings = new Settings();
+		$settings->setApiProvider('custom');
+		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		if ($secondaryKey !== null) {
+			$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
+		}
+		$settings->setDefaultModel($model);
+		$settings->setLlmChatTimeout(90);
+		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
+		$settingsService->method('getSettings')->willReturn($settings);
+		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn($secondaryKey);
+		$settingsService->method('normalizePositiveInteger')
+			->willReturnCallback(static fn (?int $value, int $fallback): int => $value !== null && $value > 0 ? $value : $fallback);
+		$values = [];
+		foreach ($records as $id => $record) {
+			$values['llm_model_catalogue_' . $id] = json_encode([
+				'fingerprint' => ConnectionCheckStore::fingerprint('provider', ['https://' . $id . '.example.invalid/v1/models'], $id . '-key'),
+				'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300,
+				'status' => 'ready', 'error' => null,
+			] + $record) ?: '';
+		}
+		$config = $this->createMock(IConfig::class);
+		$config->method('getAppValue')->willReturnCallback(static function (string $app, string $key, string $default = '') use (&$values): string {
+			return $values[$key] ?? $default;
+		});
+		$config->method('setAppValue')->willReturnCallback(static function (string $app, string $key, string $value) use (&$values): void {
+			$values[$key] = $value;
+		});
+		$client = $this->createMock(IClient::class);
+		$client->method('get')->willThrowException(new \Exception('404 Not Found'));
+		$client->expects($this->once())
+			->method('post')
+			->with('https://primary.example.invalid/v1/chat/completions', $this->callback(function (array $options) use ($model): bool {
+				$this->assertSame($model, $options['json']['model'] ?? null);
+				return true;
+			}))
+			->willReturn($this->jsonResponse(['model' => $model, 'choices' => [['message' => ['content' => 'primary answer'], 'finish_reason' => 'stop']]]));
+
+		$result = (new LLMClient($this->clientService($client), $settingsService, $this->logger(), $config))
+			->sendChatCompletion('system', [['role' => 'user', 'content' => 'hi']], null);
+
+		$this->assertSame('primary answer', $result['content']);
+		$this->assertSame('primary:' . $model, $result['model_reference']);
+	}
+
+	public function testAmbiguousUnprefixedModelKeepsPrimaryRoutingButIsNotPinned(): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
@@ -722,21 +783,23 @@ class LLMClientTest extends TestCase {
 
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->never())->method('get');
-		$client->expects($this->never())->method('post');
+		$client->expects($this->once())
+			->method('post')
+			->with('https://primary.example.invalid/v1/chat/completions')
+			->willReturn($this->jsonResponse(['choices' => [['message' => ['content' => 'primary answer'], 'finish_reason' => 'stop']]]));
 
-		$llmClient = new LLMClient(
-			$this->clientService($client),
-			$settingsService,
-			$this->logger(),
-			$this->cachedModelOptionsConfig($settings, [
-				['id' => 'primary:model-a', 'label' => 'Primary · model-a', 'model' => 'model-a', 'endpoint' => 'primary'],
-				['id' => 'secondary:model-a', 'label' => 'Secondary · model-a', 'model' => 'model-a', 'endpoint' => 'secondary'],
-			])
-		);
+		$config = $this->cachedModelOptionsConfig($settings, [
+			['id' => 'primary:model-a', 'label' => 'Primary · model-a', 'model' => 'model-a', 'endpoint' => 'primary'],
+			['id' => 'secondary:model-a', 'label' => 'Secondary · model-a', 'model' => 'model-a', 'endpoint' => 'secondary'],
+		]);
+		$llmClient = new LLMClient($this->clientService($client), $settingsService, $this->logger(), $config);
 
+		$result = $llmClient->sendChatCompletion('system', [['role' => 'user', 'content' => 'hi']], 'model-a');
+		$this->assertSame('primary:model-a', $result['model_reference']);
+		$this->assertSame('', $config->getAppValue('educai', 'llm_model_reference_bindings', ''));
 		$this->expectException(\InvalidArgumentException::class);
 		$this->expectExceptionMessage('Select an explicit Primary or Secondary model');
-		$llmClient->sendChatCompletion('system', [['role' => 'user', 'content' => 'hi']], 'model-a');
+		$llmClient->canonicalizeModelReference('model-a');
 	}
 
 	public function testSendChatCompletionDoesNotFallbackOnFourHundredErrors(): void {
@@ -3807,53 +3870,61 @@ class LLMClientTest extends TestCase {
 		$this->assertStringNotContainsString('https://', json_encode($attemptEvents) ?: '');
 	}
 
-	public function testTracePreflightDiscoveryFailureIsNotRepeatedAndNeverPostsToGuessedProvider(): void {
-		$this->assertDiscoveryFailureCannotGuessPrimary(new \Exception('secret-discovery-host unavailable'));
+	public function testTracePreflightDiscoveryFailureIsNotRepeatedAndKeepsPrimaryRouting(): void {
+		$this->assertDiscoveryFailureKeepsPrimaryRouting(new \Exception('secret-discovery-host unavailable'));
 	}
 
-	public function testTracePreflightDiscoveryErrorIsMemoizedBeforeRethrowAndNeverPosts(): void {
-		$this->assertDiscoveryFailureCannotGuessPrimary(new \Error('secret-discovery-error'));
+	public function testTracePreflightDiscoveryErrorIsMemoizedBeforeRethrowAndKeepsPrimaryRouting(): void {
+		$this->assertDiscoveryFailureKeepsPrimaryRouting(new \Error('secret-discovery-error'));
 	}
 
-	private function assertDiscoveryFailureCannotGuessPrimary(\Throwable $failure): void {
+	private function assertDiscoveryFailureKeepsPrimaryRouting(\Throwable $failure): void {
 		$settings = new Settings();
 		$settings->setApiProvider('custom');
 		$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
+		$settings->setSecondaryApiEndpoint('https://secondary.example.invalid/v1/chat/completions');
 		$settings->setDefaultModel('model-a');
 		$settingsService = $this->createMock(SettingsService::class);
+		$settingsService->method('getMaxOutputTokens')->willReturn(4096);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getApiKey')->willReturn('primary-key');
+		$settingsService->method('getSecondaryApiKey')->willReturn('secondary-key');
 		$settingsService->method('normalizePositiveInteger')->willReturn(25);
+		$gets = [];
 		$client = $this->createMock(IClient::class);
-		$client->expects($this->once())->method('get')->willThrowException($failure);
-		$client->expects($this->never())->method('post');
+		$client->method('get')->willReturnCallback(function (string $url) use (&$gets, $failure): IResponse {
+			$gets[] = $url;
+			if (str_contains($url, 'primary')) {
+				throw $failure;
+			}
+			return $this->jsonResponse(['data' => [['id' => 'model-a']]]);
+		});
+		$client->expects($this->once())
+			->method('post')
+			->with('https://primary.example.invalid/v1/chat/completions')
+			->willReturn($this->jsonResponse(['choices' => [['message' => ['content' => 'primary answer'], 'finish_reason' => 'stop']]]));
 		$events = [];
-		$budget = new ProviderAttemptBudget(2);
+		$budget = new ProviderAttemptBudget(3);
 		$options = ['provider_attempt_budget' => $budget, 'trace_run_id' => 60];
 		$llm = new LLMClient($this->clientService($client), $settingsService, $this->logger(), null, $this->recordingTraceService($events));
 		try {
-			$llm->buildTraceChatCompletionPayload('system', [], null, $options);
-			$this->fail('Unresolved provider must not be guessed');
-		} catch (\Throwable $caught) {
-			if ($failure instanceof \Error) {
-				$this->assertSame($failure, $caught);
-			} else {
-				$this->assertInstanceOf(\InvalidArgumentException::class, $caught);
-			}
+			$payload = $llm->buildTraceChatCompletionPayload('system', [], null, $options);
+			$this->assertNotInstanceOf(\Error::class, $failure, 'An engine error must reach the caller');
+			$this->assertSame('primary:model-a', $payload['model_reference']);
+		} catch (\Error $caught) {
+			$this->assertSame($failure, $caught);
 		}
-		try {
-			$llm->sendAgentTurn('system', [], [], null, $options);
-			$this->fail('A subsequent inference must also fail closed');
-		} catch (\InvalidArgumentException $caught) {
-			$this->assertStringContainsString('Select an explicit', $caught->getMessage());
-		}
-		$this->assertSame(1, $budget->getConsumed());
-		$attempts = array_values(array_filter($events, static fn (array $event): bool => $event['event_type'] === 'provider_attempt'));
-		$this->assertCount(1, $attempts);
-		$this->assertSame('model_discovery', $attempts[0]['event']['payload']['route']);
-		$this->assertSame('error', $attempts[0]['event']['status']);
-		$this->assertStringNotContainsString('secret-discovery', json_encode($attempts) ?: '');
-		$this->assertStringNotContainsString('primary-key', json_encode($attempts) ?: '');
+		$turn = $llm->sendAgentTurn('system', [], [], null, $options);
+		$this->assertSame('primary answer', $turn->getText());
+		$this->assertSame('primary:model-a', $turn->getModelReference());
+		$this->assertSame(['https://primary.example.invalid/v1/models', 'https://secondary.example.invalid/v1/models'], $gets);
+		$this->assertSame(3, $budget->getConsumed());
+		$discoveryAttempts = array_values(array_filter($events, static fn (array $event): bool => $event['event_type'] === 'provider_attempt'
+			&& $event['event']['payload']['route'] === 'model_discovery'));
+		$this->assertCount(2, $discoveryAttempts);
+		$this->assertSame(['error', 'ok'], array_column(array_column($discoveryAttempts, 'event'), 'status'));
+		$this->assertStringNotContainsString('secret-discovery', json_encode($events) ?: '');
+		$this->assertStringNotContainsString('primary-key', json_encode($events) ?: '');
 	}
 
 	public function testColdCacheDiscoveryExhaustionPreventsTheNextGetAndChatPost(): void {
@@ -4013,7 +4084,7 @@ class LLMClientTest extends TestCase {
 		$values = [];
 		foreach (['primary', 'secondary'] as $id) {
 			$values['llm_model_catalogue_' . $id] = json_encode([
-				'fingerprint' => hash('sha256', 'https://' . $id . '.example.invalid/v1/models' . "\0" . $id . '-key'),
+				'fingerprint' => ConnectionCheckStore::fingerprint('provider', ['https://' . $id . '.example.invalid/v1/models'], $id . '-key'),
 				'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300,
 				'status' => 'ready', 'error' => null,
 				'options' => array_values(array_filter($options, static fn (array $option): bool => $option['endpoint'] === $id)),

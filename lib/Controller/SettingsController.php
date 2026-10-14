@@ -181,17 +181,13 @@ class SettingsController extends Controller {
 			if ($allowedModels !== null) {
 				$previousAllowed = json_decode($previous->getAllowedModels() ?: '[]', true) ?: [];
 				$allowedModels = array_values(array_unique(array_map(
-					fn (string $model): string => $this->normalizeModelChoice($model, $previousAllowed, $connectionsChanged),
+					fn (mixed $model): string => $this->normalizeModelChoice(
+						is_string($model) ? $model : throw new \InvalidArgumentException('Invalid model reference'),
+						$previousAllowed,
+						$connectionsChanged,
+					),
 					$allowedModels,
 				)));
-			}
-			if (is_array($modelOutputTokenLimits)) {
-				$previousLimitModels = array_keys($previous->getModelOutputTokenLimitsArray());
-				$normalizedLimits = [];
-				foreach ($modelOutputTokenLimits as $model => $limit) {
-					$normalizedLimits[$this->normalizeModelChoice((string)$model, $previousLimitModels, $connectionsChanged)] = $limit;
-				}
-				$modelOutputTokenLimits = $normalizedLimits;
 			}
 			$beforeRateLimitConfig = $this->extractRateLimitConfig($previous);
 			$settings = $this->settingsService->updateSettings(
@@ -266,7 +262,6 @@ class SettingsController extends Controller {
 
 	/**
 	 * @NoAdminRequired
-	 * Read independently cached provider catalogues. This never tests inference.
 	 */
 	public function models(): DataResponse {
 		return $this->modelCatalogueResponse(false);
@@ -274,7 +269,6 @@ class SettingsController extends Controller {
 
 	/**
 	 * @AdminRequired
-	 * Explicitly refresh discovery; this does not authorize new models.
 	 */
 	public function refreshModels(): DataResponse {
 		return $this->modelCatalogueResponse(true);
@@ -282,7 +276,6 @@ class SettingsController extends Controller {
 
 	/**
 	 * @AdminRequired
-	 * Send one small test to the explicitly selected, saved provider. No fallback.
 	 */
 	public function testModel(string $model): DataResponse {
 		if (strlen($model) > 512 || preg_match('/[\x00-\x1f\x7f]/', $model)
@@ -310,10 +303,6 @@ class SettingsController extends Controller {
 		}
 	}
 
-	/**
-	 * Remember the explicit test for the administrator overview. It never changes
-	 * the test response; only the safe message shown to the administrator is kept.
-	 */
 	private function rememberModelCheck(string $reference, bool $success, ?int $durationMs, ?string $error): void {
 		if ($this->connectionChecks === null) {
 			return;
@@ -333,11 +322,12 @@ class SettingsController extends Controller {
 	private function modelCatalogueResponse(bool $refresh): DataResponse {
 		try {
 			$catalogue = $this->llmClient->getModelCatalogue($refresh);
-			try {
-				$this->modelReferenceMigration?->migrate();
-			} catch (\Throwable $e) {
-				// A deferred migration must not hide an otherwise usable catalogue.
-				$this->logger->warning('Legacy model references could not yet be migrated');
+			if ($refresh) {
+				try {
+					$this->modelReferenceMigration?->migrate();
+				} catch (\Throwable $e) {
+					$this->logger->warning('Legacy model references could not yet be migrated', ['exception_class' => $e::class]);
+				}
 			}
 			$modelOptions = array_map(function (array $option): array {
 				$endpoint = (string)($option['endpoint'] ?? '');

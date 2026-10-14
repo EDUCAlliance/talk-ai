@@ -59,7 +59,7 @@ class ModelReferenceEmbeddingTest extends TestCase {
 		$after = clone $before;
 		$after->setDefaultModel('primary:new');
 		$config = $this->createMock(IConfig::class);
-		$config->expects($this->exactly(2))->method('setAppValue')->with('educai', $this->anything(), '1');
+		$config->expects($this->exactly(2))->method('setAppValue')->with('educai', $this->anything(), $this->callback(static fn (string $changedAt): bool => (int)$changedAt >= time() - 5));
 		(new EmbeddingConfigurationService($config))->recordChange($before, $after);
 	}
 }

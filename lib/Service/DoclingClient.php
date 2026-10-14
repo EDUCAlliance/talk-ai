@@ -82,12 +82,7 @@ class DoclingClient {
         $this->logger = $logger;
     }
 
-    /**
-     * Fixed diagnostics are shown to administrators, so they are translated
-     * when a translator is available. Parameters are HTTP status codes only.
-     *
-     * @param list<int|string> $parameters
-     */
+    /** @param list<int|string> $parameters */
     private function message(string $text, array $parameters = []): string {
         return $this->l10n !== null ? $this->l10n->t($text, $parameters) : vsprintf($text, $parameters);
     }
@@ -214,19 +209,13 @@ class DoclingClient {
         }
     }
 
-    /**
-     * Fingerprint and short label of what testConnection() would test, with the
-     * same precedence for unsaved values. Keys are only ever hashed.
-     *
-     * @return array{fingerprint: ?string, summary: ?string}
-     */
+    /** @return array{fingerprint: ?string, summary: ?string} */
     public function connectionCheckTarget(?string $endpoint = null, ?string $apiKey = null, ?string $profile = null, ?string $authMode = null, bool $ignoreStoredKey = false): array {
         try {
             $config = $this->settingsService->getDoclingConfig($profile, $authMode);
             $profile = (string)$config['docling_api_profile'];
             $authMode = (string)$config['docling_auth_mode'];
             if ($apiKey === null && $ignoreStoredKey) {
-                // Without the dedicated key only legacy Bearer falls back to the main API key.
                 $apiKey = $profile === 'legacy' && $authMode === 'bearer' ? $this->settingsService->getApiKey() : '';
             }
         } catch (\Throwable $e) {
@@ -247,10 +236,8 @@ class DoclingClient {
     }
 
     /**
-     * Detect the API profile and authentication behind a saved or unsaved
-     * Docling URL, then prove the result with one small test conversion.
-     * Settings are never changed. Upstream bodies, keys and query strings are
-     * never returned; all errors are fixed diagnostics.
+     * Detects profile and authentication behind a Docling URL and proves them
+     * with one test conversion. Settings are never changed.
      *
      * @param string|null $endpoint URL entered by the administrator; blank selects the AcademicCloud default
      * @param string|null $apiKey Unsaved Docling key; blank uses the stored Docling key
@@ -272,36 +259,30 @@ class DoclingClient {
             'duration_ms' => null, 'error' => null,
         ];
         try {
-            // The profile-independent lookup returns only a dedicated Docling key, never the main API key.
             $serveKey = $typedKey !== '' || $ignoreStoredKey ? $typedKey
                 : trim((string)($this->settingsService->getDoclingConfig('docling_serve', 'x_api_key')['api_key'] ?? ''));
         } catch (\Throwable $e) {
             return ['error' => $this->message(self::SETTINGS_UNREADABLE)] + $result;
         }
-        // Legacy Bearer falls back to the main API key exactly like the saved configuration does.
-        $legacyKey = fn (): string => $typedKey !== '' ? $typedKey
-            : trim((string)($ignoreStoredKey
-                ? $this->settingsService->getApiKey()
-                : ($this->settingsService->getDoclingConfig('legacy', 'bearer')['api_key'] ?? '')));
+        $legacyAttempt = fn (string $endpoint): array => $serveKey === '' && !$this->mainKeyMayBeSentTo($input)
+            ? $this->attemptConversion('legacy', 'none', $endpoint, static fn (): string => '')
+            : $this->attemptConversion('legacy', 'bearer', $endpoint, fn (): string => $serveKey !== '' ? $serveKey : trim($this->settingsService->getApiKey()));
 
         if ($parsed === null) {
-            return $this->detectionResult($result, 'legacy', 'default', '',
-                $this->attemptConversion('legacy', 'bearer', '', $legacyKey));
+            return $this->detectionResult($result, 'legacy', 'default', '', $legacyAttempt(''));
         }
         [$parts, $path, $decodedPath] = $parsed;
         if (str_ends_with($decodedPath, '/v1/convert/file') || str_ends_with($decodedPath, '/v1/convert')) {
             return $this->detectionResult($result, 'docling_serve', 'path', $input, $this->attemptServeConversion($input, $serveKey));
         }
         if (str_ends_with($decodedPath, '/v1/documents/convert')) {
-            return $this->detectionResult($result, 'legacy', 'path', $input,
-                $this->attemptConversion('legacy', 'bearer', $input, $legacyKey));
+            return $this->detectionResult($result, 'legacy', 'path', $input, $legacyAttempt($input));
         }
 
         while (preg_match('~/(?:v1|docs|openapi\.json)$~', $path) === 1) {
             $path = rtrim(substr($path, 0, (int)strrpos($path, '/')), '/');
         }
         $base = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '') . $path;
-        // Never send a key with control characters as a discovery header; the conversion reports it safely.
         $discovered = $this->discover($base, preg_match('/[\x00-\x1F\x7F]/', $serveKey) ? '' : $serveKey);
         if ($discovered === null) {
             return ['error' => $this->message('Docling could not be reached. Check the server address, connectivity and TLS configuration.')] + $result;
@@ -311,24 +292,34 @@ class DoclingClient {
             $storedEndpoint = $this->detectedEndpoint($input, $base, $profile, $discovered['route'], $parts['query'] ?? null);
             $attempt = $profile === 'docling_serve'
                 ? $this->attemptServeConversion($storedEndpoint, $serveKey)
-                : $this->attemptConversion('legacy', 'bearer', $storedEndpoint, $legacyKey);
+                : $legacyAttempt($storedEndpoint);
             return $this->detectionResult(['title' => $discovered['title'], 'version' => $discovered['version']] + $result,
                 $profile, $discovered['source'], $storedEndpoint, $attempt);
         }
 
-        // Probe Docling Serve first. Try legacy only after a definite "no such route"
-        // answer, never after timeouts, 5xx or authentication failures.
         $serve = $this->attemptServeConversion($input, $serveKey);
         if ($serve['success'] || !in_array($serve['status'], [404, 405], true)) {
             return $this->detectionResult($result, $this->routeAnswered($serve) ? 'docling_serve' : null, 'probe', $input, $serve);
         }
-        $legacy = $this->attemptConversion('legacy', 'bearer', $input, $legacyKey);
+        $legacy = $legacyAttempt($input);
         return $this->detectionResult($result, $this->routeAnswered($legacy) ? 'legacy' : null, 'probe', $input, $legacy);
     }
 
+    /** The main API key goes only where the saved configuration already sends it. */
+    private function mainKeyMayBeSentTo(string $input): bool {
+        if ($input === '' || $input === self::DEFAULT_ENDPOINT) {
+            return true;
+        }
+        try {
+            $saved = $this->settingsService->getDoclingConfig();
+        } catch (\Throwable $e) {
+            return false;
+        }
+        return $saved['docling_api_profile'] === 'legacy' && $saved['docling_auth_mode'] === 'bearer'
+            && trim((string)$saved['docling_api_endpoint']) === $input;
+    }
+
     /**
-     * Query API metadata below $base: OpenAPI paths first, then Docling Serve's /version.
-     *
      * @return array{profile: ?string, source: ?string, title: ?string, version: ?string, route: string}|null Null when the server could not be reached
      */
     private function discover(string $base, string $key): ?array {
@@ -353,7 +344,6 @@ class DoclingClient {
             if ($serve || $legacyRoute !== null) {
                 $info = is_array($openApi['info'] ?? null) ? $openApi['info'] : [];
                 return [
-                    // Docling Serve wins when a server documents both routes.
                     'profile' => $serve ? 'docling_serve' : 'legacy',
                     'source' => 'openapi',
                     'title' => $this->cleanLabel($info['title'] ?? null),
@@ -380,9 +370,6 @@ class DoclingClient {
     }
 
     /**
-     * One bounded metadata GET. An authentication rejection is retried once with
-     * X-Api-Key and once with a Bearer token when a key is available.
-     *
      * @return array<mixed>|false|null Decoded JSON object; null when unavailable; false when unreachable
      */
     private function fetchDiscoveryJson(string $url, string $key): array|false|null {
@@ -421,11 +408,6 @@ class DoclingClient {
         return null;
     }
 
-    /**
-     * The value an administrator should store: the input, unless it would not
-     * resolve to the route discovered below $base (for example a /docs URL, or
-     * a legacy route behind a path prefix that is never expanded).
-     */
     private function detectedEndpoint(string $input, string $base, string $profile, string $route, ?string $query): string {
         $suffix = $query !== null && $query !== '' ? '?' . $query : '';
         try {
@@ -433,18 +415,12 @@ class DoclingClient {
                 return $input;
             }
         } catch (Exception $e) {
-            // Use the discovered route below.
         }
 
         return ($profile === 'docling_serve' ? $base : $base . $route) . $suffix;
     }
 
-    /**
-     * Docling Serve uses X-Api-Key when a key is available. A gateway that rejects
-     * it is retried once with Bearer; no request is repeated after any other failure.
-     *
-     * @return array{success: bool, auth_mode: string, status: ?int, error: ?string, duration_ms: ?int, conversion_url: ?string}
-     */
+    /** @return array{success: bool, auth_mode: string, status: ?int, error: ?string, duration_ms: ?int, conversion_url: ?string} */
     private function attemptServeConversion(string $endpoint, string $key): array {
         $attempt = $this->attemptConversion('docling_serve', $key !== '' ? 'x_api_key' : 'none', $endpoint, fn (): string => $key);
         if ($attempt['auth_mode'] === 'x_api_key' && in_array($attempt['status'], [401, 403], true)) {
@@ -458,9 +434,6 @@ class DoclingClient {
     }
 
     /**
-     * One test conversion through the shared adapter. The HTTP status, when the
-     * server answered, classifies a failure; the message is a fixed diagnostic.
-     *
      * @param callable():string $key
      * @return array{success: bool, auth_mode: string, status: ?int, error: ?string, duration_ms: ?int, conversion_url: ?string}
      */
@@ -493,11 +466,7 @@ class DoclingClient {
         return $attempt;
     }
 
-    /**
-     * Any HTTP answer other than "no such route" or a redirect identifies the route.
-     *
-     * @param array{success: bool, status: ?int} $attempt
-     */
+    /** @param array{success: bool, status: ?int} $attempt */
     private function routeAnswered(array $attempt): bool {
         $status = $attempt['status'];
         return $attempt['success']
@@ -541,7 +510,6 @@ class DoclingClient {
         return $query === false ? $url : substr($url, 0, $query);
     }
 
-    /** A short, printable label from remote metadata, never more than 80 characters. */
     private function cleanLabel(mixed $value): ?string {
         if (!is_string($value) && !is_int($value) && !is_float($value)) {
             return null;
@@ -680,8 +648,6 @@ class DoclingClient {
     }
 
     /**
-     * URL checks shared by conversion and detection. Messages never echo the URL.
-     *
      * @return array{0: array<string,mixed>, 1: string, 2: string} URL parts, path without trailing slash, decoded path
      * @throws \InvalidArgumentException
      */

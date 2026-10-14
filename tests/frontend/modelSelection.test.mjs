@@ -108,7 +108,7 @@ test('refresh keeps admin default, fallback, allowed models and overrides unchan
 	await state.loadModels()
 	assert.equal(state.availableModelOptions.length, 2)
 	assert.equal(state.modelProviders[1].status, 'stale')
-	const missing = state.availableModelOptionsWithCurrent(state.settings.defaultModel).find(option => option.id === 'secondary:missing')
+	const missing = modelSelection.modelOptionsWithCurrent(state.availableModelOptions, state.settings.defaultModel).find(option => option.id === 'secondary:missing')
 	assert.equal(missing.availability, 'missing')
 	assert.match(missing.label, /not in current catalogue/)
 })
@@ -133,7 +133,7 @@ test('unqualified legacy values are neither assigned to primary nor stripped on 
 	assert.equal(saved.fallbackModel, 'unknown')
 	assert.deepEqual(Array.from(saved.allowedModels), ['secondary:secondary-only', 'shared'])
 	assert.equal(state.errors.length, 0)
-	const legacy = state.availableModelOptionsWithCurrent('shared').find(option => option.id === 'shared')
+	const legacy = modelSelection.modelOptionsWithCurrent(state.availableModelOptions, 'shared').find(option => option.id === 'shared')
 	assert.equal(legacy.endpoint, null)
 	assert.match(legacy.label, /provider not selected/)
 })
@@ -326,4 +326,16 @@ test('stored models of a provider without a model list are manual entries, not m
 	assert.equal(byId['primary:microsoft/gpt-5.4'].label, 'Primary · microsoft/gpt-5.4')
 	assert.equal(byId['secondary:gone'].availability, 'missing')
 	assert.match(byId['secondary:gone'].label, /not in current catalogue/)
+})
+
+test('a bot with an unqualified model can pin it to a provider without a release', () => {
+	const { state } = component('BotForm', {}, { bot: { id: 6, model: 'gpt-4o' }, userPermissions: {} })
+	state.settings.allowMultipleModels = false
+	state.formData.model = 'gpt-4o'
+	state.modelProviders = [{ id: 'primary', status: 'ready' }, { id: 'secondary', status: 'unconfigured' }]
+	assert.deepEqual(Array.from(state.selectableModelOptions, option => option.id), ['gpt-4o', 'primary:gpt-4o'])
+	state.modelProviders = [{ id: 'primary', status: 'ready' }, { id: 'secondary', status: 'stale' }]
+	assert.deepEqual(Array.from(state.selectableModelOptions, option => option.id), ['gpt-4o', 'primary:gpt-4o', 'secondary:gpt-4o'])
+	state.formData.model = 'secondary:gpt-4o'
+	assert.deepEqual(Array.from(state.selectableModelOptions, option => option.id), ['secondary:gpt-4o'], 'A qualified choice offers no other providers')
 })

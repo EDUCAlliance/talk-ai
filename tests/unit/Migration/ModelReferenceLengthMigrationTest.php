@@ -6,6 +6,7 @@ namespace OCA\EducAI\Tests\Unit\Migration;
 
 use OCA\EducAI\Migration\Version024300Date20261013000000;
 use OCP\DB\ISchemaWrapper;
+use OCP\IConfig;
 use OCP\Migration\IOutput;
 use PHPUnit\Framework\TestCase;
 
@@ -22,7 +23,7 @@ class ModelReferenceLengthMigrationTest extends TestCase {
 		$schema->method('hasTable')->willReturn(true);
 		$schema->method('getTable')->willReturnCallback(static fn (string $name) => $name === 'educai_settings' ? $settings : $bots);
 		$output = $this->createMock(IOutput::class);
-		$migration = new Version024300Date20261013000000();
+		$migration = new Version024300Date20261013000000($this->createMock(IConfig::class));
 		$this->assertSame($schema, $migration->changeSchema($output, static fn () => $schema, []));
 		$this->assertSame(['length' => 512, 'notnull' => true, 'default' => 'old-default'], $settings->columns['default_model']);
 		$this->assertSame(['length' => 512, 'notnull' => false, 'default' => null], $settings->columns['fallback_model']);
@@ -39,7 +40,7 @@ class ModelReferenceLengthMigrationTest extends TestCase {
 		$schema = $this->createMock(ISchemaWrapper::class);
 		$schema->method('hasTable')->willReturnCallback(static fn (string $name): bool => $name === 'educai_settings');
 		$schema->method('getTable')->willReturn($table);
-		$this->assertNull((new Version024300Date20261013000000())->changeSchema($this->createMock(IOutput::class), static fn () => $schema, []));
+		$this->assertNull((new Version024300Date20261013000000($this->createMock(IConfig::class)))->changeSchema($this->createMock(IOutput::class), static fn () => $schema, []));
 		$this->assertSame([], $table->changes);
 	}
 

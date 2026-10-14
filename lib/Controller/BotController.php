@@ -6,6 +6,7 @@ namespace OCA\EducAI\Controller;
 
 use Exception;
 use OCA\EducAI\Exception\AuthorizationException;
+use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\PermissionService;
@@ -121,6 +122,8 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot, 201);
+		} catch (ModelNotReleasedException $e) {
+			return $this->modelNotReleasedResponse($e);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to create bot: ' . $e->getMessage());
 			return $this->errorResponse('bot_create_failed', $this->l10n->t('Failed to create bot'), 400);
@@ -168,6 +171,8 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot);
+		} catch (ModelNotReleasedException $e) {
+			return $this->modelNotReleasedResponse($e);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to update bot: ' . $e->getMessage());
 			return $this->errorResponse(
@@ -484,6 +489,8 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot);
+		} catch (ModelNotReleasedException $e) {
+			return $this->modelNotReleasedResponse($e);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to update bot as admin', [
 				'bot_id' => $id,
@@ -537,6 +544,12 @@ class BotController extends Controller {
 		unset($tool);
 
 		return $tools;
+	}
+
+	private function modelNotReleasedResponse(ModelNotReleasedException $e): DataResponse {
+		return $this->errorResponse('model_not_released', $e->selectionDisabled
+			? $this->l10n->t('Choosing a model per bot is turned off. The bot uses the administrator default model.')
+			: $this->l10n->t('This model has not been released for bots. Choose a released model or the administrator default.'), 400);
 	}
 
 	private function errorResponse(string $errorCode, string $error, int $status): DataResponse {

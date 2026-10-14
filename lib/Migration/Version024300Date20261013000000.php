@@ -6,11 +6,17 @@ namespace OCA\EducAI\Migration;
 
 use Closure;
 use OCP\DB\ISchemaWrapper;
+use OCP\IConfig;
 use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
 /** Provider-qualified references must fit without truncating older model IDs. */
 class Version024300Date20261013000000 extends SimpleMigrationStep {
+	public function __construct(
+		private IConfig $config,
+	) {
+	}
+
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
 		$schema = $schemaClosure();
 		$changed = false;
@@ -28,12 +34,16 @@ class Version024300Date20261013000000 extends SimpleMigrationStep {
 			}
 			foreach ($columns as $column) {
 				if ($table->hasColumn($column) && $table->getColumn($column)->getLength() < 512) {
-					// Preserve defaults and nullability, including inherited bot models.
 					$table->changeColumn($column, ['length' => 512]);
 					$changed = true;
 				}
 			}
 		}
 		return $changed ? $schema : null;
+	}
+
+	/** The combined model list cache was replaced by one catalogue per provider. */
+	public function postSchemaChange(IOutput $output, Closure $schemaClosure, array $options): void {
+		$this->config->deleteAppValue('educai', 'llm_model_options_cache');
 	}
 }

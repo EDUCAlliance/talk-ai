@@ -4,7 +4,6 @@ export function modelReference(value) {
 	return typeof value === 'string' ? value.trim() : ''
 }
 
-// Only adopt a binding confirmed by saved server state, never guess from discovery.
 export function adoptSavedModelBinding(current, saved) {
 	const reference = modelReference(current)
 	const savedParts = splitModelReference(saved)
@@ -62,7 +61,6 @@ export function unlistedModelEndpoints(providers) {
 		.map(provider => provider.id)
 }
 
-// Keep the actual stored value selectable; discovery must never change a choice.
 // Without a provider list there is nothing to compare against, so manual IDs are not "missing".
 export function modelOptionsWithCurrent(options, current, unlistedEndpoints = []) {
 	const result = options.map(option => ({ ...option }))

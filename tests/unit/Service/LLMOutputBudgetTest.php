@@ -10,6 +10,7 @@ use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Service\AgentTurn;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\ProviderAttemptBudget;
 use OCA\EducAI\Service\SettingsService;
@@ -82,7 +83,7 @@ class LLMOutputBudgetTest extends TestCase {
 		$llm = $this->llm($client, $this->settings(), budgets: [$model => 4096]);
 		$system = 'You are a helpful assistant.';
 		$this->assertSame('ok', $this->turn($llm, $stream, $model, $system, $messages)->getText());
-		$llm->listModelOptions();
+		$llm->getModelCatalogue()['model_options'];
 		$this->assertSame('ok', $this->turn($llm, $stream, $model, $system, $messages)->getText());
 		$this->assertSame($sent[0], $sent[1], 'Discovery must not break a fitting conversation.');
 		$this->assertSame($messages, array_slice($sent[1]['messages'], -count($messages)), 'History must not be discarded.');
@@ -124,7 +125,7 @@ class LLMOutputBudgetTest extends TestCase {
 			]]);
 		});
 		$discovery->expects($this->never())->method('post');
-		$options = $this->llm($discovery, $settings, $config)->listModelOptions();
+		$options = $this->llm($discovery, $settings, $config)->getModelCatalogue()['model_options'];
 		$byId = array_column($options, null, 'id');
 		$this->assertSame(['output_tokens' => 8192, 'context_tokens' => 65536], $byId['primary:model-a']['limits']);
 		$this->assertSame(['context_tokens' => 16384], $byId['primary:context-only']['limits']);
@@ -171,7 +172,7 @@ class LLMOutputBudgetTest extends TestCase {
 			return $this->answer(false);
 		});
 		$llm = $this->llm($client, $settings);
-		$options = $llm->listModelOptions();
+		$options = $llm->getModelCatalogue()['model_options'];
 		$this->assertEmpty($options[0]['limits'] ?? []);
 		$this->turn($llm, false, 'primary:model-a');
 	}
@@ -218,7 +219,7 @@ class LLMOutputBudgetTest extends TestCase {
 			return $this->answer(false);
 		});
 		$llm = $this->llm($client, $settings, $config);
-		$llm->listModelOptions();
+		$llm->getModelCatalogue()['model_options'];
 		$this->turn($llm, false, 'primary:model-a');
 		$settings->setApiEndpoint('https://replacement.example.invalid/v1/chat/completions');
 		$this->turn($llm, false, 'primary:model-a');
@@ -430,7 +431,7 @@ class LLMOutputBudgetTest extends TestCase {
 		$cache = [];
 		foreach (['primary', 'secondary'] as $endpoint) {
 			$cache['llm_model_catalogue_' . $endpoint] = json_encode([
-				'fingerprint' => hash('sha256', 'https://' . $endpoint . '.example.invalid/v1/models' . "\0synthetic-" . $endpoint . '-key'),
+				'fingerprint' => ConnectionCheckStore::fingerprint('provider', ['https://' . $endpoint . '.example.invalid/v1/models'], 'synthetic-' . $endpoint . '-key'),
 				'last_success_at' => time(), 'checked_at' => time(), 'next_refresh_at' => time() + 300,
 				'status' => 'ready', 'error' => null,
 				'options' => array_values(array_filter($options, static fn (array $option): bool => ($option['endpoint'] ?? '') === $endpoint)),

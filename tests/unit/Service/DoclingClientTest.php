@@ -312,20 +312,44 @@ class DoclingClientTest extends TestCase {
 		], $calls);
 	}
 
-	public function testDetectReadsOpenApiForLegacyAndFallsBackToTheMainKey(): void {
+	public function testDetectReadsOpenApiForLegacyAndSendsTheMainKeyOnlyToTheSavedEndpoint(): void {
+		foreach ([
+			'new address' => [null, 'none', ['Accept' => 'application/json']],
+			'saved legacy endpoint' => ['https://d.example/v1', 'bearer', ['Accept' => 'application/json', 'Authorization' => 'Bearer main-key']],
+		] as $case => [$savedEndpoint, $authMode, $headers]) {
+			$calls = [];
+			$http = $this->scriptedHttp([
+				'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/documents/convert'], 'EDUC Docling API', '0.4'))],
+				'POST https://d.example/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
+			], $calls);
+			$result = $this->detectionClient($http, savedEndpoint: $savedEndpoint)->detect('https://d.example/v1', null);
+			$this->assertSame('legacy', $result['profile'], $case);
+			$this->assertSame($authMode, $result['auth_mode'], $case);
+			$this->assertSame('AcademicCloud / EDUC', $result['service'], $case);
+			$this->assertSame(['EDUC Docling API', '0.4', 'openapi'], [$result['title'], $result['version'], $result['source']], $case);
+			$this->assertSame('https://d.example/v1', $result['endpoint'], $case);
+			$this->assertTrue($result['success'], $case);
+			$this->assertSame($headers, $calls[1][2], $case);
+		}
+	}
+
+	public function testDetectSendsTheMainKeyToTheTypedAcademicCloudDefaultButAsksForAKeyElsewhere(): void {
 		$calls = [];
 		$http = $this->scriptedHttp([
-			'GET https://d.example/openapi.json' => [$this->response($this->openApi(['/v1/documents/convert'], 'EDUC Docling API', '0.4'))],
-			'POST https://d.example/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
+			'POST https://chat-ai.academiccloud.de/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
 		], $calls);
-		$result = $this->detectionClient($http)->detect('https://d.example/v1', null);
-		$this->assertSame('legacy', $result['profile']);
-		$this->assertSame('bearer', $result['auth_mode']);
-		$this->assertSame('AcademicCloud / EDUC', $result['service']);
-		$this->assertSame(['EDUC Docling API', '0.4', 'openapi'], [$result['title'], $result['version'], $result['source']]);
-		$this->assertSame('https://d.example/v1', $result['endpoint']);
+		$result = $this->detectionClient($http)->detect('https://chat-ai.academiccloud.de/v1/documents/convert', null);
 		$this->assertTrue($result['success']);
-		$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[1][2]);
+		$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[0][2]);
+
+		$calls = [];
+		$http = $this->scriptedHttp([
+			'POST https://typo.example/v1/documents/convert' => [$this->response(['detail' => 'Not authenticated'], 401)],
+		], $calls);
+		$result = $this->detectionClient($http)->detect('https://typo.example/v1/documents/convert', null);
+		$this->assertFalse($result['success']);
+		$this->assertSame(['legacy', 'none'], [$result['profile'], $result['auth_mode']]);
+		$this->assertSame(['Accept' => 'application/json'], $calls[0][2]);
 	}
 
 	public function testDetectCanIgnoreAStoredKeyThatIsBeingRemoved(): void {
@@ -354,8 +378,8 @@ class DoclingClientTest extends TestCase {
 		], $calls);
 		$result = $this->createDoclingClient($http, settings: $settings)->detect('https://d.example/educ/v1/documents/convert', '', true);
 		$this->assertTrue($result['success']);
-		$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[0][2],
-			'Legacy Bearer falls back to the main key, never to the removed dedicated key');
+		$this->assertSame(['Accept' => 'application/json'], $calls[0][2],
+			'An unsaved address gets neither the removed dedicated key nor the main key');
 	}
 
 	public function testDetectPrefersDoclingServeWhenOpenApiListsBothRoutes(): void {
@@ -396,10 +420,10 @@ class DoclingClientTest extends TestCase {
 				'POST https://d.example/v1/documents/convert' => [$this->response(['markdown' => '# Test'])],
 			], $calls);
 			$result = $this->detectionClient($http)->detect('https://d.example', null);
-			$this->assertSame(['legacy', 'bearer', 'probe', true], [$result['profile'], $result['auth_mode'], $result['source'], $result['success']]);
+			$this->assertSame(['legacy', 'none', 'probe', true], [$result['profile'], $result['auth_mode'], $result['source'], $result['success']]);
 			$this->assertSame('https://d.example/v1/documents/convert', $result['conversion_url']);
 			$this->assertSame(['Accept' => 'application/json'], $calls[2][2]);
-			$this->assertSame(['Accept' => 'application/json', 'Authorization' => 'Bearer main-key'], $calls[3][2]);
+			$this->assertSame(['Accept' => 'application/json'], $calls[3][2], 'The main key never goes to an unsaved address');
 		}
 	}
 
@@ -673,17 +697,18 @@ class DoclingClientTest extends TestCase {
 	/**
 	 * Saved settings without an endpoint: a dedicated key (if any) and a main API key.
 	 */
-	private function detectionClient(IClient $client, ?string $dedicatedKey = null): DoclingClient {
+	private function detectionClient(IClient $client, ?string $dedicatedKey = null, ?string $savedEndpoint = null): DoclingClient {
 		$settings = $this->createMock(SettingsService::class);
-		$settings->method('getDoclingConfig')->willReturnCallback(static function (?string $profile = null, ?string $auth = null) use ($dedicatedKey): array {
+		$settings->method('getDoclingConfig')->willReturnCallback(static function (?string $profile = null, ?string $auth = null) use ($dedicatedKey, $savedEndpoint): array {
 			$profile ??= 'legacy';
 			$auth ??= 'bearer';
 			return [
-				'docling_enabled' => false, 'docling_api_endpoint' => null,
+				'docling_enabled' => false, 'docling_api_endpoint' => $savedEndpoint,
 				'docling_api_profile' => $profile, 'docling_auth_mode' => $auth,
 				'api_key' => $auth === 'none' ? '' : ($dedicatedKey ?? ($profile === 'legacy' && $auth === 'bearer' ? 'main-key' : null)),
 			];
 		});
+		$settings->method('getApiKey')->willReturn('main-key');
 		return $this->createDoclingClient($client, settings: $settings);
 	}
 

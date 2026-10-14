@@ -33,8 +33,6 @@ OC.L10N.register(
     "Inference not tested in this session." : "In dieser Sitzung wurde noch keine Modellantwort getestet.",
     "Test response received from {model} at {time} ({latency} ms)." : "Testantwort von {model} am {time} erhalten ({latency} ms).",
     "Choose a model" : "Modell auswählen",
-    "Catalogue up to date" : "Katalog aktuell",
-    "Using last known catalogue" : "Letzter bekannter Katalog wird verwendet",
     "Catalogue unavailable" : "Katalog nicht verfügbar",
     "Not configured" : "Nicht eingerichtet",
     "Not checked" : "Noch nicht geprüft",
@@ -1194,6 +1192,12 @@ OC.L10N.register(
     "A stored key stays in use until you replace or remove it." : "Ein gespeicherter Schlüssel bleibt in Gebrauch, bis du ihn ersetzt oder entfernst.",
     "Leave empty to use the primary API key." : "Leer lassen, um den primären API-Schlüssel zu verwenden.",
     "Only needed if the server requires a key. The primary API key is not sent." : "Nur nötig, wenn der Server einen Schlüssel verlangt. Der primäre API-Schlüssel wird nicht gesendet.",
+    "Choosing a model per bot is turned off. The bot uses the administrator default model." : "Die Modellauswahl pro Bot ist ausgeschaltet. Der Bot nutzt das administrative Standardmodell.",
+    "This model has not been released for bots. Choose a released model or the administrator default." : "Dieses Modell ist für Bots nicht freigegeben. Wähle ein freigegebenes Modell oder das administrative Standardmodell.",
+    "Save first. Until then a test would still use the saved provider." : "Erst speichern. Bis dahin würde ein Test noch den gespeicherten Anbieter verwenden.",
+    "The settings were not changed." : "Die Einstellungen wurden nicht geändert.",
+    "Open model choice" : "Modellauswahl öffnen",
+    "_The saved model name {models} has no provider yet. It keeps working as before. Select it again with its provider to pin it._::_The saved model names {models} have no provider yet. They keep working as before. Select them again with their provider to pin them._" : ["Der gespeicherte Modellname {models} hat noch keinen Anbieter. Er funktioniert weiter wie bisher. Wähle ihn erneut mit seinem Anbieter aus, um ihn festzulegen.","Die gespeicherten Modellnamen {models} haben noch keinen Anbieter. Sie funktionieren weiter wie bisher. Wähle sie erneut mit ihrem Anbieter aus, um sie festzulegen."],
     "{duration} · {time}" : "{duration} · {time}"
 },
 "nplurals=2; plural=(n != 1);");

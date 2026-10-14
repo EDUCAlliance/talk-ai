@@ -387,9 +387,6 @@ class ToolsController extends Controller {
 
     /**
      * @AdminRequired
-     * Detect the Docling API profile and authentication of a saved or unsaved URL
-     * and prove it with one small test conversion. Settings are never changed.
-     *
      * HTTP 200 whenever detection ran, including a failed conversion; HTTP 400 only for invalid input.
      */
     public function detectDocling(
@@ -398,7 +395,6 @@ class ToolsController extends Controller {
         bool $ignoreStoredKey = false,
     ): DataResponse {
         try {
-            // $ignoreStoredKey: the administrator is removing the stored key, so test without it.
             $result = $this->doclingClient->detect($doclingApiEndpoint, $doclingApiKey, $ignoreStoredKey);
         } catch (\InvalidArgumentException $e) {
             // DoclingClient validation messages are fixed and never echo the URL or key.
@@ -520,9 +516,6 @@ class ToolsController extends Controller {
     }
 
     /**
-     * Remember an explicit check for the administrator overview. Only the error
-     * already returned to the administrator is stored, never upstream details.
-     *
      * @param (callable(array<string,mixed>):array{fingerprint?:?string,summary?:?string})|null $checkTarget
      * @param array<string,mixed> $result
      */
@@ -534,7 +527,6 @@ class ToolsController extends Controller {
         try {
             $target = $checkTarget !== null ? $checkTarget($result) : [];
         } catch (\Throwable $e) {
-            // Without a fingerprint the check is remembered, but never reported as current.
             $target = [];
         }
         try {
@@ -564,7 +556,6 @@ class ToolsController extends Controller {
             $summary = $result['service'] . ($result['version'] !== null ? ' ' . $result['version'] : '')
                 . ' · ' . $result['auth_mode'];
             try {
-                // Same precedence as the detection: a typed key, otherwise the stored key.
                 $typedKey = trim((string)$typedKey);
                 $fingerprint = $this->doclingClient->connectionCheckTarget(
                     $result['endpoint'],
@@ -574,7 +565,6 @@ class ToolsController extends Controller {
                     $ignoreStoredKey,
                 )['fingerprint'] ?? null;
             } catch (\Throwable $e) {
-                // Without a fingerprint the check is remembered, but never reported as current.
             }
         }
         try {
