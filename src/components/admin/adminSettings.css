@@ -128,8 +128,10 @@
 	outline-offset: 1px;
 }
 
+/* Nextcloud core lightens every focused <button>; keep the selected colours after a click. */
 .educai-admin .ta-tab--active,
-.educai-admin .ta-tab--active:hover {
+.educai-admin .ta-tab--active:hover,
+.educai-admin .ta-tab--active:focus {
 	background: var(--color-primary-element);
 	color: var(--color-primary-element-text);
 }
@@ -361,7 +363,8 @@
 	cursor: not-allowed;
 }
 
-.educai-admin .ta-btn--primary {
+.educai-admin .ta-btn--primary,
+.educai-admin .ta-btn--primary:focus {
 	background: var(--color-primary-element);
 	color: var(--color-primary-element-text);
 }
@@ -1569,6 +1572,10 @@
 
 .educai-admin .ta-savebar .ta-btn--ghost {
 	color: #dbe7f0;
+}
+
+.educai-admin .ta-savebar .ta-btn--ghost:focus {
+	background: transparent;
 }
 
 .educai-admin .ta-savebar .ta-btn--ghost:hover:not(:disabled) {
