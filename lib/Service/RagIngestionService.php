@@ -26,9 +26,6 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 class RagIngestionService {
-    /** Operating-system metadata that is never document content (AppleDouble, Finder, Explorer). */
-    private const METADATA_FILE_NAMES = ['.ds_store', 'thumbs.db', 'ehthumbs.db', 'desktop.ini', '.localized', "icon\r"];
-    private const METADATA_FOLDER_NAMES = ['__macosx', '.trashes', '.spotlight-v100', '.fseventsd', '.temporaryitems', '.apdisk'];
     /** Retries after a source lookup failed for a backend reason (storage, database). */
     private const TEMPORARY_FAILURE_RETRY_DELAYS = [600, 1800, 3600];
     /** Retries after the embedding provider asked for a pause without any progress in between. */
@@ -740,7 +737,7 @@ class RagIngestionService {
         if ($node instanceof Folder) {
             foreach ($node->getDirectoryListing() as $child) {
                 if ($child instanceof Folder) {
-                    if (in_array(mb_strtolower((string)$child->getName()), self::METADATA_FOLDER_NAMES, true)) {
+                    if (MetadataFileFilter::isMetadataFolderName((string)$child->getName())) {
                         $stats['metadata']++;
                         continue;
                     }
@@ -762,8 +759,7 @@ class RagIngestionService {
      * AppleDouble companions (._name) and known Finder/Explorer files carry no document content.
      */
     private function isMetadataFile(File $file): bool {
-        $name = (string)$file->getName();
-        return str_starts_with($name, '._') || in_array(mb_strtolower($name), self::METADATA_FILE_NAMES, true);
+        return MetadataFileFilter::isMetadataPath((string)$file->getName());
     }
 
     /**
