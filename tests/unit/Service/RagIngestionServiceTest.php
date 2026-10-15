@@ -69,8 +69,9 @@ class RagIngestionServiceTest extends TestCase {
 		$docling->method('isSupported')->willReturnCallback(static fn (File $file): bool => str_ends_with((string)$file->getName(), '.jpg'));
 		$docling->expects($this->never())->method('convertToMarkdown');
 		$embeddings = $this->createMock(EmbeddingMapper::class);
-		$embeddings->expects($this->once())->method('deleteBySource')->with(1);
-		$embeddings->expects($this->once())->method('insert')->willReturnCallback(static fn (Embedding $item): Embedding => $item);
+		$embeddings->method('stagedChunkIndexes')->willReturn([]);
+		$embeddings->expects($this->once())->method('insertStaged');
+		$embeddings->expects($this->once())->method('publishStaged')->with(1, 'model', $this->anything(), 1);
 		$embeddingClient = $this->createMock(EmbeddingClient::class);
 		$embeddingClient->method('getActiveModel')->willReturn('model');
 		$embeddingClient->expects($this->once())->method('embedTexts')
@@ -412,6 +413,198 @@ class RagIngestionServiceTest extends TestCase {
 		$this->assertSame('ready', $source->getStatus());
 	}
 
+	public function testRetryContinuesWithTheStagedChunksInsteadOfStartingOver(): void {
+		$source = $this->source();
+		// 750-character chunks with 50 overlap: three chunks.
+		$folder = $this->folder([$this->file('long.txt', 'text/plain', str_repeat('a', 1500))]);
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('stagedChunkIndexes')->willReturn([0 => true, 1 => true]);
+		$staged = [];
+		$embeddings->method('insertStaged')->willReturnCallback(static function (Embedding $item, int $index) use (&$staged): void {
+			$staged[] = $index;
+		});
+		$embeddings->expects($this->once())->method('publishStaged')->with(1, 'model', $this->anything(), 3);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$embeddingClient->expects($this->once())->method('embedTexts')
+			->with([str_repeat('a', 100)], 'model', $this->anything())
+			->willReturn([[0.1, 0.2]]);
+
+		$this->service($folder, null, $embeddings, $embeddingClient)->ingestSource($source, true, 2);
+
+		$this->assertSame([2], $staged);
+		$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
+	}
+
+	public function testPauseAfterProgressKeepsRetryingWithAFreshBudget(): void {
+		$source = $this->source();
+		// 51 chunks: the first batch of 50 is embedded, the second one is paused.
+		$folder = $this->folder([$this->file('big.txt', 'text/plain', str_repeat('b', 50 * 700 + 750))]);
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('stagedChunkIndexes')->willReturn([]);
+		$embeddings->expects($this->exactly(50))->method('insertStaged');
+		$embeddings->expects($this->never())->method('publishStaged');
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$calls = 0;
+		$embeddingClient->method('embedTexts')->willReturnCallback(static function (array $texts) use (&$calls): array {
+			if (++$calls === 2) {
+				throw new EmbeddingRateLimitedException(120);
+			}
+			return array_fill(0, count($texts), [0.1]);
+		});
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('getJobsIterator')->willReturn([]);
+		$jobs->expects($this->once())->method('scheduleAfter')->with(
+			ReindexBotSourceJob::class,
+			$this->greaterThanOrEqual(time() + 120),
+			['sourceId' => 1, 'force' => true, 'attempt' => 1]
+		);
+
+		// The last attempt of the chain: without progress this would end in an error.
+		$this->service($folder, null, $embeddings, $embeddingClient, $jobs)->ingestSource($source, true, 5);
+
+		$this->assertSame(KnowledgeSourceStatus::PENDING, $source->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::STAGE_WAITING, $source->getProgressStage());
+	}
+
+	public function testExplicitReindexQueuedMeanwhileReplacesTheRetry(): void {
+		$source = $this->source();
+		$folder = $this->folder([$this->file('a.txt', 'text/plain', 'Some text.')]);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$embeddingClient->method('embedTexts')->willThrowException(new EmbeddingRateLimitedException(120));
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('getJobsIterator')->willReturn([$this->job(5, ['sourceId' => 1, 'force' => true])]);
+		$jobs->expects($this->never())->method('scheduleAfter');
+
+		$this->service($folder, null, null, $embeddingClient, $jobs)->ingestSource($source, true);
+
+		$this->assertSame(KnowledgeSourceStatus::STAGE_WAITING, $source->getProgressStage());
+	}
+
+	public function testSourceRemovedWhileItWasEmbeddedPublishesNothing(): void {
+		$source = $this->source();
+		$folder = $this->folder([$this->file('a.txt', 'text/plain', 'Some text.')]);
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('stagedChunkIndexes')->willReturn([]);
+		$embeddings->expects($this->never())->method('publishStaged');
+		$embeddings->expects($this->once())->method('deleteBySource')->with(1);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$embeddingClient->method('embedTexts')->willReturn([[0.1]]);
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willThrowException(new \OCP\AppFramework\Db\DoesNotExistException('removed'));
+
+		$this->service($folder, null, $embeddings, $embeddingClient, null, $mapper)->ingestSource($source, true);
+	}
+
+	public function testSourceUnreachableBeforePublishingIsExcludedInsteadOfPublished(): void {
+		$source = $this->source();
+		$text = $this->file('a.txt', 'text/plain', 'Some text.');
+		$folder = $this->createMock(Folder::class);
+		$folder->method('getPath')->willReturn('/alice/files');
+		$folder->method('getDirectoryListing')->willReturn([$text]);
+		// Found for collecting, gone when the finished index would be published.
+		$folder->method('getById')->with(10)->willReturnOnConsecutiveCalls([$folder], []);
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('stagedChunkIndexes')->willReturn([]);
+		$embeddings->expects($this->never())->method('publishStaged');
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$embeddingClient->method('embedTexts')->willReturn([[0.1]]);
+
+		$this->service($folder, null, $embeddings, $embeddingClient)->ingestSource($source, true);
+
+		$this->assertSame(KnowledgeSourceStatus::UNAVAILABLE, $source->getStatus());
+		$this->assertSame('previous-complete-index', $source->getChecksum());
+	}
+
+	public function testDeniedFolderListingExcludesTheSource(): void {
+		$source = $this->source();
+		$folder = $this->createMock(Folder::class);
+		$folder->method('getPath')->willReturn('/alice/files');
+		$folder->method('getById')->with(10)->willReturn([$folder]);
+		$folder->method('getDirectoryListing')->willThrowException(new NotPermittedException('denied'));
+
+		$this->service($folder)->ingestSource($source, true);
+
+		$this->assertSame(KnowledgeSourceStatus::UNAVAILABLE, $source->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::SOURCE_ACCESS_DENIED, KnowledgeSourceStatus::decode($source->getErrorMessage())['code']);
+	}
+
+	public function testExcludedSourceStaysExcludedUntilItsNewIndexIsPublished(): void {
+		$source = $this->source();
+		$source->setStatus(KnowledgeSourceStatus::UNAVAILABLE);
+		$folder = $this->folder([$this->file('a.txt', 'text/plain', 'Some text.')]);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$embeddingClient->method('embedTexts')->willThrowException(new EmbeddingRateLimitedException(120));
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('getJobsIterator')->willReturn([]);
+		$jobs->expects($this->once())->method('scheduleAfter');
+
+		$this->service($folder, null, null, $embeddingClient, $jobs)->ingestSource($source, true);
+
+		// Found again, but its old index must not answer before the new one is complete.
+		$this->assertSame(KnowledgeSourceStatus::UNAVAILABLE, $source->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::STAGE_WAITING, $source->getProgressStage());
+	}
+
+	public function testUnchangedContentIsReembeddedWhenTheModelHasNoVectors(): void {
+		$source = $this->source();
+		$folder = $this->folder([$this->file('a.txt', 'text/plain', 'Some text.')]);
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('stagedChunkIndexes')->willReturn([]);
+		$embeddings->method('countBySourceAndModel')->with(1, 'model-b')->willReturn(0);
+		$embeddings->expects($this->once())->method('publishStaged');
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model-b');
+		$embeddingClient->expects($this->once())->method('embedTexts')->willReturn([[0.1]]);
+		$service = $this->service($folder, null, $embeddings, $embeddingClient);
+		$fingerprint = (new \ReflectionMethod($service, 'indexFingerprint'))->invoke($service, sha1('Some text.'), 750, 50);
+		$source->setChecksum($fingerprint);
+
+		$service->ingestSource($source, false);
+
+		$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
+	}
+
+	public function testPhpErrorDoesNotLeaveTheSourcePending(): void {
+		$source = $this->source();
+		$folder = $this->folder([$this->file('a.txt', 'text/plain', 'Some text.')]);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$embeddingClient->method('embedTexts')->willThrowException(new \TypeError('unexpected vector'));
+
+		$this->service($folder, null, null, $embeddingClient)->ingestSource($source, true);
+
+		$this->assertSame(KnowledgeSourceStatus::ERROR, $source->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::INDEXING_FAILED, KnowledgeSourceStatus::decode($source->getErrorMessage())['code']);
+	}
+
+	public function testOverlapOfTheChunkSizeStillAdvancesThroughTheText(): void {
+		$source = $this->source();
+		$folder = $this->folder([$this->file('a.txt', 'text/plain', str_repeat('c', 250))]);
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('stagedChunkIndexes')->willReturn([]);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('model');
+		$sent = [];
+		$embeddingClient->method('embedTexts')->willReturnCallback(static function (array $texts) use (&$sent): array {
+			array_push($sent, ...$texts);
+			return array_fill(0, count($texts), [0.1]);
+		});
+
+		// A stored overlap equal to the chunk size used to loop until the worker ran out of memory.
+		$this->service($folder, null, $embeddings, $embeddingClient, null, null, ['rag_enabled' => true, 'rag_chunk_size' => 100, 'rag_chunk_overlap' => 100])
+			->ingestSource($source, true);
+
+		$this->assertCount(250, $sent);
+		$this->assertSame(str_repeat('c', 100), $sent[0]);
+		$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
+	}
+
 	private function source(): BotSource {
 		$source = new BotSource();
 		$source->setId(1);
@@ -460,6 +653,8 @@ class RagIngestionServiceTest extends TestCase {
 		?EmbeddingMapper $embeddings = null,
 		?EmbeddingClient $embeddingClient = null,
 		?IJobList $jobs = null,
+		?BotSourceMapper $mapper = null,
+		array $ragConfig = ['rag_enabled' => true],
 	): RagIngestionService {
 		$root = $this->createMock(IRootFolder::class);
 		$root->method('getUserFolder')->with('alice')->willReturn($userFolder);
@@ -469,9 +664,11 @@ class RagIngestionServiceTest extends TestCase {
 			$docling->method('isSupported')->willReturn(false);
 		}
 		$settings = $this->createMock(SettingsService::class);
-		$settings->method('getRagConfig')->willReturn(['rag_enabled' => true]);
-		$mapper = $this->createMock(BotSourceMapper::class);
-		$mapper->method('update')->willReturnCallback(static fn (BotSource $item): BotSource => $item);
+		$settings->method('getRagConfig')->willReturn($ragConfig);
+		if ($mapper === null) {
+			$mapper = $this->createMock(BotSourceMapper::class);
+			$mapper->method('update')->willReturnCallback(static fn (BotSource $item): BotSource => $item);
+		}
 
 		return new RagIngestionService(
 			$mapper,

@@ -33,6 +33,8 @@ final class KnowledgeSourceStatus {
 	public const EMBEDDING_FAILED = 'embedding_failed';
 	public const URL_FETCH_FAILED = 'url_fetch_failed';
 	public const INDEXING_FAILED = 'indexing_failed';
+	/** A run stopped without finishing (worker killed, server restart). */
+	public const INDEXING_INTERRUPTED = 'indexing_interrupted';
 	public const RAG_DISABLED = 'rag_disabled';
 	/** Not an error: the source is ready, but some files were skipped. */
 	public const SKIPPED_FILES = 'skipped_files';

@@ -270,6 +270,11 @@ class RagController extends Controller {
             $result['notice_message'] = $this->l10n->t('The embedding service asked for a pause. Indexing continues automatically.');
             return $result;
         }
+        if ($status === KnowledgeSourceStatus::UNAVAILABLE && $code === KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED && (int)($params['retry_at'] ?? 0) > 0) {
+            $result['error_message'] = $this->l10n->t('The source is reachable again and is indexed after a pause of the embedding service. Until then the bot does not use it.');
+            $result['source_error_code'] = KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED;
+            return $result;
+        }
 
         $isProblem = in_array($status, [KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::UNAVAILABLE], true)
             && $source->getErrorMessage() !== null
@@ -313,6 +318,7 @@ class RagController extends Controller {
                 : $this->l10n->t('The embedding service could not be reached. The previous index is kept; administrators find details in the Nextcloud log.'),
             KnowledgeSourceStatus::URL_FETCH_FAILED => $this->l10n->t('The web page could not be loaded. Check the address and reindex.'),
             KnowledgeSourceStatus::RAG_DISABLED => $this->l10n->t('Knowledge sources are turned off by the administrator.'),
+            KnowledgeSourceStatus::INDEXING_INTERRUPTED => $this->l10n->t('Indexing was interrupted, for example by a server restart. The previous index is kept; start it again with Reindex.'),
             default => null,
         };
     }

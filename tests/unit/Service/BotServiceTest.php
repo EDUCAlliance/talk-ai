@@ -1632,7 +1632,7 @@ class BotServiceTest extends TestCase {
 		$rateLimitService->method('isEnabled')->willReturn(false);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
-		$embeddingMapper->expects($this->once())->method('findByBot')->with(7)->willReturn([new \stdClass()]);
+		$embeddingMapper->expects($this->once())->method('countByBot')->with(7)->willReturn(1);
 		$conversationMapper->expects($this->exactly(2))
 			->method('insert')
 			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);

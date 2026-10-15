@@ -75,7 +75,7 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$this->catalogue->method('isEnabled')->willReturn(true);
 		$this->sources->method('findAll')->willReturn([$this->source(11)]);
 		$this->jobs->method('has')->willReturn(true);
-		$this->ingestion->method('isQueued')->with(11)->willReturn(true);
+		$this->ingestion->method('isBusy')->willReturn(true);
 		$this->ingestion->expects($this->never())->method('enqueueSource');
 		$this->jobs->expects($this->never())->method('add');
 		$this->configuration->expects($this->never())->method('markQueued');
@@ -169,7 +169,7 @@ class EmbeddingAdminServiceTest extends TestCase {
 
 		$queued = [];
 		// Source 31 waits for a retry scheduled for later; it is queued already.
-		$this->ingestion->method('isQueued')->willReturnCallback(static fn (int $id): bool => $id === 31);
+		$this->ingestion->method('isBusy')->willReturnCallback(static fn (BotSource $source): bool => $source->getId() === 31);
 		$this->ingestion->method('enqueueSource')->willReturnCallback(static function (int $id) use (&$queued): void { $queued[] = $id; });
 		$result = $this->service->queueAll();
 		$this->assertSame([32], $queued);

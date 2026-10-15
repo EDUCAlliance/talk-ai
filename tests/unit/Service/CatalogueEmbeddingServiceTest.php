@@ -217,4 +217,70 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 		$this->assertFalse($stats['needs_reindex']);
 		$this->assertSame([], $this->status);
 	}
+
+	public function testRunAfterAPauseKeepsUnchangedCoursesAndEmbedsOnlyTheRest(): void {
+		$courses = array_map(static fn (int $id): array => ['id' => $id, 'title' => 'Course ' . $id], range(1, 12));
+		$this->client->method('searchCourses')->willReturn(['courses' => $courses, 'more' => 0]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);
+		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
+		$text = new \ReflectionMethod($this->service, 'buildSearchableText');
+		$stored = [];
+		foreach (array_slice($courses, 0, 10) as $course) {
+			$entity = new CatalogueEmbedding();
+			$entity->setCourseId($course['id']);
+			$entity->setSearchableText($text->invoke($this->service, $course));
+			$entity->setEmbedding('[0.5,0.5]');
+			$stored[] = $entity;
+		}
+		$this->mapper->method('findAllCurrentByModel')->with('embedding-v2')->willReturn($stored);
+		$this->mapper->method('findAllPastByModel')->willReturn([]);
+		$sent = [];
+		$this->embeddings->method('embedTexts')->willReturnCallback(static function (array $texts) use (&$sent): array {
+			array_push($sent, ...$texts);
+			return array_fill(0, count($texts), [1.0, 0.0]);
+		});
+		$vectors = [];
+		$this->mapper->method('upsert')->willReturnCallback(static function (CatalogueEmbedding $entity) use (&$vectors): CatalogueEmbedding {
+			$vectors[$entity->getCourseId()] = $entity->getEmbedding();
+			return $entity;
+		});
+		$this->mapper->method('count')->willReturn(12);
+
+		$this->assertTrue($this->service->reindex()['success']);
+
+		// Only the two courses the paused run did not reach are sent to the provider.
+		$this->assertSame([$text->invoke($this->service, $courses[10]), $text->invoke($this->service, $courses[11])], $sent);
+		$this->assertSame('[0.5,0.5]', $vectors[1]);
+		$this->assertSame('[1,0]', $vectors[12]);
+	}
+
+	public function testRequestedPauseIsKeptAndTheRefreshWaitsForIt(): void {
+		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 1, 'title' => 'A']], 'more' => 0]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);
+		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
+		$this->embeddings->method('embedTexts')->willThrowException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(86400));
+		$this->mapper->method('count')->willReturn(5);
+		$this->mapper->method('countCurrentByModel')->willReturn(5);
+		$this->settings->setCatalogueLastIndexed(time() - 7200);
+
+		$result = $this->service->reindex();
+
+		$this->assertGreaterThanOrEqual(time() + 86400, $result['retry_at']);
+		$this->assertSame($result['retry_at'], $this->status['retry_at']);
+		$stats = $this->service->getStats();
+		$this->assertSame('failed', $stats['state']);
+		$this->assertFalse($stats['needs_reindex']);
+		$this->assertSame($result['retry_at'], $stats['retry_at']);
+	}
+
+	public function testSearchThatCannotRunIsNotReportedAsNoMatch(): void {
+		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
+		$this->embeddings->method('embedQuery')->willReturnOnConsecutiveCalls(
+			$this->throwException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(90)),
+			$this->throwException(new \RuntimeException('connection refused')),
+		);
+
+		$this->assertSame(['courses' => [], 'total' => 0, 'error' => 'rate_limited', 'retry_after_seconds' => 90], $this->service->search('physics'));
+		$this->assertSame(['courses' => [], 'total' => 0, 'error' => 'search_failed'], $this->service->searchPast('physics'));
+	}
 }

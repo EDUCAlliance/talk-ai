@@ -108,8 +108,8 @@ class EmbeddingAdminService {
 			}
 			try {
 				$id = $source->getId();
-				// Includes retries scheduled for later (rate limits, temporary lookup failures).
-				if ($this->ingestion->isQueued($id)) {
+				// Includes retries scheduled for later and a run in progress.
+				if ($this->ingestion->isBusy($source)) {
 					$result['already_queued_rag_sources']++;
 					continue;
 				}

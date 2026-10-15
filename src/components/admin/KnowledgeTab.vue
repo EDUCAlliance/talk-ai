@@ -106,9 +106,14 @@
 								class="ta-input"
 								type="number"
 								min="0"
+								:max="Math.max(0, (admin.settings.ragChunkSize || 750) - 1)"
 								step="5"
-								placeholder="50">
-							<p class="ta-hint">
+								placeholder="50"
+								:aria-invalid="chunkOverlapInvalid ? 'true' : 'false'">
+							<p v-if="chunkOverlapInvalid" class="ta-hint" role="alert">
+								{{ t('educai', 'The chunk overlap must be smaller than the chunk size.') }}
+							</p>
+							<p v-else class="ta-hint">
 								{{ t('educai', 'Overlap keeps context between neighbouring chunks.') }}
 							</p>
 						</div>
@@ -335,6 +340,10 @@ export default {
 		return { customEmbeddingLimits: false, presets: RATE_LIMIT_PRESETS }
 	},
 	computed: {
+		chunkOverlapInvalid() {
+			const { ragChunkSize, ragChunkOverlap } = this.admin.settings
+			return Number.isFinite(ragChunkSize) && Number.isFinite(ragChunkOverlap) && ragChunkOverlap >= ragChunkSize
+		},
 		primaryDetail() {
 			const host = endpointHost(this.admin.settings.apiEndpoint)
 			return host ? t('educai', '{host} · same key', { host }) : t('educai', 'Uses the primary endpoint and key')

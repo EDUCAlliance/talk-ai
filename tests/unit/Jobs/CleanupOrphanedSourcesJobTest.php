@@ -83,17 +83,86 @@ class CleanupOrphanedSourcesJobTest extends TestCase {
 	public function testSourcesWithoutAFileToCheckAreSkipped(): void {
 		$url = $this->source(KnowledgeSourceStatus::READY);
 		$url->setNodeType('url');
-		$pending = $this->source(KnowledgeSourceStatus::PENDING);
 		$legacy = $this->source(KnowledgeSourceStatus::ERROR);
 		$legacy->setErrorMessage('Source file or folder no longer exists');
 		$ownerless = $this->source(KnowledgeSourceStatus::READY);
 		$ownerless->setOwnerUid('');
-		$mapper = $this->mapper([$url, $pending, $legacy, $ownerless]);
+		$mapper = $this->mapper([$url, $legacy, $ownerless]);
 		$mapper->expects($this->never())->method('update');
 		$locator = $this->createMock(RagSourceLocator::class);
 		$locator->expects($this->never())->method('locate');
 
 		$this->runJob($mapper, $locator, $this->createMock(IJobList::class));
+	}
+
+	public function testWaitingSourceWhoseFolderWasDeletedIsExcludedAtOnce(): void {
+		// A provider pause must not keep a deleted folder answerable until the retry runs.
+		$source = $this->source(KnowledgeSourceStatus::PENDING);
+		$source->setProgressStage(KnowledgeSourceStatus::STAGE_WAITING);
+		$source->setUpdatedAt(time() - 7200);
+		$mapper = $this->mapper([$source]);
+		$mapper->expects($this->once())->method('update')->with($source);
+
+		$this->runJob($mapper, $this->locator(RagSourceLocator::MISSING), $this->jobs([3]));
+
+		$this->assertSame(KnowledgeSourceStatus::UNAVAILABLE, $source->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::SOURCE_MISSING, KnowledgeSourceStatus::decode($source->getErrorMessage())['code']);
+	}
+
+	public function testPendingSourceWithoutJobOrProgressIsMarkedInterrupted(): void {
+		$source = $this->source(KnowledgeSourceStatus::PENDING);
+		$source->setProgressStage('embedding');
+		$source->setUpdatedAt(time() - 4 * 3600);
+		$mapper = $this->mapper([$source]);
+		$mapper->expects($this->once())->method('update')->with($source);
+		$locator = $this->createMock(RagSourceLocator::class);
+		$locator->expects($this->never())->method('locate');
+
+		$this->runJob($mapper, $locator, $this->jobs([]));
+
+		$this->assertSame(KnowledgeSourceStatus::ERROR, $source->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::INDEXING_INTERRUPTED, KnowledgeSourceStatus::decode($source->getErrorMessage())['code']);
+		$this->assertSame('index-checksum', $source->getChecksum());
+	}
+
+	public function testRunningOrQueuedSourcesAreLeftToTheirJob(): void {
+		$running = $this->source(KnowledgeSourceStatus::PENDING);
+		$running->setProgressStage('embedding');
+		$running->setUpdatedAt(time() - 60);
+		$queued = $this->source(KnowledgeSourceStatus::PENDING);
+		$queued->setId(4);
+		$queued->setUpdatedAt(time() - 4 * 3600);
+		$mapper = $this->mapper([$running, $queued]);
+		$mapper->expects($this->never())->method('update');
+
+		$this->runJob($mapper, $this->locator(RagSourceLocator::FOUND), $this->jobs([4]));
+
+		$this->assertSame(KnowledgeSourceStatus::PENDING, $running->getStatus());
+		$this->assertSame(KnowledgeSourceStatus::PENDING, $queued->getStatus());
+	}
+
+	public function testReachableAgainSourceWithAQueuedJobIsNotQueuedTwice(): void {
+		$source = $this->source(KnowledgeSourceStatus::UNAVAILABLE);
+		$mapper = $this->mapper([$source]);
+		$jobs = $this->jobs([3]);
+		$jobs->expects($this->never())->method('add');
+
+		$this->runJob($mapper, $this->locator(RagSourceLocator::FOUND), $jobs);
+	}
+
+	/**
+	 * @param list<int> $sourceIds Sources with a queued indexing job
+	 */
+	private function jobs(array $sourceIds): IJobList&\PHPUnit\Framework\MockObject\MockObject {
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('getJobsIterator')->willReturnCallback(function () use ($sourceIds): \Generator {
+			foreach ($sourceIds as $id) {
+				$job = $this->createMock(\OCP\BackgroundJob\IJob::class);
+				$job->method('getArgument')->willReturn(['sourceId' => $id, 'force' => true, 'attempt' => 1]);
+				yield $job;
+			}
+		});
+		return $jobs;
 	}
 
 	private function source(string $status): BotSource {

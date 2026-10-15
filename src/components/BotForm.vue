@@ -342,14 +342,14 @@
 										<button
 											type="button"
 											class="button subtle"
-											:disabled="rag.reindexing[source.id] || source.status === 'pending'"
+											:disabled="rag.reindexing[source.id]"
 											@click="reindexSource(source)">
 											{{ rag.reindexing[source.id] ? t('educai', 'Reindexing…') : t('educai', 'Reindex') }}
 										</button>
 										<button
 											type="button"
 											class="button danger"
-											:disabled="rag.removing[source.id] || source.status === 'pending'"
+											:disabled="rag.removing[source.id]"
 											@click="removeSource(source)">
 											{{ rag.removing[source.id] ? t('educai', 'Removing…') : t('educai', 'Remove') }}
 										</button>

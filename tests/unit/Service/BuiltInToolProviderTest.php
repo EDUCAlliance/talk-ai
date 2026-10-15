@@ -323,7 +323,7 @@ class BuiltInToolProviderTest extends TestCase {
 	public function testDocumentSearchUsesOnlyReachableSources(): void {
 		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
 		$embeddingMapper->expects($this->once())->method('findRetrievableByBotAndModel')->with(7, 'embed-model')->willReturn([]);
-		$embeddingMapper->method('countByBotAndModel')->with(7, 'embed-model')->willReturn(12);
+		$embeddingMapper->method('countUnavailableByBotAndModel')->with(7, 'embed-model')->willReturn(12);
 		$embeddingMapper->expects($this->never())->method('findByBotAndModel');
 		$embeddingClient = $this->createMock(EmbeddingClient::class);
 		$embeddingClient->method('getActiveModel')->willReturn('embed-model');

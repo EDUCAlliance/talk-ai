@@ -3785,3 +3785,15 @@ msgstr ""
 #: src/components/BotForm.vue
 msgid "Waiting for the embedding service…"
 msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The source is reachable again and is indexed after a pause of the embedding service. Until then the bot does not use it."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "Indexing was interrupted, for example by a server restart. The previous index is kept; start it again with Reindex."
+msgstr ""
+
+#: lib/Controller/SettingsController.php
+msgid "The chunk overlap must be smaller than the chunk size."
+msgstr ""

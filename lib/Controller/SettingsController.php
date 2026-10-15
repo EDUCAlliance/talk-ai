@@ -255,6 +255,9 @@ class SettingsController extends Controller {
 
 			return new DataResponse($this->buildSettingsPayload($settings));
 		} catch (\InvalidArgumentException $e) {
+			if ($e->getCode() === SettingsService::INVALID_CHUNK_SETTINGS) {
+				return $this->errorResponse('rag_chunk_settings_invalid', $this->l10n->t('The chunk overlap must be smaller than the chunk size.'), 400);
+			}
 			return $this->errorResponse('settings_validation_failed', $this->l10n->t('Check the model selections and settings. Select an explicit provider for new or ambiguous model names.'), 400);
 		} catch (Exception $e) {
 			$this->logger->error('Failed to update settings: ' . $e->getMessage());

@@ -869,4 +869,26 @@ class SettingsServiceTest extends TestCase {
 			}
 		}
 	}
+
+	public function testChunkOverlapMustBeSmallerThanTheChunkSize(): void {
+		$settings = new \OCA\EducAI\Db\Settings();
+		$settings->setRagChunkSize(750);
+		$settings->setRagChunkOverlap(50);
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->method('getSettings')->willReturn($settings);
+		$mapper->expects($this->never())->method('update');
+		$service = new SettingsService($mapper, $this->createMock(CredentialService::class),
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class));
+
+		foreach ([['ragChunkSize' => 100, 'ragChunkOverlap' => 100], ['ragChunkOverlap' => 750], ['ragChunkSize' => 40]] as $invalid) {
+			try {
+				$service->updateSettings(...array_merge(['apiProvider' => 'custom', 'apiKey' => '', 'apiEndpoint' => 'https://api.invalid', 'defaultModel' => 'primary:ok'], $invalid));
+				$this->fail('Invalid chunk settings accepted: ' . json_encode($invalid));
+			} catch (\InvalidArgumentException $e) {
+				$this->assertSame(SettingsService::INVALID_CHUNK_SETTINGS, $e->getCode());
+			}
+		}
+		$this->assertSame(50, $settings->getRagChunkOverlap());
+	}
 }

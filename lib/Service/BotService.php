@@ -1477,8 +1477,7 @@ class BotService {
 	 */
 	private function hasIndexedDocuments(int $botId): bool {
 		try {
-			$embeddings = $this->embeddingMapper->findByBot($botId);
-			return count($embeddings) > 0;
+			return $this->embeddingMapper->countByBot($botId) > 0;
 		} catch (Exception $e) {
 			$this->logger->warning('Failed to check indexed documents', [
 				'bot_id' => $botId,

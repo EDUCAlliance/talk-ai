@@ -8,6 +8,7 @@ use Exception;
 use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Service\KnowledgeSourceStatus;
+use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\RagSourceLocator;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\IJobList;
@@ -19,11 +20,16 @@ use Psr\Log\LoggerInterface;
  * reachable for their owner.
  *
  * Unreachable sources are marked "unavailable": their embeddings are kept but no
- * longer used for answers. When such a source becomes reachable again, it is
- * reindexed. Lookup failures (storage, database) change nothing. Embeddings are
- * only deleted when the owner removes the source.
+ * longer used for answers. This includes sources that are queued or waiting for a
+ * retry. When such a source becomes reachable again, it is reindexed. Lookup failures
+ * (storage, database) change nothing. Embeddings are only deleted when the owner
+ * removes the source. Sources left "pending" by an interrupted indexing run are
+ * marked as failed so their owner can start them again.
  */
 class CleanupOrphanedSourcesJob extends TimedJob {
+    /** Twice the running lease of an indexing run. */
+    private const INTERRUPTED_AFTER_SECONDS = 2 * RagIngestionService::RUNNING_LEASE_SECONDS;
+
     private BotSourceMapper $botSourceMapper;
     private RagSourceLocator $sourceLocator;
     private IJobList $jobList;
@@ -54,10 +60,11 @@ class CleanupOrphanedSourcesJob extends TimedJob {
 
         try {
             $sources = $this->botSourceMapper->findAll();
+            $queued = $this->queuedSourceIds();
 
             foreach ($sources as $source) {
                 try {
-                    if ($this->checkSource($source)) {
+                    if ($this->checkSource($source, isset($queued[$source->getId()]))) {
                         $changedCount++;
                     }
                 } catch (Exception $e) {
@@ -81,20 +88,46 @@ class CleanupOrphanedSourcesJob extends TimedJob {
     }
 
     /**
-     * @return bool Whether the source was marked unavailable or queued for reindexing
+     * @return array<int,true> Sources with a queued or scheduled indexing job
      */
-    private function checkSource(BotSource $source): bool {
+    private function queuedSourceIds(): array {
+        $ids = [];
+        foreach ($this->jobList->getJobsIterator(ReindexBotSourceJob::class, null, 0) as $job) {
+            $argument = $job->getArgument();
+            if (is_array($argument) && is_int($argument['sourceId'] ?? null)) {
+                $ids[$argument['sourceId']] = true;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @return bool Whether the source was changed or queued for reindexing
+     */
+    private function checkSource(BotSource $source, bool $queued): bool {
         // Rows cleaned up by the earlier deletion policy have no embeddings left.
         if ($source->getStatus() === KnowledgeSourceStatus::ERROR
             && str_contains($source->getErrorMessage() ?? '', 'no longer exists')) {
             return false;
         }
 
-        // URL sources have no file to check, and sources being indexed are handled by their job.
-        if ($source->getNodeType() === 'url' || $source->getStatus() === KnowledgeSourceStatus::PENDING) {
-            return false;
+        $now = time();
+        if ($source->getStatus() === KnowledgeSourceStatus::PENDING && !$queued
+            && !RagIngestionService::isRunning($source, $now)
+            && $source->getUpdatedAt() < $now - self::INTERRUPTED_AFTER_SECONDS) {
+            // No job will finish it (worker killed, server restart): let the owner start it again.
+            $source->setStatus(KnowledgeSourceStatus::ERROR);
+            $source->setErrorMessage(KnowledgeSourceStatus::encode(KnowledgeSourceStatus::INDEXING_INTERRUPTED, [], 'No job finished the indexing run'));
+            $source->setProgressStage(null);
+            $source->setUpdatedAt($now);
+            $this->botSourceMapper->update($source);
+            $this->logger->warning('EducAI: Knowledge source indexing was interrupted; marked as failed', ['sourceId' => $source->getId()]);
+            return true;
         }
-        if ($source->getOwnerUid() === '') {
+
+        // URL sources have no file to check.
+        if ($source->getNodeType() === 'url' || $source->getOwnerUid() === '') {
             return false;
         }
 
@@ -107,7 +140,7 @@ class CleanupOrphanedSourcesJob extends TimedJob {
         ];
 
         if ($location['state'] === RagSourceLocator::FOUND) {
-            if ($source->getStatus() !== KnowledgeSourceStatus::UNAVAILABLE) {
+            if ($source->getStatus() !== KnowledgeSourceStatus::UNAVAILABLE || $queued || RagIngestionService::isRunning($source, $now)) {
                 return false;
             }
             // Reachable again: reindexing is cheap when the content did not change.
@@ -120,6 +153,7 @@ class CleanupOrphanedSourcesJob extends TimedJob {
             if ($source->getStatus() === KnowledgeSourceStatus::UNAVAILABLE) {
                 return false;
             }
+            // Also while a retry waits: its old index must not answer until it is found again.
             $source->setStatus(KnowledgeSourceStatus::UNAVAILABLE);
             $source->setErrorMessage(KnowledgeSourceStatus::encode(
                 $location['state'] === RagSourceLocator::DENIED

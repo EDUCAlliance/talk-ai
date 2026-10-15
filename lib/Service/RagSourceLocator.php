@@ -6,6 +6,7 @@ namespace OCA\EducAI\Service;
 
 use OCA\EducAI\Db\BotSource;
 use OCP\Files\Folder;
+use OCP\Files\ForbiddenException;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use OCP\Files\NotPermittedException;
@@ -36,7 +37,7 @@ class RagSourceLocator {
 	public function locate(BotSource $source): array {
 		try {
 			$folder = $this->rootFolder->getUserFolder($source->getOwnerUid());
-		} catch (NotPermittedException $e) {
+		} catch (NotPermittedException|ForbiddenException $e) {
 			return $this->result(self::DENIED, null, null, $e);
 		} catch (Throwable $e) {
 			// The owner account no longer exists (server-internal exception class).
@@ -46,7 +47,7 @@ class RagSourceLocator {
 
 		try {
 			$nodes = $folder->getById($source->getNodeId());
-		} catch (NotPermittedException $e) {
+		} catch (NotPermittedException|ForbiddenException $e) {
 			return $this->result(self::DENIED, null, $folder, $e);
 		} catch (Throwable $e) {
 			return $this->result(self::UNAVAILABLE, null, $folder, $e);

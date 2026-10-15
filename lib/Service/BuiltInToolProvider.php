@@ -515,14 +515,13 @@ class BuiltInToolProvider {
             $embeddings = $this->embeddingMapper->findRetrievableByBotAndModel($botId, $embeddingModel);
 
             if (count($embeddings) === 0) {
-                if ($this->embeddingMapper->countByBotAndModel($botId, $embeddingModel) > 0) {
+                if ($this->embeddingMapper->countUnavailableByBotAndModel($botId, $embeddingModel) > 0) {
                     return $this->errorResponse(
                         'The knowledge sources of this assistant are currently not reachable for their owner and are not used for answers. Tell the user that the documents are unavailable.',
                         'sources_unavailable'
                     );
                 }
-                $allEmbeddingsCount = $this->embeddingMapper->countByBot($botId);
-                if ($allEmbeddingsCount > 0) {
+                if ($this->embeddingMapper->countIndexedByBot($botId) > 0) {
                     return [
                         'content' => [
                             [
