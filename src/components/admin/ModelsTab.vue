@@ -236,7 +236,7 @@
 
 		<AdminSection anchor="educai-admin-model-test"
 			:title="t('educai', 'Test a model response')"
-			:description="t('educai', 'Sends one short real request with the saved credentials. This may incur a small provider charge. Nothing is sent automatically.')">
+			:description="t('educai', 'Sends a short real request with the saved credentials, with at most one retry for model compatibility. This may incur a small provider charge. Nothing is sent automatically.')">
 			<div class="ta-field">
 				<label for="test-model" class="ta-label">{{ t('educai', 'Model to test') }}</label>
 				<ModelSelector id="test-model"

@@ -9,6 +9,8 @@ use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Exception\ModelTestException;
+use OCA\EducAI\Exception\ProviderContractException;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\ConnectionCheckStore;
@@ -291,16 +293,38 @@ class SettingsController extends Controller {
 		} catch (\Throwable $e) {
 			// Provider errors can contain credentials or upstream response bodies.
 			$this->logger->warning('The explicit model connection test failed');
-			$error = $this->l10n->t('The provider did not return a test answer. Check the saved endpoint, credentials, selected model and available credit.');
+			[$errorCode, $error] = $this->modelTestFailure($e);
 			$this->rememberModelCheck($model, false, $this->elapsedMs($started), $error);
 			return new DataResponse([
 				'success' => false,
-				'errorCode' => 'model_test_failed',
+				'errorCode' => $errorCode,
 				'error' => $error,
 				'model' => $model,
 				'checked_at' => time(),
 			], 502);
 		}
+	}
+
+	/** @return array{string, string} */
+	private function modelTestFailure(\Throwable $error): array {
+		if ($error instanceof ModelTestException) {
+			return $error->isOutputLimitReached()
+				? ['model_test_output_limit', $this->l10n->t('The model used the short test token budget without returning text. It may still work in a normal chat with a larger response budget.')]
+				: ['model_test_empty_response', $this->l10n->t('The provider accepted the test but returned no visible answer. Check whether the selected model supports text chat.')];
+		}
+		if ($error instanceof ProviderContractException) {
+			return ['model_test_invalid_response', $this->l10n->t('The provider returned an invalid chat response. Check the saved endpoint and model compatibility.')];
+		}
+		return match ((int)$error->getCode()) {
+			400, 422 => ['model_test_request_rejected', $this->l10n->t('The provider rejected the test request. Check model parameter compatibility and the saved endpoint.')],
+			401, 403 => ['model_test_access_denied', $this->l10n->t('The provider denied access. Check the saved credentials and permission to use the selected model.')],
+			402 => ['model_test_payment_required', $this->l10n->t('The provider requires payment. Check the provider account credit or billing status.')],
+			404 => ['model_test_not_found', $this->l10n->t('The provider could not find the selected model or endpoint. Check the model ID and saved endpoint.')],
+			408, 504 => ['model_test_timeout', $this->l10n->t('The model test timed out. Try again later or review the provider response timeout.')],
+			429 => ['model_test_rate_limited', $this->l10n->t('The provider rate limit or quota was reached. Try again later or check the provider limits.')],
+			500, 502, 503 => ['model_test_provider_unavailable', $this->l10n->t('The provider is temporarily unavailable. Try again later.')],
+			default => ['model_test_failed', $this->l10n->t('The model test failed. Check the saved endpoint and the Nextcloud logs for details.')],
+		};
 	}
 
 	private function rememberModelCheck(string $reference, bool $success, ?int $durationMs, ?string $error): void {

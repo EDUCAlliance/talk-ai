@@ -174,6 +174,25 @@ test('tests require saved provider settings and are never invoked by catalogue l
 	assert.equal(state.modelTesting, false)
 })
 
+test('admin tests unapproved models and displays the safe parameter error from the server', async () => {
+	const message = 'The provider rejected the test request. Check model parameter compatibility and the saved endpoint.'
+	const calls = []
+	const state = readyAdmin({ post: async (_url, payload) => {
+		calls.push(payload)
+		throw { response: { data: { errorCode: 'model_test_request_rejected', error: message } } }
+	} })
+	state.settings.allowMultipleModels = true
+	state.settings.allowedModels = ['primary:shared']
+	state.modelTestSelection = 'secondary:microsoft/gpt-6-luna'
+	assert.equal(state.canTestModel, true)
+	await state.testModelResponse()
+	assert.equal(calls.length, 1)
+	assert.equal(calls[0].model, 'secondary:microsoft/gpt-6-luna')
+	assert.equal(state.modelTestResult.success, false)
+	assert.equal(state.modelTestResult.error, message)
+	assert.equal(state.modelTesting, false)
+})
+
 test('stale inference result is discarded if settings are edited while the request runs', async () => {
 	let resolve
 	const state = readyAdmin({ post: () => new Promise(done => { resolve = done }) })

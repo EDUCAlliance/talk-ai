@@ -8,6 +8,7 @@ use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Exception\AgentRunInterruptedException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\IncompleteProviderStreamException;
+use OCA\EducAI\Exception\ModelTestException;
 use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Exception\ProviderContractException;
 use OCP\Http\Client\IClientService;
@@ -703,16 +704,15 @@ class LLMClient {
 		$settings = $this->settingsService->getSettings();
 		$options = [
 			'max_tokens' => 32,
-			'provider_attempt_budget' => new ProviderAttemptBudget(1),
+			'provider_attempt_budget' => new ProviderAttemptBudget(2),
 		];
 		$model = $this->resolveModelConfig($settings, $reference, $options);
-		$options = $this->withInitialModelParameterProfile($options, $model['model']);
 		$started = microtime(true);
-		$response = $this->sendResolvedChatCompletion(
-			[['role' => 'user', 'content' => 'Reply with OK.']], $model, $settings, $options, 'selected', 'connection_test'
+		$response = $this->sendResolvedChatCompletionWithReasoningRetry(
+			[['role' => 'user', 'content' => 'Reply with OK.']], $model, $settings, $options, 'selected', connectionTest: true
 		);
 		if (trim((string)($response['content'] ?? '')) === '') {
-			throw new \RuntimeException('The provider returned no test text. Try a different model or review its token requirements.');
+			throw new ModelTestException(($response['finish_reason'] ?? null) === 'length');
 		}
 		return [
 			'success' => true,
@@ -812,15 +812,19 @@ class LLMClient {
 		$settings,
 		array $options,
 		string $route,
+		bool $connectionTest = false,
 	): array {
 		$options = $this->withInitialModelParameterProfile($options, $modelConfig['model']);
 		try {
-			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options, $route, 'initial');
+			return $this->sendResolvedChatCompletion($fullMessages, $modelConfig, $settings, $options, $route, $connectionTest ? 'connection_test' : 'initial');
 		} catch (\Exception $e) {
 			if ($this->isNonRetryableProviderException($e)) {
 				throw $e;
 			}
 			if (!$this->shouldRetryWithReasoningParameters($e, $options, $modelConfig['model'])) {
+				throw $e;
+			}
+			if ($connectionTest && !$this->isUnsupportedModelParameterError($e)) {
 				throw $e;
 			}
 
@@ -834,6 +838,9 @@ class LLMClient {
 					'reasoning_retry',
 				);
 			} catch (\Exception $retryException) {
+				if ($connectionTest) {
+					throw $retryException;
+				}
 				if ($this->isNonRetryableProviderException($retryException)) {
 					throw $retryException;
 				}
@@ -1938,7 +1945,13 @@ class LLMClient {
 	}
 
 	private function modelUsesReasoningTokenParameters(string $model): bool {
-		return preg_match('/(?:^|[\\/:])(?:gpt-5|claude-sonnet-5)(?:[._-]|$)/i', $model) === 1;
+		return preg_match('/(?:^|[\\/:])(?:gpt-[56]|claude-sonnet-5)(?:[._-]|$)/i', $model) === 1;
+	}
+
+	private function isUnsupportedModelParameterError(\Exception $exception): bool {
+		$message = strtolower($exception->getMessage());
+		return preg_match('/\b(?:max_tokens|temperature)\b/', $message) === 1
+			&& preg_match('/unsupported|not supported|does not support|unknown parameter|unrecognized|not allowed/', $message) === 1;
 	}
 
 	private function isInvalidModelHttpError(\Exception $exception): bool {
@@ -1970,7 +1983,7 @@ class LLMClient {
 	}
 
 	private function modelRejectsSamplingExtras(string $model): bool {
-		return preg_match('/claude|anthropic|gpt-5/i', $model) === 1;
+		return preg_match('/claude|anthropic|gpt-[56]/i', $model) === 1;
 	}
 
 	/**

@@ -973,7 +973,7 @@ export default {
 				}
 			} catch (error) {
 				if (!this.hasUnsavedProviderSettings && baseline === this.modelProviderRevision && model === this.modelTestSelection) {
-					this.modelTestResult = { success: false, model, error: getApiErrorMessage(error, t('educai', 'No test response received. Check model access, provider settings, and account credit.')) }
+					this.modelTestResult = { success: false, model, error: getApiErrorMessage(error, t('educai', 'The model test failed. Check the saved endpoint and the Nextcloud logs for details.')) }
 				}
 			} finally {
 				this.modelTesting = false

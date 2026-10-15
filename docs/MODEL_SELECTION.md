@@ -9,7 +9,7 @@ Talk AI 2.43.0 keeps model discovery, administrator approval and inference testi
 3. Select the **Default Model** for bots that inherit the administrator default. A global default is required. Models not listed by a provider can be entered manually with an explicit provider and model ID.
 4. If **Allow Multiple Models** is enabled, explicitly select the models users may choose. New discoveries never expand this list. Turning it off preserves existing bot selections; new bots inherit the default.
 5. Optionally configure a provider-bound fallback under **Fallback & Timeouts**, and exact model output limits under **Response Limits**.
-6. Use **Test a model response** when you need to verify real model access. It makes one small, potentially billable request to the selected saved provider. It does not use the fallback or change any settings.
+6. Use **Test a model response** when you need to verify real model access. It makes a small, potentially billable request to the selected saved provider. An explicit token/temperature compatibility error may trigger one retry, for at most two requests to the same model and provider. It does not use the fallback or change any settings. Administrator tests do not require the model to be in the user allowlist.
 
 Unsaved provider settings disable explicit catalogue refresh and the inference test, so a success cannot be mistaken for a test of an unsaved endpoint or credential. Manual model selection, refresh and test controls use the same provider-bound identifiers throughout the UI.
 
@@ -20,7 +20,7 @@ Unsaved provider settings disable explicit catalogue refresh and the inference t
 - Endpoint or credential changes invalidate the affected provider's cached discovery and capacity data. They do not rewrite saved provider-bound selections.
 - A model removed from a catalogue remains selected, with a warning. It may still be callable. Talk AI does not choose a replacement silently.
 - A successful model-list request is not proof that inference works, the selected model is accessible, or the account has credit.
-- The explicit inference test caps output at 32 tokens and requires visible response text. A reasoning model may produce no visible text within that cap; a failed test is not proof that the model can never answer. Normal chat limits remain separate.
+- The explicit inference test caps output at 32 tokens and requires visible response text. A reasoning model may produce no visible text within that cap; a failed test is not proof that the model can never answer. Normal chat limits remain separate. GPT-5 and GPT-6 families use `max_completion_tokens` without custom temperature from the first attempt; classic models retain their existing parameters. A response that exhausts the test budget without text is reported separately from access failures. Authentication, quota, unavailable providers and invalid responses also receive safe, specific messages without raw upstream details.
 
 ## Bot behaviour and authorization
 
@@ -46,7 +46,7 @@ If embeddings inherit the chat default model name, the local `primary:`/`seconda
 
 - `GET /api/v1/models`: model options and independent provider statuses; cache-aware and available to authenticated users.
 - `POST /api/v1/models/refresh`: administrator-only explicit discovery refresh.
-- `POST /api/v1/models/test` with `{"model":"secondary:model-id"}`: administrator-only, one-request inference probe of the saved selected provider.
+- `POST /api/v1/models/test` with `{"model":"secondary:model-id"}`: administrator-only inference probe of the saved selected provider, with at most one parameter-compatibility retry and no fallback.
 
 The existing `models` and `model_options` response fields remain available. Catalogue responses additionally include `providers` and `refresh_interval_seconds`; each option indicates whether it is current or stale. Provider failures return safe descriptions, not credentials or raw upstream error bodies.
 

@@ -64,7 +64,7 @@ sudo -u www-data php occ app:enable educai
 **3. Configure** under **Administration settings → Talk AI**. On a new installation, the **Overview** tab shows a short setup checklist:
 
 - **Models:** primary API endpoint + API key (any OpenAI-compatible provider), then a default model from the automatically loaded model list
-- **Models → Test a model response:** one short real request confirms access and credit
+- **Models → Test a model response:** a short real request checks the selected model, with at most one compatibility retry
 - **System:** the webhook secret is created automatically during installation; replace it here if needed
 
 See [Administrator settings](docs/ADMIN_SETTINGS.md) for all tabs.

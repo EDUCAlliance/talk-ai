@@ -361,7 +361,7 @@ export function deriveOverview({
 					title: t('educai', 'Send a test request'),
 					detail: testDone
 						? checkValue(modelCheck, now).value
-						: t('educai', 'Checks with one short real request that access and credit are available.'),
+						: t('educai', 'Checks whether the selected model can return a real answer.'),
 					action: { tab: 'models', target: 'educai-admin-model-test', label: testDone ? t('educai', 'Test again') : t('educai', 'Test now') },
 				},
 				{

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Tests\Unit\Service;
 
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Exception\ModelTestException;
 use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\SettingsService;
@@ -248,6 +249,107 @@ class ModelCatalogueTest extends TestCase {
 		$this->assertSame([], $this->calls);
 	}
 
+	public function testGpt6ProbeUsesReasoningParametersImmediatelyEvenWhenNotReleased(): void {
+		$this->settings->setAllowMultipleModels(true);
+		$this->http->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url, array $options): IResponse {
+			$this->assertSame('https://secondary.invalid/v1/chat/completions', $url);
+			$this->assertSame('Bearer secondary-test-key', $options['headers']['Authorization']);
+			$this->assertSame(32, $options['json']['max_completion_tokens']);
+			$this->assertArrayNotHasKey('max_tokens', $options['json']);
+			$this->assertArrayNotHasKey('temperature', $options['json']);
+			return $this->response(['choices' => [['message' => ['content' => 'OK'], 'finish_reason' => 'stop']]]);
+		});
+		foreach (['gpt-6-luna', 'microsoft/gpt-6-luna'] as $model) {
+			$result = $this->client()->testModelConnection('secondary:' . $model);
+			$this->assertTrue($result['success']);
+			$this->assertSame('secondary:' . $model, $result['model']);
+		}
+		$this->assertSame([], $this->calls, 'A probe must not discover models');
+		$this->assertSame('["primary:alpha"]', $this->settings->getAllowedModels());
+		$this->assertSame('primary:alpha', $this->settings->getDefaultModel());
+	}
+
+	public function testUnknownAliasGetsOneParameterRetryOnTheSameProvider(): void {
+		$attempt = 0;
+		$this->http->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url, array $options) use (&$attempt): IResponse {
+			$this->assertSame('https://secondary.invalid/v1/chat/completions', $url);
+			$this->assertSame('Bearer secondary-test-key', $options['headers']['Authorization']);
+			$this->assertSame('private-alias', $options['json']['model']);
+			if (++$attempt === 1) {
+				$this->assertSame(32, $options['json']['max_tokens']);
+				return $this->response(['error' => ['message' => "Unsupported parameter: 'max_tokens'. Use max_completion_tokens instead."]], 400);
+			}
+			$this->assertSame(32, $options['json']['max_completion_tokens']);
+			$this->assertArrayNotHasKey('max_tokens', $options['json']);
+			$this->assertArrayNotHasKey('temperature', $options['json']);
+			return $this->response(['choices' => [['message' => ['content' => 'OK'], 'finish_reason' => 'stop']]]);
+		});
+		$this->assertTrue($this->client()->testModelConnection('secondary:private-alias')['success']);
+		$this->assertSame([], $this->calls);
+	}
+
+	public function testFailedParameterRetrySurfacesLastErrorWithoutFallbackOrThirdAttempt(): void {
+		$this->http->expects($this->exactly(2))->method('post')->willReturnOnConsecutiveCalls(
+			$this->response(['error' => ['message' => "Unsupported value: 'temperature'. Only default is supported."]], 422),
+			$this->response(['error' => ['message' => 'Payment required']], 402),
+		);
+		$this->expectExceptionCode(402);
+		try {
+			$this->client()->testModelConnection('primary:alpha');
+		} finally {
+			$this->assertSame([], $this->calls);
+		}
+	}
+
+	#[\PHPUnit\Framework\Attributes\DataProvider('nonRetryableProbeErrors')]
+	public function testProbeDoesNotRetryUnrelatedFailures(int $status, string $message, string $model): void {
+		$this->http->expects($this->once())->method('post')->willReturnCallback(function (string $url) use ($status, $message): IResponse {
+			$this->assertSame('https://primary.invalid/v1/chat/completions', $url, 'No fallback');
+			return $this->response(['error' => ['message' => $message]], $status);
+		});
+		$this->expectException(\Exception::class);
+		try {
+			$this->client()->testModelConnection('primary:' . $model);
+		} finally {
+			$this->assertSame([], $this->calls);
+		}
+	}
+
+	public static function nonRetryableProbeErrors(): array {
+		return [
+			'validation' => [400, 'Malformed messages', 'alpha'],
+			'unprocessable' => [422, 'Messages must include a user', 'alpha'],
+			'unknown model' => [400, 'Unknown model; max_tokens unsupported', 'alpha'],
+			'context overflow' => [400, 'context_length_exceeded', 'alpha'],
+			'credentials' => [401, 'Invalid credentials', 'alpha'],
+			'permission' => [403, 'Access denied', 'alpha'],
+			'payment' => [402, 'Insufficient credit', 'alpha'],
+			'rate limit' => [429, 'Rate limit', 'alpha'],
+			'unavailable' => [503, 'Unavailable', 'alpha'],
+			'already compatible' => [400, 'Unsupported max_completion_tokens', 'microsoft/gpt-6-luna'],
+			'classic-only family' => [400, 'Unsupported temperature', 'mistral-small'],
+		];
+	}
+
+	#[\PHPUnit\Framework\Attributes\DataProvider('emptyProbeResponses')]
+	public function testEmptyProbeResponseIsNotAccessFailureOrReasoningText(string $finishReason, bool $limited): void {
+		$this->http->expects($this->once())->method('post')->willReturn($this->response([
+			'choices' => [['message' => ['content' => '', 'reasoning_content' => 'private thinking'], 'finish_reason' => $finishReason]],
+		]));
+		try {
+			$this->client()->testModelConnection('primary:microsoft/gpt-6-luna');
+			$this->fail('An empty answer must not pass the test');
+		} catch (ModelTestException $e) {
+			$this->assertSame($limited, $e->isOutputLimitReached());
+			$this->assertStringNotContainsString('private thinking', $e->getMessage());
+		}
+		$this->assertSame([], $this->calls);
+	}
+
+	public static function emptyProbeResponses(): array {
+		return [['length', true], ['stop', false]];
+	}
+
 	public function testUnreadableCredentialDoesNotBreakHealthyProviderDiscoveryChatOrProbe(): void {
 		$this->keyFailures['secondary'] = new \RuntimeException('cannot decrypt secret-secondary-key');
 		$client = $this->client();
@@ -395,9 +497,9 @@ class ModelCatalogueTest extends TestCase {
 		return new LLMClient($factory, $this->settingsService, $this->createMock(LoggerInterface::class), $this->config);
 	}
 
-	private function response(array $payload): IResponse {
+	private function response(array $payload, int $status = 200): IResponse {
 		$response = $this->createMock(IResponse::class);
-		$response->method('getStatusCode')->willReturn(200);
+		$response->method('getStatusCode')->willReturn($status);
 		$response->method('getBody')->willReturn(json_encode($payload));
 		$response->method('getHeader')->willReturn('');
 		return $response;

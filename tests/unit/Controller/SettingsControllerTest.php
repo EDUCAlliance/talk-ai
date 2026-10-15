@@ -10,6 +10,8 @@ use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Exception\ModelTestException;
+use OCA\EducAI\Exception\ProviderContractException;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\ConnectionCheckStore;
@@ -213,6 +215,40 @@ class SettingsControllerTest extends TestCase {
 		$this->assertStringNotContainsString('secret-key', json_encode($response->getData()));
 	}
 
+	#[\PHPUnit\Framework\Attributes\DataProvider('modelProbeFailures')]
+	public function testModelProbeReturnsOnlySafeFailureCategories(\Throwable $failure, string $code, string $messageFragment): void {
+		$llm = $this->createMock(LLMClient::class);
+		$llm->method('testModelConnection')->willThrowException($failure);
+		$response = $this->modelController($llm)->testModel('secondary:manual-model');
+		$data = $response->getData();
+		$this->assertSame(502, $response->getStatus());
+		$this->assertFalse($data['success']);
+		$this->assertSame($code, $data['errorCode']);
+		$this->assertStringContainsString($messageFragment, $data['error']);
+		$this->assertSame('secondary:manual-model', $data['model']);
+		$this->assertStringNotContainsString('secret-key', json_encode($data));
+		$this->assertStringNotContainsString('private.invalid', json_encode($data));
+	}
+
+	public static function modelProbeFailures(): array {
+		$private = 'Bearer secret-key https://private.invalid';
+		return [
+			'parameters' => [new \Exception($private, 400), 'model_test_request_rejected', 'parameter compatibility'],
+			'validation' => [new \Exception($private, 422), 'model_test_request_rejected', 'parameter compatibility'],
+			'authentication' => [new \Exception($private, 401), 'model_test_access_denied', 'credentials'],
+			'authorization' => [new \Exception($private, 403), 'model_test_access_denied', 'permission'],
+			'payment' => [new \Exception($private, 402), 'model_test_payment_required', 'payment'],
+			'not found' => [new \Exception($private, 404), 'model_test_not_found', 'model or endpoint'],
+			'rate limit' => [new \Exception($private, 429), 'model_test_rate_limited', 'quota'],
+			'timeout' => [new \Exception($private, 504), 'model_test_timeout', 'timed out'],
+			'unavailable' => [new \Exception($private, 503), 'model_test_provider_unavailable', 'unavailable'],
+			'unknown' => [new \Exception($private), 'model_test_failed', 'Nextcloud logs'],
+			'output limit' => [new ModelTestException(true), 'model_test_output_limit', 'test token budget'],
+			'empty' => [new ModelTestException(false), 'model_test_empty_response', 'no visible answer'],
+			'malformed' => [new ProviderContractException(), 'model_test_invalid_response', 'invalid chat response'],
+		];
+	}
+
 	public function testUnchangedLegacyReferencesSurviveUnrelatedSettingsSave(): void {
 		$settings = new Settings();
 		$settings->setDefaultModel('legacy');
@@ -318,7 +354,7 @@ class SettingsControllerTest extends TestCase {
 		$failed = $store->read('model');
 		$this->assertFalse($failed['success']);
 		$this->assertSame('primary:unfunded', $failed['summary']);
-		$this->assertStringStartsWith('The provider did not return a test answer.', $failed['error']);
+		$this->assertStringStartsWith('The model test failed.', $failed['error']);
 		$this->assertIsInt($failed['duration_ms']);
 		$this->assertStringNotContainsString('secret-key', json_encode($storage));
 	}

@@ -1782,6 +1782,7 @@ class LLMClientTest extends TestCase {
 	public function testSendChatCompletionUsesModelSpecificTokenAndSamplingProfiles(): void {
 		foreach ([
 			'primary:microsoft/gpt-5.6-luna' => true,
+			'primary:microsoft/gpt-6-luna' => true,
 			'primary:microsoft/claude-sonnet-5' => true,
 			'primary:microsoft/claude-sonnet-4-6' => false,
 		] as $model => $usesReasoningTokenParameters) {
@@ -1894,7 +1895,7 @@ class LLMClientTest extends TestCase {
 	}
 
 	public function testReasoningModelsStreamingAndTracePayloadUseReasoningParametersOnFirstAttempt(): void {
-		foreach (['primary:microsoft/gpt-5.4', 'primary:microsoft/claude-sonnet-5'] as $model) {
+		foreach (['primary:microsoft/gpt-5.4', 'primary:microsoft/gpt-6-luna', 'primary:microsoft/claude-sonnet-5'] as $model) {
 			$settings = new Settings();
 			$settings->setApiProvider('custom');
 			$settings->setApiEndpoint('https://primary.example.invalid/v1/chat/completions');
