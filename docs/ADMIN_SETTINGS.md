@@ -33,10 +33,6 @@ Explicit tests of the model, Docling, image understanding, speech to text and th
 
 Enter the server address and, if the server requires it, a key. **Detect and test** looks for the Docling Serve or the AcademicCloud/EDUC-compatible API, chooses the authentication and proves the result with one small PDF conversion. Docling Serve wins if a server offers both. A successful detection fills in profile and authentication as unsaved changes; a failed one leaves the form unchanged. Both can still be set manually. See [Docling setup](DOCLING.md) for the detection steps.
 
-## Rate limits
-
-The GWDG / AcademicCloud preset sets 30 requests per minute, 200 per hour and 1000 per day for chat. For embeddings it sets 100, 2000 and 4000. **Custom values** shows the individual fields, including the optional per-second limit.
-
 ## Released models
 
 With **Bots may choose a released model themselves** switched on, models are released per provider in a checklist with a filter. Released models are listed first. The list marks the default and fallback model, models that are new in the catalogue (first listed within the last 14 days) and released models that are not in the current catalogue. New catalogue models are never released automatically. Models without a catalogue entry can be added with their provider and model ID.
