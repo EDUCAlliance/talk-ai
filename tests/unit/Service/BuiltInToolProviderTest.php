@@ -320,12 +320,86 @@ class BuiltInToolProviderTest extends TestCase {
 		$this->assertStringContainsString('No room context', $result['content'][0]['text']);
 	}
 
+	public function testDocumentSearchUsesOnlyReachableSources(): void {
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$embeddingMapper->expects($this->once())->method('findRetrievableByBotAndModel')->with(7, 'embed-model')->willReturn([]);
+		$embeddingMapper->method('countByBotAndModel')->with(7, 'embed-model')->willReturn(12);
+		$embeddingMapper->expects($this->never())->method('findByBotAndModel');
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('embed-model');
+		$embeddingClient->expects($this->never())->method('embedTexts');
+		$provider = $this->createProvider(embeddingClient: $embeddingClient, embeddingMapper: $embeddingMapper);
+		$provider->setInvocationContext(['bot_id' => 7, 'room_token' => 'room-a', 'attachments' => [], 'document_source_ids' => []]);
+
+		$result = $provider->executeTool(BuiltInToolProvider::TOOL_RAG_SEARCH, ['query' => 'holidays']);
+
+		$this->assertTrue($result['isError']);
+		$this->assertSame('sources_unavailable', $result['error']['code']);
+		$this->assertStringContainsString('not reachable', $result['error']['message']);
+	}
+
+	public function testRateLimitedDocumentSearchTellsTheModelWhenToRetry(): void {
+		$embedding = new \OCA\EducAI\Db\Embedding();
+		$embedding->setEmbedding('[0.1,0.2]');
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$embeddingMapper->method('findRetrievableByBotAndModel')->willReturn([$embedding]);
+		$embeddingClient = $this->createMock(EmbeddingClient::class);
+		$embeddingClient->method('getActiveModel')->willReturn('embed-model');
+		$embeddingClient->expects($this->once())->method('embedTexts')
+			->with(['holidays'], 'embed-model', ['purpose' => 'rag_query', 'bot_id' => 7])
+			->willThrowException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(150));
+		$provider = $this->createProvider(embeddingClient: $embeddingClient, embeddingMapper: $embeddingMapper);
+		$provider->setInvocationContext(['bot_id' => 7, 'room_token' => 'room-a', 'attachments' => [], 'document_source_ids' => []]);
+
+		$result = $provider->executeTool(BuiltInToolProvider::TOOL_RAG_SEARCH, ['query' => 'holidays']);
+
+		$this->assertTrue($result['isError']);
+		$this->assertSame('rate_limited', $result['error']['code']);
+		$this->assertSame(['retry_after_seconds' => 150], $result['error']['details']);
+		$this->assertStringContainsString('3 minute(s)', $result['error']['message']);
+	}
+
+	public function testWikiErrorsKeepTheirCodeForTheModel(): void {
+		$wikiService = $this->createMock(WikiService::class);
+		$wikiService->method('writePage')->willThrowException(new \OCA\EducAI\Exception\WikiException(
+			\OCA\EducAI\Exception\WikiException::ALREADY_EXISTS,
+			'The page already exists: a.md. Read it with wiki_read_page, merge your changes, then write it again with mode "overwrite".',
+			['path' => 'a.md']
+		));
+		$wikiService->method('search')->willThrowException(new \RuntimeException('SQLSTATE secret'));
+		$provider = $this->createProvider(wikiService: $wikiService);
+		$provider->setInvocationContext(['bot_id' => 7, 'room_token' => 'room-a', 'attachments' => [], 'document_source_ids' => []]);
+
+		$write = $provider->executeTool(BuiltInToolProvider::TOOL_WIKI_WRITE_PAGE, ['path' => 'a.md', 'content' => '# A']);
+		$this->assertTrue($write['isError']);
+		$this->assertSame('already_exists', $write['error']['code']);
+		$this->assertSame(['path' => 'a.md'], $write['error']['details']);
+		$this->assertStringContainsString('wiki_read_page', $write['content'][0]['text']);
+
+		$search = $provider->executeTool(BuiltInToolProvider::TOOL_WIKI_SEARCH, ['query' => 'x', 'offset' => '20']);
+		$this->assertSame('operation_failed', $search['error']['code']);
+		$this->assertStringNotContainsString('SQLSTATE', json_encode($search));
+	}
+
+	public function testWikiListingPassesTheOffset(): void {
+		$wikiService = $this->createMock(WikiService::class);
+		$wikiService->expects($this->once())->method('search')->with(7, '*', 50, 'wiki', [], 100)
+			->willReturn(['success' => true, 'action' => 'list', 'pages' => []]);
+		$provider = $this->createProvider(wikiService: $wikiService);
+		$provider->setInvocationContext(['bot_id' => 7, 'room_token' => 'room-a', 'attachments' => [], 'document_source_ids' => []]);
+
+		$result = $provider->executeTool(BuiltInToolProvider::TOOL_WIKI_SEARCH, ['query' => '*', 'limit' => 50, 'offset' => 100]);
+
+		$this->assertFalse($result['isError']);
+	}
+
 	private function createProvider(
 		?EmbeddingClient $embeddingClient = null,
 		?RoomDocumentEmbeddingMapper $roomDocumentEmbeddingMapper = null,
 		?RoomImageEmbeddingMapper $roomImageEmbeddingMapper = null,
 		?RoomImageSourceMapper $roomImageSourceMapper = null,
 		?WikiService $wikiService = null,
+		?EmbeddingMapper $embeddingMapper = null,
 	): BuiltInToolProvider {
 		$settingsService = $this->createMock(SettingsService::class);
 		$settingsService->method('getRagConfig')
@@ -356,7 +430,7 @@ class BuiltInToolProviderTest extends TestCase {
 
 		return new BuiltInToolProvider(
 			$settingsService,
-			$this->createMock(EmbeddingMapper::class),
+			$embeddingMapper ?? $this->createMock(EmbeddingMapper::class),
 			$embeddingClient ?? $this->createMock(EmbeddingClient::class),
 			$roomDocumentEmbeddingMapper ?? $this->createMock(RoomDocumentEmbeddingMapper::class),
 			$this->createMock(RoomDocumentSourceMapper::class),

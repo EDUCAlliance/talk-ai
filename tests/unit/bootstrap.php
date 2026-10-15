@@ -292,6 +292,24 @@ PHP);
 			return;
 	}
 
+	if ($class === 'OCP\\Files\\NotPermittedException') {
+		eval(<<<'PHP'
+namespace OCP\Files;
+
+class NotPermittedException extends \Exception {}
+PHP);
+			return;
+	}
+
+	if ($class === 'OCP\\Lock\\LockedException') {
+		eval(<<<'PHP'
+namespace OCP\Lock;
+
+class LockedException extends \Exception {}
+PHP);
+			return;
+	}
+
 	if ($class === 'OCP\\Files\\IRootFolder') {
 		eval(<<<'PHP'
 namespace OCP\Files;
@@ -428,7 +446,34 @@ interface IJobList {
 	public function add($job, mixed $argument = null): void;
 	public function scheduleAfter(string $job, int $runAfter, mixed $argument = null): void;
 	public function remove($job, mixed $argument = null): void;
+	public function removeById(int $id): void;
 	public function has($job, mixed $argument): bool;
+	public function getJobsIterator($job, ?int $limit, int $offset): iterable;
+}
+PHP);
+			return;
+	}
+
+	if ($class === 'OCP\\BackgroundJob\\IJob') {
+		eval(<<<'PHP'
+namespace OCP\BackgroundJob;
+
+interface IJob {
+	public function getId();
+	public function getArgument();
+}
+PHP);
+			return;
+	}
+
+	if ($class === 'OCP\\Files\\ForbiddenException') {
+		eval(<<<'PHP'
+namespace OCP\Files;
+
+class ForbiddenException extends \Exception {
+	public function __construct($message, $retry, ?\Exception $previous = null) {
+		parent::__construct((string)$message, 0, $previous);
+	}
 }
 PHP);
 			return;

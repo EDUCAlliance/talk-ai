@@ -6,6 +6,7 @@ namespace OCA\EducAI\Service;
 
 use Closure;
 use Exception;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
@@ -15,9 +16,14 @@ use Throwable;
 class EmbeddingClient {
     private const RATE_LIMIT_WAIT_TIMEOUT_SECONDS = 120;
     private const RATE_LIMIT_POLL_SECONDS = 2;
-    private const MAX_REQUEST_ATTEMPTS = 2;
+    private const MAX_REQUEST_ATTEMPTS = 3;
     private const DEFAULT_RETRY_DELAY_SECONDS = 1;
-    private const MAX_RETRY_DELAY_SECONDS = 2;
+    /** Longer provider pauses are handed to the caller as EmbeddingRateLimitedException. */
+    private const MAX_INLINE_RETRY_DELAY_SECONDS = 30;
+    /** Upper bound for inline retry waits within one embedTexts() call. */
+    private const MAX_INLINE_RETRY_BUDGET_SECONDS = 90;
+    /** Assumed pause when a provider keeps answering 429 without Retry-After. */
+    private const DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 60;
 
     private IClientService $clientService;
     private SettingsService $settingsService;
@@ -27,6 +33,7 @@ class EmbeddingClient {
     private Closure $sleeper;
     /** @var Closure():int */
     private Closure $clock;
+    private int $inlineRetryBudget = self::MAX_INLINE_RETRY_BUDGET_SECONDS;
 
     public function __construct(
         IClientService $clientService,
@@ -52,13 +59,16 @@ class EmbeddingClient {
 
     /**
      * @param array<int,string> $texts
+     * @param array<string,int|string|bool> $logContext Safe identifiers for failure logs, e.g. source_id.
      * @return array<int,array<int,float>>
+     * @throws EmbeddingRateLimitedException When the provider asks for a longer pause than can be waited inline.
      * @throws Exception
      */
-    public function embedTexts(array $texts, ?string $modelOverride = null): array {
+    public function embedTexts(array $texts, ?string $modelOverride = null, array $logContext = []): array {
         if (count($texts) === 0) {
             return [];
         }
+        $this->inlineRetryBudget = self::MAX_INLINE_RETRY_BUDGET_SECONDS;
 
         $settings = $this->settingsService->getSettings();
         $ragConfig = $this->settingsService->getRagConfig();
@@ -99,7 +109,8 @@ class EmbeddingClient {
                 $model,
                 $batchTexts,
                 $cursor,
-                count($texts)
+                count($texts),
+                $logContext
             );
 
             $rateLimitHeaders = $this->extractRateLimitHeaders($response);
@@ -126,6 +137,7 @@ class EmbeddingClient {
 
     /**
      * @param array<int,string> $batchTexts
+     * @param array<string,int|string|bool> $logContext
      * @throws Exception
      */
     private function requestEmbeddingBatch(
@@ -135,7 +147,8 @@ class EmbeddingClient {
         string $model,
         array $batchTexts,
         int $cursor,
-        int $totalTexts
+        int $totalTexts,
+        array $logContext = []
     ): IResponse {
         $lastException = null;
 
@@ -162,23 +175,44 @@ class EmbeddingClient {
                     ? 'http_' . $status
                     : ($this->isResponseLessTransportFailure($e) ? 'transport' : 'internal');
 
-                if ($attempt < self::MAX_REQUEST_ATTEMPTS && $this->isTransientRequestFailure($e, $status)) {
-                    $delay = $this->retryDelaySeconds($e);
-                    $this->logger->warning('Embedding request failed transiently, retrying', [
-                        'attempt' => $attempt,
-                        'next_attempt' => $attempt + 1,
-                        'category' => $category,
-                        'delay_seconds' => $delay,
-                    ]);
-                    ($this->sleeper)($delay);
-                    continue;
+                $transient = $this->isTransientRequestFailure($e, $status);
+                if ($transient) {
+                    $delay = $this->retryDelaySeconds($e, $attempt);
+                    $retryAfter = $this->retryAfterHeader($e);
+                    $rateLimited = $status === 429 || ($status === 503 && $retryAfter !== null && trim($retryAfter) !== '');
+                    if ($rateLimited && ($delay > self::MAX_INLINE_RETRY_DELAY_SECONDS || $delay > $this->inlineRetryBudget)) {
+                        $this->logger->warning('Embedding provider asked for a longer pause, deferring', [
+                            'attempt' => $attempt,
+                            'category' => $category,
+                            'retry_after_seconds' => $delay,
+                        ] + $this->safeLogContext($logContext));
+                        throw new EmbeddingRateLimitedException($delay, $e);
+                    }
+                    if ($attempt < self::MAX_REQUEST_ATTEMPTS && $delay <= $this->inlineRetryBudget) {
+                        $this->logger->warning('Embedding request failed transiently, retrying', [
+                            'attempt' => $attempt,
+                            'next_attempt' => $attempt + 1,
+                            'category' => $category,
+                            'delay_seconds' => $delay,
+                        ]);
+                        $this->inlineRetryBudget -= $delay;
+                        ($this->sleeper)($delay);
+                        continue;
+                    }
+                    if ($rateLimited) {
+                        $this->logger->warning('Embedding provider is still rate limiting, deferring', [
+                            'attempts' => $attempt,
+                            'category' => $category,
+                        ] + $this->safeLogContext($logContext));
+                        throw new EmbeddingRateLimitedException(max($delay, self::DEFAULT_RATE_LIMIT_PAUSE_SECONDS), $e);
+                    }
                 }
 
                 $this->logger->error('Embedding request failed', [
                     'attempts' => $attempt,
                     'category' => $category,
                     'exception_class' => get_class($e),
-                ]);
+                ] + $this->failureDiagnostics($e, $endpoint, $model, $batchTexts, $logContext));
                 throw $e;
             }
         }
@@ -272,29 +306,101 @@ class EmbeddingClient {
         return $status >= 100 && $status <= 599 ? $status : null;
     }
 
-    private function retryDelaySeconds(Throwable $exception): int {
+    /**
+     * The delay the provider asked for (Retry-After), otherwise an exponential backoff.
+     */
+    private function retryDelaySeconds(Throwable $exception, int $attempt = 1): int {
+        $backoff = self::DEFAULT_RETRY_DELAY_SECONDS * (2 ** max(0, $attempt - 1));
         $retryAfter = $this->retryAfterHeader($exception);
         if ($retryAfter === null || trim($retryAfter) === '') {
-            return self::DEFAULT_RETRY_DELAY_SECONDS;
+            return $backoff;
         }
 
         $retryAfter = trim($retryAfter);
         if (is_numeric($retryAfter)) {
-            return min(
-                self::MAX_RETRY_DELAY_SECONDS,
-                max(0, (int)ceil((float)$retryAfter))
-            );
+            return max(0, (int)ceil((float)$retryAfter));
         }
 
         $retryAt = strtotime($retryAfter);
         if ($retryAt === false) {
-            return self::DEFAULT_RETRY_DELAY_SECONDS;
+            return $backoff;
         }
 
-        return min(
-            self::MAX_RETRY_DELAY_SECONDS,
-            max(0, $retryAt - ($this->clock)())
-        );
+        return max(0, $retryAt - ($this->clock)());
+    }
+
+    /**
+     * Safe diagnostics for a failed request: no credentials, no response text and no input text.
+     *
+     * @param array<int,string> $batchTexts
+     * @param array<string,int|string|bool> $logContext
+     * @return array<string,int|string|bool>
+     */
+    private function failureDiagnostics(Throwable $exception, string $endpoint, string $model, array $batchTexts, array $logContext): array {
+        $diagnostics = [
+            'model' => $model,
+            'endpoint_host' => (string)(parse_url($endpoint, PHP_URL_HOST) ?: ''),
+            'endpoint_path' => (string)(parse_url($endpoint, PHP_URL_PATH) ?: ''),
+            'batch_size' => count($batchTexts),
+            'batch_chars' => array_sum(array_map(static fn (string $text): int => mb_strlen($text, 'UTF-8'), $batchTexts)),
+        ];
+        foreach ($this->providerErrorIdentifiers($exception) as $key => $value) {
+            $diagnostics['provider_error_' . $key] = $value;
+        }
+
+        return $diagnostics + $this->safeLogContext($logContext);
+    }
+
+    /**
+     * Provider error identifiers (type, code, param) from an OpenAI-style error body.
+     * Free-text messages are skipped because providers may echo the input.
+     *
+     * @return array<string,string>
+     */
+    private function providerErrorIdentifiers(Throwable $exception): array {
+        $candidate = $exception;
+        while ($candidate instanceof Throwable) {
+            if (method_exists($candidate, 'hasResponse') && method_exists($candidate, 'getResponse') && $candidate->hasResponse()) {
+                $response = $candidate->getResponse();
+                if (!is_object($response) || !method_exists($response, 'getBody')) {
+                    return [];
+                }
+                try {
+                    $decoded = json_decode(substr((string)$response->getBody(), 0, 65536), true);
+                } catch (Throwable) {
+                    return [];
+                }
+                $error = is_array($decoded) ? ($decoded['error'] ?? null) : null;
+                if (!is_array($error)) {
+                    return [];
+                }
+                $identifiers = [];
+                foreach (['type', 'code', 'param'] as $key) {
+                    $value = $error[$key] ?? null;
+                    if ((is_string($value) || is_int($value)) && preg_match('/^[A-Za-z0-9_.:\-]{1,80}$/', (string)$value) === 1) {
+                        $identifiers[$key] = (string)$value;
+                    }
+                }
+                return $identifiers;
+            }
+            $candidate = $candidate->getPrevious();
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<string,int|string|bool> $logContext
+     * @return array<string,int|string|bool>
+     */
+    private function safeLogContext(array $logContext): array {
+        $safe = [];
+        foreach ($logContext as $key => $value) {
+            if (is_string($key) && preg_match('/^[a-z_]{1,40}$/', $key) === 1 && (is_int($value) || is_bool($value) || (is_string($value) && mb_strlen($value) <= 80))) {
+                $safe[$key] = $value;
+            }
+        }
+        return $safe;
     }
 
     private function retryAfterHeader(Throwable $exception): ?string {

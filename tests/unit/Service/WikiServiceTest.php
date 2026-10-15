@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\Service;
 use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Exception\WikiException;
 use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\BrandingService;
 use OCA\EducAI\Service\TextSessionResetService;
@@ -16,7 +17,9 @@ use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
+use OCP\Files\NotPermittedException;
 use OCP\IConfig;
+use OCP\Lock\LockedException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -437,6 +440,392 @@ class WikiServiceTest extends TestCase {
 		$service->writePage(42, '../secrets.md', '# nope');
 	}
 
+	public function testCollectiveSubpageTurnsTheParentIntoAFolderPageAndKeepsItsFileId(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$topic = $collectiveRoot->newFile('topic.md');
+		$topic->putContent("# Topic\n\nOverview.");
+		$topicId = $topic->getId();
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->writePage(42, 'topic/sub.md', "# Sub\n", 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertTrue($result['verified']);
+		$this->assertSame('topic/sub.md', $result['path']);
+		$this->assertSame('topic/Readme.md', $result['parent_page']);
+		$this->assertSame([['from' => 'topic.md', 'to' => 'topic/Readme.md']], $result['converted_to_parent_pages']);
+		$parent = $collectiveRoot->get('topic/Readme.md');
+		$this->assertSame($topicId, $parent->getId());
+		$this->assertSame("# Topic\n\nOverview.", $parent->getContent());
+		$this->assertNull($this->nodeOrNull($collectiveRoot, 'topic.md'));
+
+		$read = $service->readPage(42, 'topic.md', self::COLLECTIVE);
+		$this->assertSame('topic/Readme.md', $read['resolved_path']);
+		$this->assertSame("# Topic\n\nOverview.", $read['content']);
+	}
+
+	public function testWritingAParentPageWhoseSubpagesExistTargetsItsReadme(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFolder('topic')->newFile('sub.md')->putContent("# Sub\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->writePage(42, 'topic.md', "# Topic\n", 'create', null, self::COLLECTIVE);
+
+		$this->assertSame('topic/Readme.md', $result['resolved_path']);
+		$this->assertNull($result['parent_page']);
+		$this->assertNull($this->nodeOrNull($collectiveRoot, 'topic.md'));
+		$this->assertSame("# Topic\n", $collectiveRoot->get('topic/Readme.md')->getContent());
+	}
+
+	public function testDuplicateParentPagesAreReportedInsteadOfMerged(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('topic.md')->putContent("# Topic (old)\n");
+		$collectiveRoot->newFolder('topic')->newFile('Readme.md')->putContent("# Topic\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->writePage(42, 'topic/sub.md', "# Sub\n", 'create', null, self::COLLECTIVE);
+
+		$this->assertArrayNotHasKey('converted_to_parent_pages', $result);
+		$this->assertStringContainsString('Both topic.md and topic/Readme.md exist', implode("\n", $result['warnings']));
+		$this->assertSame("# Topic (old)\n", $collectiveRoot->get('topic.md')->getContent());
+	}
+
+	public function testMovedParentPageKeepsItsRelativeLinkTargets(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('target.md')->putContent("# Target\n");
+		$collectiveRoot->newFile('topic.md')->putContent("# Topic\n\nSee [Target](target.md), [Web](https://example.com) and ![Logo](logo.png).\n\n```\n[Code](target.md)\n```\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->writePage(42, 'topic/sub.md', "# Sub\n", 'create', null, self::COLLECTIVE);
+
+		$this->assertSame(
+			"# Topic\n\nSee [Target](../target.md), [Web](https://example.com) and ![Logo](../logo.png).\n\n```\n[Code](target.md)\n```\n",
+			$collectiveRoot->get('topic/Readme.md')->getContent()
+		);
+		$this->assertSame([['from' => 'topic.md', 'to' => 'topic/Readme.md', 'links_rebased' => 2]], $result['converted_to_parent_pages']);
+		$this->assertArrayNotHasKey('warnings', $result);
+	}
+
+	public function testRejectedCreateLeavesExistingParentPagesUntouched(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('topic.md')->putContent("# Topic\n");
+		$collectiveRoot->newFolder('topic')->newFile('sub.md')->putContent("# Sub\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'topic/sub.md', "# Sub 2\n", 'create', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::ALREADY_EXISTS, $error->getErrorCode());
+		$this->assertSame("# Topic\n", $collectiveRoot->get('topic.md')->getContent());
+		$this->assertNull($this->nodeOrNull($collectiveRoot, 'topic/Readme.md'));
+	}
+
+	public function testCreatingTheFolderPageOfAPageThatStillHasTheOldLayoutIsAConflict(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('topic.md')->putContent("# Topic\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'topic/Readme.md', "# New\n", 'create', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::ALREADY_EXISTS, $error->getErrorCode());
+		$this->assertSame("# Topic\n", $collectiveRoot->get('topic.md')->getContent());
+	}
+
+	public function testTheCollectiveLandingPageIsNeverMovedIntoAFolder(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('Readme.md')->putContent("# Welcome\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'Readme/child.md', "# Child\n", 'create', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::INVALID_PATH, $error->getErrorCode());
+		$this->assertSame("# Welcome\n", $collectiveRoot->get('Readme.md')->getContent());
+		$this->assertNull($this->nodeOrNull($collectiveRoot, 'Readme'));
+	}
+
+	public function testAPageCalledReadmeInCapitalsIsAnOrdinaryPage(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('README.md')->putContent("# Readme page\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$service->writePage(42, 'README/child.md', "# Child\n", 'create', null, self::COLLECTIVE);
+		$read = $service->readPage(42, 'README.md', self::COLLECTIVE);
+		$write = $service->writePage(42, 'README.md', "# Readme page v2\n", 'overwrite', null, self::COLLECTIVE);
+
+		$this->assertSame('README/Readme.md', $read['resolved_path']);
+		$this->assertSame('README/Readme.md', $write['resolved_path']);
+		$this->assertNull($this->nodeOrNull($collectiveRoot, 'README.md'));
+		$this->assertSame("# Readme page v2\n", $collectiveRoot->get('README/Readme.md')->getContent());
+	}
+
+	public function testFolderPagesReportTheFolderAboveAsTheirParent(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$top = $service->writePage(42, 'topic/Readme.md', "# Topic\n", 'create', null, self::COLLECTIVE);
+		$nested = $service->writePage(42, 'topic/sub/Readme.md', "# Sub\n", 'create', null, self::COLLECTIVE);
+
+		$this->assertNull($top['parent_page']);
+		$this->assertSame('topic/Readme.md', $nested['parent_page']);
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string,2:string}>
+	 */
+	public static function nearDuplicates(): array {
+		return [
+			'hyphen instead of space' => ['General-Orientation.md', 'create', 'General Orientation.md'],
+			'lower case, overwrite' => ['general orientation.md', 'overwrite', 'General Orientation.md'],
+			'folder segment' => ['general_orientation/sub.md', 'create', 'General Orientation.md'],
+		];
+	}
+
+	#[DataProvider('nearDuplicates')]
+	public function testNearDuplicatePageNamesAreRefused(string $path, string $mode, string $existing): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFile('General Orientation.md')->putContent("# General Orientation\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, $path, "# New\n", $mode, null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::SIMILAR_PAGE_EXISTS, $error->getErrorCode());
+		$this->assertSame($existing, $error->getDetails()['existing']);
+		$this->assertStringContainsString('"overwrite"', $this->wikiError(fn () => $service->writePage(42, 'General-Orientation.md', "# New\n", 'create', null, self::COLLECTIVE))->getMessage());
+		$this->assertCount(1, array_filter($collectiveRoot->getDirectoryListing(), static fn ($node): bool => str_starts_with(strtolower($node->getName()), 'general')));
+	}
+
+	public function testPersonalWikiAlsoRefusesNearDuplicates(): void {
+		$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'Projekte/Alpha Plan.md', "# Alpha\n", 'create');
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'Projekte/alpha-plan.md', "# Alpha 2\n", 'create'));
+
+		$this->assertSame(WikiException::SIMILAR_PAGE_EXISTS, $error->getErrorCode());
+		$this->assertSame('Projekte/Alpha Plan.md', $error->getDetails()['existing']);
+	}
+
+	public function testWriteIsOnlyReportedWhenTheContentCanBeReadBack(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$page = $collectiveRoot->newFile('page.md');
+		$page->putContent("# Page\n");
+		$page->dropWrites = true;
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'page.md', "# Page\n\nNew text.", 'overwrite', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::VERIFICATION_FAILED, $error->getErrorCode());
+		$this->assertSame(['path' => 'page.md'], $error->getDetails());
+	}
+
+	public function testBrokenInternalLinksAreReportedAfterAWrite(): void {
+		$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'pages/b.md', "# B\n", 'create');
+
+		$result = $service->writePage(42, 'pages/a.md', "# A\n\n[B](b.md), [Index](../index.md), [Web](https://example.com), [Here](#top), ![Pic](missing.png), [Gone](missing-page.md)", 'create');
+
+		$this->assertSame(3, $result['links_checked']);
+		$this->assertSame([['text' => 'Gone', 'target' => 'missing-page.md']], $result['broken_links']);
+		$this->assertStringContainsString('1 internal link(s)', implode("\n", $result['warnings']));
+	}
+
+	public function testBrokenLinksSuggestTheRelativeLinkToAPageWithThatName(): void {
+		$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'Projekte/Alpha.md', "# Alpha\n", 'create');
+
+		$top = $service->writePage(42, 'Projekte.md', "# Projekte\n\n- [Alpha](Alpha.md)", 'create');
+		$nested = $service->writePage(42, 'Projekte/Beta.md', "# Beta\n\nSiehe [Alpha](Projekte/Alpha.md) und [Gamma](Gamma.md).", 'create');
+
+		$this->assertSame([['text' => 'Alpha', 'target' => 'Alpha.md', 'suggested_target' => 'Projekte/Alpha.md']], $top['broken_links']);
+		$this->assertStringContainsString('top level of the wiki', implode("\n", $top['warnings']));
+		$this->assertSame([
+			['text' => 'Alpha', 'target' => 'Projekte/Alpha.md', 'suggested_target' => 'Alpha.md'],
+			['text' => 'Gamma', 'target' => 'Gamma.md'],
+		], $nested['broken_links']);
+		$this->assertStringContainsString('keep these links as they are', implode("\n", $nested['warnings']));
+	}
+
+	public function testLinkTargetsWithUnencodedSpacesAreReportedWithTheEncodedLink(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFolder('Collaboration')->newFile('How to create a team.md')->putContent("# How to create a team\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->writePage(42, 'Collaboration/Readme.md', "# Collaboration\n\n- [Guide](How to create a team.md)\n- [Same](How%20to%20create%20a%20team.md)\n- [Angled](<How to create a team.md>)", 'create', null, self::COLLECTIVE);
+
+		$this->assertSame(3, $result['links_checked']);
+		$this->assertSame([[
+			'text' => 'Guide',
+			'target' => 'How to create a team.md',
+			'problem' => 'Spaces in a link target must be written as %20.',
+			'suggested_target' => 'How%20to%20create%20a%20team.md',
+		]], $result['broken_links']);
+	}
+
+	public function testWikiStyleLinksAreReportedWithTheMarkdownLink(): void {
+		$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'Projekte/Alpha.md', "# Alpha\n", 'create');
+
+		$result = $service->writePage(42, 'Projekte.md', "# Projekte\n\n- [[Projekte/Alpha]]\n\n```\n[[Beispiel]]\n```", 'create');
+
+		$this->assertSame(1, $result['links_checked']);
+		$this->assertSame([[
+			'text' => 'Projekte/Alpha',
+			'target' => '[[Projekte/Alpha]]',
+			'problem' => 'Nextcloud does not show [[...]] as a link; write a Markdown link [text](target.md).',
+			'suggested_target' => 'Projekte/Alpha.md',
+		]], $result['broken_links']);
+	}
+
+	public function testReadingOrWritingAFolderPageThroughItsOldNameSaysWhereItIsStored(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFolder('topic')->newFile('Readme.md')->putContent("# Topic\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$read = $service->readPage(42, 'topic.md', self::COLLECTIVE);
+		$write = $service->writePage(42, 'topic.md', "# Topic v2\n", 'overwrite', null, self::COLLECTIVE);
+
+		$this->assertStringContainsString('stored as topic/Readme.md', $read['note']);
+		$this->assertStringContainsString('resolved from "topic/"', $read['note']);
+		$this->assertStringContainsString('stored as topic/Readme.md', implode("\n", $write['warnings']));
+	}
+
+	public function testCollectiveLinksToFolderPagesAreNotBroken(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->newFolder('topic')->newFile('Readme.md')->putContent("# Topic\n");
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->writePage(42, 'other.md', "# Other\n\nSee [Topic](topic.md) and [Topic again](topic).", 'create', null, self::COLLECTIVE);
+
+		$this->assertSame(2, $result['links_checked']);
+		$this->assertArrayNotHasKey('broken_links', $result);
+		$this->assertArrayNotHasKey('warnings', $result);
+	}
+
+	public function testListingAllPagesIsCompleteAndPaginated(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$pages = $collectiveRoot->newFolder('pages');
+		foreach (['delta', 'Alpha', 'charlie', 'bravo'] as $name) {
+			$pages->newFile($name . '.md')->putContent('# ' . ucfirst($name) . "\n");
+		}
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$first = $service->search(42, '*', 3, 'wiki', self::COLLECTIVE);
+		$this->assertSame('list', $first['action']);
+		$this->assertSame(7, $first['total']);
+		$this->assertSame(['index.md', 'log.md', 'pages/Alpha.md'], array_column($first['pages'], 'path'));
+		$this->assertSame('Alpha', $first['pages'][2]['title']);
+		$this->assertTrue($first['has_more']);
+		$this->assertSame(3, $first['next_offset']);
+		$this->assertFalse($first['truncated']);
+
+		$last = $service->search(42, '*', 3, 'wiki', self::COLLECTIVE, 6);
+		$this->assertSame(['schema.md'], array_column($last['pages'], 'path'));
+		$this->assertFalse($last['has_more']);
+		$this->assertNull($last['next_offset']);
+	}
+
+	public function testSearchSaysWhenNotAllFilesWereSearched(): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$pages = $collectiveRoot->newFolder('pages');
+		for ($i = 0; $i < 505; $i++) {
+			$pages->newFile(sprintf('page-%03d.md', $i))->putContent('filler');
+		}
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$result = $service->search(42, 'needle', 5, 'wiki', self::COLLECTIVE);
+
+		$this->assertTrue($result['truncated']);
+		$this->assertSame(500, $result['searched_files']);
+		$this->assertStringContainsString('query "*"', $result['warning']);
+	}
+
+	public function testErrorsTellTheModelWhatToDoNext(): void {
+		$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'pages/a.md', "# A\n", 'create');
+
+		$exists = $this->wikiError(fn () => $service->writePage(42, 'pages/a.md', "# A2\n", 'create'));
+		$this->assertSame(WikiException::ALREADY_EXISTS, $exists->getErrorCode());
+		$this->assertStringContainsString('wiki_read_page', $exists->getMessage());
+		$this->assertStringContainsString('"overwrite"', $exists->getMessage());
+		$this->assertSame(['path' => 'pages/a.md'], $exists->getDetails());
+
+		$missing = $this->wikiError(fn () => $service->readPage(42, 'pages/nope.md'));
+		$this->assertSame(WikiException::NOT_FOUND, $missing->getErrorCode());
+		$this->assertStringContainsString('query "*"', $missing->getMessage());
+
+		$empty = $this->wikiError(fn () => $service->search(42, '  '));
+		$this->assertSame(WikiException::INVALID_ARGUMENT, $empty->getErrorCode());
+
+		$folder = $this->wikiError(fn () => $service->readPage(42, 'pages.md'));
+		$this->assertSame(WikiException::NOT_FOUND, $folder->getErrorCode());
+	}
+
+	/**
+	 * @return array<string,array{0:\Throwable,1:string}>
+	 */
+	public static function storageFailures(): array {
+		return [
+			'permission' => [new NotPermittedException('no write permission'), WikiException::FORBIDDEN],
+			'lock' => [new LockedException('index.md'), WikiException::LOCKED],
+			'unexpected' => [new \RuntimeException('SQLSTATE secret'), WikiException::OPERATION_FAILED],
+		];
+	}
+
+	#[DataProvider('storageFailures')]
+	public function testStorageFailuresBecomeWikiErrorsWithoutInternalDetails(\Throwable $failure, string $code): void {
+		$collectiveRoot = new InMemoryFolder('collective');
+		$collectiveRoot->failNewFileWith = $failure;
+		$service = $this->createCollectiveService($collectiveRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'page.md', "# Page\n", 'create', null, self::COLLECTIVE));
+
+		$this->assertSame($code, $error->getErrorCode());
+		$this->assertStringNotContainsString('SQLSTATE', $error->getMessage());
+		$this->assertSame($failure, $error->getPrevious());
+	}
+
+	public function testUnavailableCollectiveKeepsInternalDetailsOutOfTheToolError(): void {
+		$wrapped = new \Exception('Unable to load selected collective: SQLSTATE[HY000] secret', 0, new \RuntimeException('SQLSTATE[HY000] secret'));
+		$plain = new \Exception('The Collectives app is not available.');
+		foreach ([[$wrapped, 'it may have been deleted'], [$plain, 'The Collectives app is not available.']] as [$failure, $expected]) {
+			$locationService = $this->createMock(WikiLocationService::class);
+			$locationService->method('resolveCollectiveWikiRoot')->willThrowException($failure);
+			$service = $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'), $locationService);
+
+			$error = $this->wikiError(fn () => $service->readPage(42, 'page.md', self::COLLECTIVE));
+
+			$this->assertSame(WikiException::WIKI_UNAVAILABLE, $error->getErrorCode());
+			$this->assertStringContainsString($expected, $error->getMessage());
+			$this->assertStringNotContainsString('SQLSTATE', $error->getMessage());
+		}
+	}
+
+	private const COLLECTIVE = ['wiki_location' => 'collective', 'wiki_collective_id' => 99];
+
+	private function createCollectiveService(InMemoryFolder $collectiveRoot): WikiService {
+		$locationService = $this->createMock(WikiLocationService::class);
+		$locationService->method('resolveCollectiveWikiRoot')
+			->with(99, 'alice')
+			->willReturn(['folder' => $collectiveRoot, 'label' => 'Collective: Team Notes']);
+
+		return $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'), $locationService);
+	}
+
+	private function wikiError(callable $operation): WikiException {
+		try {
+			$operation();
+		} catch (WikiException $e) {
+			return $e;
+		}
+		$this->fail('Expected a WikiException');
+	}
+
+	private function nodeOrNull(InMemoryFolder $folder, string $path): mixed {
+		try {
+			return $folder->get($path);
+		} catch (NotFoundException) {
+			return null;
+		}
+	}
+
 	private function createService(
 		InMemoryRootFolder $root,
 		Bot $bot,
@@ -489,11 +878,27 @@ class InMemoryRootFolder {
 
 class InMemoryFolder implements Folder {
 	private string $name;
+	private ?InMemoryFolder $parent;
 	/** @var array<string,File|Folder> */
 	private array $children = [];
+	/** Simulates a storage failure when a page is created. */
+	public ?\Throwable $failNewFileWith = null;
 
-	public function __construct(string $name) {
+	public function __construct(string $name, ?InMemoryFolder $parent = null) {
 		$this->name = $name;
+		$this->parent = $parent;
+	}
+
+	public function attach(string $name, InMemoryFile|InMemoryFolder $node): void {
+		$this->children[$name] = $node;
+	}
+
+	public function detach(string $name): void {
+		unset($this->children[$name]);
+	}
+
+	public function top(): InMemoryFolder {
+		return $this->parent === null ? $this : $this->parent->top();
 	}
 
 	public function get(string $path) {
@@ -516,13 +921,16 @@ class InMemoryFolder implements Folder {
 	}
 
 	public function newFolder(string $path): Folder {
-		$folder = new self($path);
+		$folder = new self($path, $this);
 		$this->children[$path] = $folder;
 		return $folder;
 	}
 
 	public function newFile(string $path): File {
-		$file = new InMemoryFile($path);
+		if ($this->failNewFileWith !== null) {
+			throw $this->failNewFileWith;
+		}
+		$file = new InMemoryFile($path, $this);
 		$this->children[$path] = $file;
 		return $file;
 	}
@@ -536,7 +944,9 @@ class InMemoryFolder implements Folder {
 	}
 
 	public function getPath() {
-		return '/' . trim($this->name, '/');
+		return $this->parent === null
+			? '/' . trim($this->name, '/')
+			: rtrim($this->parent->getPath(), '/') . '/' . $this->name;
 	}
 
 	public function getId() {
@@ -563,10 +973,16 @@ class InMemoryFolder implements Folder {
 
 class InMemoryFile implements File {
 	private string $name;
+	private int $id;
+	private ?InMemoryFolder $parent;
 	private string $content = '';
+	/** Simulates a storage that does not keep what was written. */
+	public bool $dropWrites = false;
 
-	public function __construct(string $name) {
+	public function __construct(string $name, ?InMemoryFolder $parent = null) {
 		$this->name = $name;
+		$this->id = crc32($name);
+		$this->parent = $parent;
 	}
 
 	public function getContent() {
@@ -574,11 +990,27 @@ class InMemoryFile implements File {
 	}
 
 	public function putContent($data) {
-		$this->content = (string)$data;
+		$this->content = $this->dropWrites ? '' : (string)$data;
 	}
 
 	public function getId() {
-		return crc32($this->name);
+		return $this->id;
+	}
+
+	/**
+	 * Like Node::move(): the target is an absolute path and the file id is kept.
+	 */
+	public function move($targetPath) {
+		$top = $this->parent->top();
+		$relative = ltrim(substr($targetPath, strlen(rtrim($top->getPath(), '/'))), '/');
+		$segments = explode('/', $relative);
+		$name = array_pop($segments);
+		$target = $segments === [] ? $top : $top->get(implode('/', $segments));
+		$this->parent->detach($this->name);
+		$this->name = $name;
+		$this->parent = $target;
+		$target->attach($name, $this);
+		return $this;
 	}
 
 	public function getSize() {
@@ -594,10 +1026,12 @@ class InMemoryFile implements File {
 	}
 
 	public function getPath() {
-		return '/' . trim($this->name, '/');
+		return $this->parent === null
+			? '/' . trim($this->name, '/')
+			: rtrim($this->parent->getPath(), '/') . '/' . $this->name;
 	}
 
 	public function getParent() {
-		return null;
+		return $this->parent;
 	}
 }

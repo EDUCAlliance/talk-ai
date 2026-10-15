@@ -7,6 +7,7 @@ namespace OCA\EducAI\Service;
 use Exception;
 use OCA\EducAI\Db\CatalogueEmbedding;
 use OCA\EducAI\Db\CatalogueEmbeddingMapper;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
 use Throwable;
@@ -70,6 +71,7 @@ class CatalogueEmbeddingService {
 			$pastCourses = $this->fetchAllCourses(true);
 			$model = $this->embeddingClient->getActiveModel();
 			$failed = 0;
+			$pausedFor = null;
 
 			foreach ([false, true] as $isPast) {
 				foreach (array_chunk($isPast ? $pastCourses : $currentCourses, 10) as $batch) {
@@ -81,14 +83,32 @@ class CatalogueEmbeddingService {
 						} else {
 							$processedCurrent += count($batch);
 						}
+					} catch (EmbeddingRateLimitedException $e) {
+						// The provider asked for a pause: stop instead of sending the remaining batches.
+						$pausedFor = $e->getRetryAfterSeconds();
+						$this->logger->warning('Catalogue indexing stopped: the embedding provider asked for a pause', [
+							'retry_after_seconds' => $pausedFor,
+							'is_past' => $isPast,
+						]);
+						break 2;
 					} catch (Throwable $e) {
 						$failed += count($batch);
-						$this->logger->warning('Catalogue embedding batch failed', ['exception' => $e, 'is_past' => $isPast]);
+						// Error level so the failure is visible in exports that only keep errors.
+						$this->logger->error('Catalogue embedding batch failed', [
+							'exception' => $e,
+							'batch_size' => count($batch),
+							'is_past' => $isPast,
+						]);
 					}
 				}
 			}
 
 			$this->requireEnabled();
+			if ($pausedFor !== null) {
+				$error = 'The embedding provider asked for a pause of ' . $pausedFor . ' seconds. Previous records were retained; retry later.';
+				$this->saveStatus('failed', $startedAt, $error);
+				return $this->reindexResult($processedCurrent, $processedPast, $error);
+			}
 			if ($failed > 0) {
 				$error = "$failed catalogue courses could not be indexed. Previous records were retained; retry to complete.";
 				$this->saveStatus('failed', $startedAt, $error);
@@ -206,7 +226,7 @@ class CatalogueEmbeddingService {
 			$embeddingModel = $this->embeddingClient->getActiveModel();
 
 			// Generate embedding for query
-			$queryVectors = $this->embeddingClient->embedTexts([$query], $embeddingModel);
+			$queryVectors = $this->embeddingClient->embedTexts([$query], $embeddingModel, ['purpose' => 'catalogue_query']);
 			if (count($queryVectors) === 0) {
 				throw new Exception('Failed to generate query embedding');
 			}
@@ -356,7 +376,7 @@ class CatalogueEmbeddingService {
 
 		// Generate embeddings
 		$this->requireEnabled();
-		$embeddings = $this->embeddingClient->embedTexts($texts, $embeddingModel);
+		$embeddings = $this->embeddingClient->embedTexts($texts, $embeddingModel, ['purpose' => 'catalogue']);
 		if (count($embeddings) !== count($courses)) {
 			throw new Exception('Catalogue embedding response was incomplete');
 		}

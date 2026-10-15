@@ -544,8 +544,8 @@ class Application extends App implements IBootstrap {
 			return new CleanupOrphanedSourcesJob(
 				$c->get(\OCP\AppFramework\Utility\ITimeFactory::class),
 				$c->get(BotSourceMapper::class),
-				$c->get(EmbeddingMapper::class),
-				$c->get(\OCP\Files\IRootFolder::class),
+				new \OCA\EducAI\Service\RagSourceLocator($c->get(\OCP\Files\IRootFolder::class)),
+				$c->get(\OCP\BackgroundJob\IJobList::class),
 				$c->get(\Psr\Log\LoggerInterface::class)
 			);
 		});

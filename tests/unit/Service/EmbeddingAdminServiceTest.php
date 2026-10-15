@@ -75,6 +75,7 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$this->catalogue->method('isEnabled')->willReturn(true);
 		$this->sources->method('findAll')->willReturn([$this->source(11)]);
 		$this->jobs->method('has')->willReturn(true);
+		$this->ingestion->method('isQueued')->with(11)->willReturn(true);
 		$this->ingestion->expects($this->never())->method('enqueueSource');
 		$this->jobs->expects($this->never())->method('add');
 		$this->configuration->expects($this->never())->method('markQueued');
@@ -149,6 +150,30 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$this->jobs->expects($this->never())->method('add');
 		$this->expectException(\InvalidArgumentException::class);
 		$this->service->queueCatalogue();
+	}
+
+	public function testWaitingAndUnreachableSourcesAreCountedAndNotQueuedTwice(): void {
+		$this->settings->method('getRagConfig')->willReturn(['rag_enabled' => true]);
+		$this->catalogue->method('isEnabled')->willReturn(false);
+		$this->catalogue->method('getStats')->willReturn(['count' => 0, 'last_indexed' => null, 'needs_reindex' => false, 'state' => 'idle']);
+		$waiting = $this->source(31);
+		$waiting->setProgressStage('waiting');
+		$unreachable = $this->source(32, 'unavailable');
+		$this->sources->method('findAll')->willReturn([$waiting, $unreachable]);
+
+		$status = $this->service->getStatus();
+		$this->assertSame(1, $status['rag']['queued']);
+		$this->assertSame(0, $status['rag']['processing']);
+		$this->assertSame(1, $status['rag']['error']);
+		$this->assertSame([['source_id' => 32, 'bot_id' => 3]], $status['rag']['errors']);
+
+		$queued = [];
+		// Source 31 waits for a retry scheduled for later; it is queued already.
+		$this->ingestion->method('isQueued')->willReturnCallback(static fn (int $id): bool => $id === 31);
+		$this->ingestion->method('enqueueSource')->willReturnCallback(static function (int $id) use (&$queued): void { $queued[] = $id; });
+		$result = $this->service->queueAll();
+		$this->assertSame([32], $queued);
+		$this->assertSame(1, $result['already_queued_rag_sources']);
 	}
 
 	private function source(int $id, string $status = 'pending'): BotSource {

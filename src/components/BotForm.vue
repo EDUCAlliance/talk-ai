@@ -335,6 +335,9 @@
 									<div v-if="source.error_message" class="source-meta source-error">
 										{{ source.error_message }}
 									</div>
+									<div v-if="source.notice_message" class="source-meta">
+										{{ source.notice_message }}
+									</div>
 									<div class="source-actions">
 										<button
 											type="button"
@@ -1616,6 +1619,8 @@ export default {
 				return t('educai', 'Pending')
 			case 'error':
 				return t('educai', 'Error')
+			case 'unavailable':
+				return t('educai', 'Not reachable')
 			default:
 				return t('educai', 'Unknown')
 			}
@@ -1627,6 +1632,7 @@ export default {
 				chunking: t('educai', 'Processing content…'),
 				embedding: t('educai', 'Generating embeddings…'),
 				storing: t('educai', 'Saving results…'),
+				waiting: t('educai', 'Waiting for the embedding service…'),
 				ready: t('educai', 'Complete'),
 			}
 			return stages[stage] || t('educai', 'Processing…')
@@ -2141,6 +2147,11 @@ export default {
 .status-error {
 	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
 	color: var(--color-error-text);
+}
+
+.status-unavailable {
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .source-meta {

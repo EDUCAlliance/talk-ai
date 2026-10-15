@@ -786,11 +786,15 @@ class AgentExecutor {
 
 			if (($result['isError'] ?? false) === true) {
 				$status = 'error';
-				$output = $this->encodeToolError(
-					'tool_execution_failed',
-					'The tool reported an execution error.',
-					$toolName
-				);
+				// Built-in tools may report a safe, actionable error; MCP errors stay generic.
+				$builtInError = $isBuiltIn ? $this->safeBuiltInToolError($result) : null;
+				$output = $builtInError !== null
+					? $this->encodeToolError($builtInError['code'], $builtInError['message'], $toolName, $builtInError['details'])
+					: $this->encodeToolError(
+						'tool_execution_failed',
+						'The tool reported an execution error.',
+						$toolName
+					);
 			} else {
 				$output = $this->sanitizeOutput($result, $isBuiltIn && $toolName === BuiltInToolProvider::TOOL_WIKI_READ_PAGE);
 			}
@@ -908,6 +912,32 @@ class AgentExecutor {
 		}
 
 		return ['arguments' => $decoded, 'error' => null];
+	}
+
+	/**
+	 * The structured error of a built-in tool result, if it carries one.
+	 *
+	 * @param array<string,mixed> $result
+	 * @return array{code:string,message:string,details:array<string,int|float|bool|string>}|null
+	 */
+	private function safeBuiltInToolError(array $result): ?array {
+		$error = $result['error'] ?? null;
+		if (!is_array($error) || !is_string($error['code'] ?? null) || preg_match('/^[a-z_]{1,64}$/', $error['code']) !== 1
+			|| !is_string($error['message'] ?? null) || trim($error['message']) === '') {
+			return null;
+		}
+		$details = [];
+		foreach (is_array($error['details'] ?? null) ? $error['details'] : [] as $key => $value) {
+			if (is_string($key) && (is_int($value) || is_float($value) || is_bool($value) || is_string($value))) {
+				$details[$key] = is_string($value) ? $this->truncateUtf8($value, 300) : $value;
+			}
+		}
+
+		return [
+			'code' => $error['code'],
+			'message' => $this->truncateUtf8($this->ensureValidUtf8($error['message']), 1000),
+			'details' => $details,
+		];
 	}
 
 	/**

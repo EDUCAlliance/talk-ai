@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Service;
 
 use Exception;
+use OCA\EducAI\Exception\DoclingEmptyResultException;
 use OCP\Files\File;
 use OCP\Http\Client\IClientService;
 use OCP\IL10N;
@@ -156,6 +157,11 @@ class DoclingClient {
 
             return $markdown;
 
+        } catch (DoclingEmptyResultException $e) {
+            $this->logger->info('Docling found no text in the document', [
+                'file' => $filename,
+            ]);
+            throw $e;
         } catch (Exception $e) {
             $this->logger->error('Docling conversion failed', [
                 'file' => $filename,
@@ -598,8 +604,12 @@ class DoclingClient {
             throw new Exception($this->message('Docling did not report a successful conversion. Check the API profile and server logs.'), $status);
         }
         $markdown = $profile === 'docling_serve' ? ($payload['document']['md_content'] ?? null) : ($payload['markdown'] ?? null);
-        if (!is_string($markdown) || trim($markdown) === '') {
+        if (!is_string($markdown)) {
             throw new Exception($this->message('Docling returned no Markdown content. Check the API profile and inline output configuration.'), $status);
+        }
+        if (trim($markdown) === '') {
+            // The conversion succeeded but the document has no text, e.g. a photo without writing.
+            throw new DoclingEmptyResultException($this->message('Docling returned no Markdown content. Check the API profile and inline output configuration.'), $status);
         }
 
         // Legacy EDUC warnings include informational backend notices, not just failures.

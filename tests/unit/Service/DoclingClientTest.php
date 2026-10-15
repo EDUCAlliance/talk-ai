@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Tests\Unit\Service;
 
 use Exception;
+use OCA\EducAI\Exception\DoclingEmptyResultException;
 use OCA\EducAI\Service\DoclingClient;
 use OCA\EducAI\Service\SettingsService;
 use OCP\Files\File;
@@ -233,6 +234,24 @@ class DoclingClientTest extends TestCase {
 				$this->assertStringContainsString(str_contains($reason, 'timed out') ? 'no automatic retry' : 'not retried', $e->getMessage());
 			}
 		}
+	}
+
+	public function testDocumentWithoutTextIsReportedAsEmptyRatherThanAsAFailure(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())->method('post')->willReturn($this->response(['status' => 'success', 'document' => ['md_content' => " \n"], 'errors' => []]));
+		$logger = $this->createMock(LoggerInterface::class);
+		$logger->expects($this->never())->method('error');
+		$infos = [];
+		$logger->method('info')->willReturnCallback(static function (string $message) use (&$infos): void { $infos[] = $message; });
+
+		try {
+			$this->createDoclingClient($client, ['docling_api_profile' => 'docling_serve', 'docling_api_endpoint' => 'https://d.example'], logger: $logger)
+				->convertBinaryToMarkdown('photo.jpg', 'JPEG', 'image/jpeg');
+			$this->fail('A document without text must be reported');
+		} catch (DoclingEmptyResultException $e) {
+			$this->assertStringContainsString('no Markdown', $e->getMessage());
+		}
+		$this->assertContains('Docling found no text in the document', $infos);
 	}
 
 	public function testLegacyInformationalWarningsAreCountedWithoutLoggingDocumentOrProviderText(): void {

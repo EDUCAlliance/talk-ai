@@ -107,6 +107,23 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 		$this->assertStringNotContainsString('private upstream payload', $this->status['last_error']);
 	}
 
+	public function testProviderPauseStopsTheRunInsteadOfSendingTheRemainingBatches(): void {
+		$courses = array_map(static fn (int $id): array => ['id' => $id, 'title' => 'Course ' . $id], range(1, 25));
+		$this->client->method('searchCourses')->willReturn(['courses' => $courses, 'more' => 0]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [['id' => 99]], 'morePast' => 0]);
+		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
+		$this->embeddings->expects($this->once())->method('embedTexts')
+			->willThrowException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(120));
+		$this->mapper->expects($this->never())->method('upsert');
+		$this->mapper->expects($this->never())->method('deleteStale');
+
+		$result = $this->service->reindex();
+
+		$this->assertFalse($result['success']);
+		$this->assertSame('failed', $this->status['state']);
+		$this->assertStringContainsString('pause of 120 seconds', $this->status['last_error']);
+	}
+
 	public function testIncompleteEmbeddingBatchRetainsPreviousIndexAndSuccessfulTimestamp(): void {
 		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42], ['id' => 43]], 'more' => 0]);
 		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);

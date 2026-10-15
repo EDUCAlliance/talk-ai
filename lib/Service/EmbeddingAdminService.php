@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace OCA\EducAI\Service;
 
 use OCA\EducAI\Db\BotSourceMapper;
-use OCA\EducAI\Jobs\ReindexBotSourceJob;
 use OCA\EducAI\Jobs\ReindexCatalogueEmbeddingsJob;
 use OCP\BackgroundJob\IJobList;
 use Psr\Log\LoggerInterface;
@@ -31,8 +30,12 @@ class EmbeddingAdminService {
 		foreach ($this->sourceMapper->findAll() as $source) {
 			$counts['total']++;
 			$status = $source->getStatus();
-			if ($status === 'pending') {
-				$status = $source->getProgressStage() ? 'processing' : 'queued';
+			if ($status === KnowledgeSourceStatus::PENDING) {
+				$stage = $source->getProgressStage();
+				$status = $stage && $stage !== KnowledgeSourceStatus::STAGE_WAITING ? 'processing' : 'queued';
+			} elseif ($status === KnowledgeSourceStatus::UNAVAILABLE) {
+				// Not used for answers until the owner can reach it again: a problem to fix.
+				$status = 'error';
 			}
 			if (array_key_exists($status, $counts) && $status !== 'total') {
 				$counts[$status]++;
@@ -105,8 +108,8 @@ class EmbeddingAdminService {
 			}
 			try {
 				$id = $source->getId();
-				if ($this->jobs->has(ReindexBotSourceJob::class, ['sourceId' => $id, 'force' => true])
-					|| $this->jobs->has(ReindexBotSourceJob::class, ['sourceId' => $id, 'force' => false])) {
+				// Includes retries scheduled for later (rate limits, temporary lookup failures).
+				if ($this->ingestion->isQueued($id)) {
 					$result['already_queued_rag_sources']++;
 					continue;
 				}

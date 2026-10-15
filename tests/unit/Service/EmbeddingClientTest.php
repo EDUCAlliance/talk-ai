@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Tests\Unit\Service;
 
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCA\EducAI\Service\EmbeddingClient;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\SettingsService;
@@ -167,8 +168,8 @@ class EmbeddingClientTest extends TestCase {
         return [
             'request timeout' => [408, '', 1, null],
             'too early' => [425, '', 1, null],
-            'rate limit with capped numeric retry-after' => [429, '9', 2, null],
-            'rate limit with capped HTTP-date retry-after' => [429, 'Thu, 01 Jan 1970 00:16:45 GMT', 2, 1000],
+            'rate limit with numeric retry-after' => [429, '9', 9, null],
+            'rate limit with HTTP-date retry-after' => [429, 'Thu, 01 Jan 1970 00:16:45 GMT', 5, 1000],
             'internal server error' => [500, '', 1, null],
             'service unavailable' => [503, '', 1, null],
         ];
@@ -225,6 +226,11 @@ class EmbeddingClientTest extends TestCase {
                 'attempts' => 1,
                 'category' => 'http_400',
                 'exception_class' => get_class($failure),
+                'model' => 'embedding-model',
+                'endpoint_host' => 'embedding.example.test',
+                'endpoint_path' => '/v1/embeddings',
+                'batch_size' => 1,
+                'batch_chars' => 5,
             ]);
 
         try {
@@ -240,7 +246,7 @@ class EmbeddingClientTest extends TestCase {
         $last = $this->httpException(503, $this->response('another-sensitive-body', 503));
         $requestAttempt = 0;
         $client = $this->createMock(IClient::class);
-        $client->expects($this->exactly(2))
+        $client->expects($this->exactly(3))
             ->method('post')
             ->willReturnCallback(static function () use (&$requestAttempt, $first, $last): never {
                 if ($requestAttempt++ === 0) {
@@ -249,28 +255,122 @@ class EmbeddingClientTest extends TestCase {
                 throw $last;
             });
         $rateLimitService = $this->createMock(RateLimitService::class);
-        $rateLimitService->expects($this->exactly(2))->method('isEnabled')->willReturn(false);
+        $rateLimitService->expects($this->exactly(3))->method('isEnabled')->willReturn(false);
+        $delays = [];
         $logger = $this->createMock(LoggerInterface::class);
-        $logger->expects($this->once())->method('warning');
+        $logger->expects($this->exactly(2))->method('warning');
+        $logged = null;
         $logger->expects($this->once())
             ->method('error')
-            ->with('Embedding request failed', [
-                'attempts' => 2,
-                'category' => 'http_503',
-                'exception_class' => get_class($last),
-            ]);
+            ->willReturnCallback(static function (string $message, array $context) use (&$logged): void {
+                $logged = $context;
+            });
 
         try {
             $this->createEmbeddingClient(
                 $client,
                 $rateLimitService,
                 $logger,
-                static function (int $seconds): void {}
+                static function (int $seconds) use (&$delays): void {
+                    $delays[] = $seconds;
+                }
             )->embedTexts(['probe']);
             $this->fail('Expected the final provider exception');
         } catch (\Throwable $caught) {
-            $this->assertSame($last, $caught);
+            $this->assertSame($last, $caught, get_class($caught) . ': ' . $caught->getMessage());
         }
+        $this->assertSame([1, 2], $delays);
+        $this->assertSame(3, $logged['attempts']);
+        $this->assertSame('http_503', $logged['category']);
+        $this->assertSame(get_class($last), $logged['exception_class']);
+        $this->assertStringNotContainsString('sensitive', json_encode($logged, JSON_THROW_ON_ERROR));
+    }
+
+    public function testLongRetryAfterIsDeferredInsteadOfWaitedInline(): void {
+        $failure = $this->httpException(429, $this->response('', 429, ['Retry-After' => '120']));
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->once())->method('post')->willThrowException($failure);
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+        $delays = [];
+
+        try {
+            $this->createEmbeddingClient(
+                $client,
+                $rateLimitService,
+                $this->createMock(LoggerInterface::class),
+                static function (int $seconds) use (&$delays): void {
+                    $delays[] = $seconds;
+                }
+            )->embedTexts(['probe'], null, ['source_id' => 12]);
+            $this->fail('Expected a deferred retry');
+        } catch (EmbeddingRateLimitedException $caught) {
+            $this->assertSame(120, $caught->getRetryAfterSeconds());
+            $this->assertSame($failure, $caught->getPrevious());
+        }
+        $this->assertSame([], $delays);
+    }
+
+    public function testPersistentRateLimitWithoutRetryAfterIsDeferredAfterBackoff(): void {
+        $failure = $this->httpException(429, $this->response('', 429));
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->exactly(3))->method('post')->willThrowException($failure);
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+        $delays = [];
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->never())->method('error');
+
+        try {
+            $this->createEmbeddingClient(
+                $client,
+                $rateLimitService,
+                $logger,
+                static function (int $seconds) use (&$delays): void {
+                    $delays[] = $seconds;
+                }
+            )->embedTexts(['probe']);
+            $this->fail('Expected a deferred retry');
+        } catch (EmbeddingRateLimitedException $caught) {
+            $this->assertSame(60, $caught->getRetryAfterSeconds());
+        }
+        $this->assertSame([1, 2], $delays);
+    }
+
+    public function testFailureLogNamesProviderErrorIdentifiersAndCallerContextButNoText(): void {
+        $body = json_encode(['error' => [
+            'message' => 'Input contains the private sentence from the document',
+            'type' => 'invalid_request_error',
+            'code' => 'context_length_exceeded',
+            'param' => 'input',
+        ]], JSON_THROW_ON_ERROR);
+        $failure = $this->httpException(400, $this->response($body, 400));
+        $client = $this->createMock(IClient::class);
+        $client->method('post')->willThrowException($failure);
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+        $logged = null;
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())->method('error')
+            ->willReturnCallback(static function (string $message, array $context) use (&$logged): void {
+                $logged = $context;
+            });
+
+        try {
+            $this->createEmbeddingClient($client, $rateLimitService, $logger)
+                ->embedTexts(['private sentence'], null, ['purpose' => 'rag_source', 'source_id' => 12, 'Bad Key' => 'dropped']);
+            $this->fail('Expected the provider exception');
+        } catch (\Throwable $caught) {
+            $this->assertSame($failure, $caught);
+        }
+
+        $this->assertSame('invalid_request_error', $logged['provider_error_type']);
+        $this->assertSame('context_length_exceeded', $logged['provider_error_code']);
+        $this->assertSame('input', $logged['provider_error_param']);
+        $this->assertSame(12, $logged['source_id']);
+        $this->assertSame('rag_source', $logged['purpose']);
+        $this->assertArrayNotHasKey('Bad Key', $logged);
+        $this->assertStringNotContainsString('private sentence', json_encode($logged, JSON_THROW_ON_ERROR));
     }
 
     private function createEmbeddingClient(

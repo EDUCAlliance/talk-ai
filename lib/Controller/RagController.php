@@ -10,6 +10,7 @@ use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\KnowledgeSourceStatus;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\UrlContentFetcher;
@@ -197,15 +198,7 @@ class RagController extends Controller {
         $data = $source->jsonSerialize();
         $data['path'] = null;
         $data['display_name'] = null;
-        $hasProcessingError = $source->getStatus() === 'error'
-            && $source->getErrorMessage() !== null
-            && $source->getErrorMessage() !== '';
-        $data['error_message'] = $hasProcessingError
-            ? $this->l10n->t('The knowledge source could not be processed.')
-            : null;
-        $data['source_error_code'] = $hasProcessingError
-            ? 'knowledge_source_processing_failed'
-            : null;
+        $data = $this->describeSourceStatus($source) + $data;
 
         // Handle URL sources differently
         if ($source->getNodeType() === 'url') {
@@ -251,6 +244,92 @@ class RagController extends Controller {
         }
 
         return $data;
+    }
+
+    /**
+     * Owner-facing status texts. Stored details (provider texts, URLs) are never shown,
+     * only the category and its safe parameters.
+     *
+     * @return array{error_message:?string,source_error_code:?string,notice_message:?string}
+     */
+    private function describeSourceStatus(BotSource $source): array {
+        $status = $source->getStatus();
+        $stored = KnowledgeSourceStatus::decode($source->getErrorMessage());
+        $code = $stored['code'] ?? null;
+        $params = $stored['params'] ?? [];
+        $result = ['error_message' => null, 'source_error_code' => null, 'notice_message' => null];
+
+        if ($status === KnowledgeSourceStatus::READY && $code === KnowledgeSourceStatus::SKIPPED_FILES) {
+            $result['notice_message'] = $this->l10n->t('Skipped files: %1$s not supported, %2$s without text.', [
+                (int)($params['unsupported'] ?? 0),
+                (int)($params['empty'] ?? 0),
+            ]) . $this->unsupportedSuffix($params);
+            return $result;
+        }
+        if ($status === KnowledgeSourceStatus::PENDING && $code === KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED) {
+            $result['notice_message'] = $this->l10n->t('The embedding service asked for a pause. Indexing continues automatically.');
+            return $result;
+        }
+
+        $isProblem = in_array($status, [KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::UNAVAILABLE], true)
+            && $source->getErrorMessage() !== null
+            && $source->getErrorMessage() !== '';
+        if (!$isProblem) {
+            return $result;
+        }
+
+        $message = $code !== null ? $this->sourceErrorMessage($code, $params) : null;
+        $result['error_message'] = $message ?? $this->l10n->t('The knowledge source could not be processed.');
+        $result['source_error_code'] = $message !== null ? $code : 'knowledge_source_processing_failed';
+
+        return $result;
+    }
+
+    /**
+     * @param array<string,mixed> $params
+     */
+    private function sourceErrorMessage(string $code, array $params): ?string {
+        return match ($code) {
+            KnowledgeSourceStatus::NO_FILES => $this->l10n->t('The folder contains no files.'),
+            KnowledgeSourceStatus::METADATA_ONLY => $this->l10n->t('Only system files were found (for example ._* or .DS_Store). There is nothing to index.'),
+            KnowledgeSourceStatus::NO_SUPPORTED_FILES => $this->l10n->t('No supported files found.') . $this->unsupportedSuffix($params)
+                . (($params['converter_disabled'] ?? false) === true ? ' ' . $this->l10n->t('Document conversion (Docling) is turned off; ask your administrator to enable it.') : ''),
+            KnowledgeSourceStatus::NO_TEXT => $this->l10n->t('No readable text found: %1$s files without text, %2$s not supported.', [
+                (int)($params['empty'] ?? 0),
+                (int)($params['unsupported'] ?? 0),
+            ]),
+            KnowledgeSourceStatus::EXTRACTION_FAILED => $this->l10n->t('%1$s of %2$s files could not be read. The previous index is kept; check the files and reindex.', [
+                (int)($params['failed'] ?? 0),
+                (int)($params['total'] ?? 0),
+            ]),
+            KnowledgeSourceStatus::SOURCE_MISSING => $this->l10n->t('The file or folder is no longer reachable for its owner (deleted, moved or no longer shared). The bot does not use this source until it is reachable again. Check it, select it again or remove the source.'),
+            KnowledgeSourceStatus::SOURCE_ACCESS_DENIED => $this->l10n->t('The owner no longer has access to this file or folder. The bot does not use this source until access is restored.'),
+            KnowledgeSourceStatus::SOURCE_TEMPORARILY_UNAVAILABLE => ($params['retry_scheduled'] ?? false) === true
+                ? $this->l10n->t('The source could not be read temporarily. The previous index is kept and indexing is retried automatically.')
+                : $this->l10n->t('The source could not be read temporarily. The previous index is kept; reindex later.'),
+            KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED => $this->l10n->t('The embedding service kept asking for a pause. The previous index is kept; reindex later.'),
+            KnowledgeSourceStatus::EMBEDDING_FAILED => isset($params['http_status']) && is_int($params['http_status'])
+                ? $this->l10n->t('The embedding service rejected the request (HTTP %s). The previous index is kept; administrators find details in the Nextcloud log.', [$params['http_status']])
+                : $this->l10n->t('The embedding service could not be reached. The previous index is kept; administrators find details in the Nextcloud log.'),
+            KnowledgeSourceStatus::URL_FETCH_FAILED => $this->l10n->t('The web page could not be loaded. Check the address and reindex.'),
+            KnowledgeSourceStatus::RAG_DISABLED => $this->l10n->t('Knowledge sources are turned off by the administrator.'),
+            default => null,
+        };
+    }
+
+    /**
+     * @param array<string,mixed> $params
+     */
+    private function unsupportedSuffix(array $params): string {
+        $extensions = array_values(array_filter(
+            is_array($params['extensions'] ?? null) ? $params['extensions'] : [],
+            static fn ($extension): bool => is_string($extension) && preg_match('/^[a-z0-9]{1,10}$/', $extension) === 1
+        ));
+        if ($extensions === []) {
+            return '';
+        }
+
+        return ' ' . $this->l10n->t('Unsupported file types: %s', [implode(', ', array_map(static fn (string $extension): string => '.' . $extension, $extensions))]);
     }
 
     private function canViewSources(Bot $bot): bool {

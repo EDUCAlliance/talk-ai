@@ -1206,6 +1206,26 @@
     "The model test timed out. Try again later or review the provider response timeout." : "Die Zeit für den Modelltest ist abgelaufen. Versuche es später erneut oder prüfe das Antwortzeitlimit des Anbieters.",
     "The provider rate limit or quota was reached. Try again later or check the provider limits." : "Das Anfragelimit oder Kontingent des Anbieters ist erreicht. Versuche es später erneut oder prüfe die Anbieterlimits.",
     "The provider is temporarily unavailable. Try again later." : "Der Anbieter ist vorübergehend nicht verfügbar. Versuche es später erneut.",
-    "{duration} · {time}" : "{duration} · {time}"
+    "{duration} · {time}" : "{duration} · {time}",
+    "Skipped files: %1$s not supported, %2$s without text." : "Übersprungene Dateien: %1$s nicht unterstützt, %2$s ohne Text.",
+    "The embedding service asked for a pause. Indexing continues automatically." : "Der Embedding-Dienst hat um eine Pause gebeten. Die Indizierung wird automatisch fortgesetzt.",
+    "The folder contains no files." : "Der Ordner enthält keine Dateien.",
+    "Only system files were found (for example ._* or .DS_Store). There is nothing to index." : "Es wurden nur Systemdateien gefunden (zum Beispiel ._* oder .DS_Store). Es gibt nichts zu indizieren.",
+    "No supported files found." : "Keine unterstützten Dateien gefunden.",
+    "Document conversion (Docling) is turned off; ask your administrator to enable it." : "Die Dokumentkonvertierung (Docling) ist ausgeschaltet; bitte die Administration, sie zu aktivieren.",
+    "No readable text found: %1$s files without text, %2$s not supported." : "Kein lesbarer Text gefunden: %1$s Dateien ohne Text, %2$s nicht unterstützt.",
+    "%1$s of %2$s files could not be read. The previous index is kept; check the files and reindex." : "%1$s von %2$s Dateien konnten nicht gelesen werden. Der bisherige Index bleibt erhalten; prüfe die Dateien und indiziere neu.",
+    "The file or folder is no longer reachable for its owner (deleted, moved or no longer shared). The bot does not use this source until it is reachable again. Check it, select it again or remove the source." : "Die Datei oder der Ordner ist für den Eigentümer nicht mehr erreichbar (gelöscht, verschoben oder nicht mehr geteilt). Der Bot nutzt diese Quelle nicht, bis sie wieder erreichbar ist. Prüfe sie, wähle sie neu aus oder entferne die Quelle.",
+    "The owner no longer has access to this file or folder. The bot does not use this source until access is restored." : "Der Eigentümer hat keinen Zugriff mehr auf diese Datei oder diesen Ordner. Der Bot nutzt diese Quelle nicht, bis der Zugriff wiederhergestellt ist.",
+    "The source could not be read temporarily. The previous index is kept and indexing is retried automatically." : "Die Quelle konnte vorübergehend nicht gelesen werden. Der bisherige Index bleibt erhalten, die Indizierung wird automatisch erneut versucht.",
+    "The source could not be read temporarily. The previous index is kept; reindex later." : "Die Quelle konnte vorübergehend nicht gelesen werden. Der bisherige Index bleibt erhalten; indiziere später neu.",
+    "The embedding service kept asking for a pause. The previous index is kept; reindex later." : "Der Embedding-Dienst hat wiederholt um eine Pause gebeten. Der bisherige Index bleibt erhalten; indiziere später neu.",
+    "The embedding service rejected the request (HTTP %s). The previous index is kept; administrators find details in the Nextcloud log." : "Der Embedding-Dienst hat die Anfrage abgelehnt (HTTP %s). Der bisherige Index bleibt erhalten; Details stehen für die Administration im Nextcloud-Log.",
+    "The embedding service could not be reached. The previous index is kept; administrators find details in the Nextcloud log." : "Der Embedding-Dienst war nicht erreichbar. Der bisherige Index bleibt erhalten; Details stehen für die Administration im Nextcloud-Log.",
+    "The web page could not be loaded. Check the address and reindex." : "Die Webseite konnte nicht geladen werden. Prüfe die Adresse und indiziere neu.",
+    "Knowledge sources are turned off by the administrator." : "Wissensquellen sind von der Administration ausgeschaltet.",
+    "Unsupported file types: %s" : "Nicht unterstützte Dateitypen: %s",
+    "Not reachable" : "Nicht erreichbar",
+    "Waiting for the embedding service…" : "Wartet auf den Embedding-Dienst…"
 },"pluralForm" :"nplurals=2; plural=(n != 1);"
 }

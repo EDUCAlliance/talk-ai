@@ -539,6 +539,9 @@ export default {
 			if (status === 'pending') {
 				return t('educai', 'Pending')
 			}
+			if (status === 'unavailable') {
+				return t('educai', 'Not reachable')
+			}
 			return t('educai', 'Unknown')
 		},
 		async enableTest(bot) {

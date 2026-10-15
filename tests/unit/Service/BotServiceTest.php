@@ -1118,6 +1118,11 @@ class BotServiceTest extends TestCase {
 					$this->assertStringContainsString('call `wiki_write_page` before claiming that it was written or saved', $systemPrompt);
 					$this->assertStringContainsString('check whether `index.md` needs a curated overview update', $systemPrompt);
 					$this->assertStringContainsString('Leave the `Existing Files` section to ' . Application::APP_DISPLAY_NAME . ' automation', $systemPrompt);
+					$this->assertStringContainsString('A page only counts as written when `wiki_write_page` returned `success: true`', $systemPrompt);
+					$this->assertStringContainsString('fails with `already_exists`, read the page', $systemPrompt);
+					// Personal-files wiki: the Collectives folder-page layout does not apply.
+					$this->assertStringContainsString('next to the page `topic.md`', $systemPrompt);
+					$this->assertStringNotContainsString('topic/Readme.md', $systemPrompt);
 
 					return true;
 				}),
