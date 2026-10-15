@@ -226,11 +226,10 @@ class CatalogueEmbeddingService {
 			$embeddingModel = $this->embeddingClient->getActiveModel();
 
 			// Generate embedding for query
-			$queryVectors = $this->embeddingClient->embedTexts([$query], $embeddingModel, ['purpose' => 'catalogue_query']);
-			if (count($queryVectors) === 0) {
+			$queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'catalogue_query']);
+			if ($queryVector === []) {
 				throw new Exception('Failed to generate query embedding');
 			}
-			$queryVector = $queryVectors[0];
 
 			// Compare vectors only inside the same embedding model space.
 			$embeddings = $isPast

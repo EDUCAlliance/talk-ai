@@ -14,16 +14,19 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 class EmbeddingClient {
-    private const RATE_LIMIT_WAIT_TIMEOUT_SECONDS = 120;
     private const RATE_LIMIT_POLL_SECONDS = 2;
-    private const MAX_REQUEST_ATTEMPTS = 3;
     private const DEFAULT_RETRY_DELAY_SECONDS = 1;
-    /** Longer provider pauses are handed to the caller as EmbeddingRateLimitedException. */
-    private const MAX_INLINE_RETRY_DELAY_SECONDS = 30;
-    /** Upper bound for inline retry waits within one embedTexts() call. */
-    private const MAX_INLINE_RETRY_BUDGET_SECONDS = 90;
     /** Assumed pause when a provider keeps answering 429 without Retry-After. */
     private const DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 60;
+
+    /**
+     * Waiting limits per call. Indexing may wait a while; a chat-time query must not hold
+     * up the answer, so longer pauses are handed to the caller as EmbeddingRateLimitedException.
+     * max_delay: longest single wait, budget: all waits of one call, limiter_wait: local
+     * rate limiter, timeout: one HTTP request, attempts: requests per batch.
+     */
+    private const BACKGROUND = ['max_delay' => 30, 'budget' => 90, 'limiter_wait' => 120, 'timeout' => 120, 'attempts' => 3];
+    private const INTERACTIVE = ['max_delay' => 5, 'budget' => 5, 'limiter_wait' => 5, 'timeout' => 30, 'attempts' => 2];
 
     private IClientService $clientService;
     private SettingsService $settingsService;
@@ -33,7 +36,9 @@ class EmbeddingClient {
     private Closure $sleeper;
     /** @var Closure():int */
     private Closure $clock;
-    private int $inlineRetryBudget = self::MAX_INLINE_RETRY_BUDGET_SECONDS;
+    /** @var array{max_delay:int,budget:int,limiter_wait:int,timeout:int,attempts:int} */
+    private array $policy = self::BACKGROUND;
+    private int $inlineRetryBudget = self::BACKGROUND['budget'];
 
     public function __construct(
         IClientService $clientService,
@@ -58,6 +63,8 @@ class EmbeddingClient {
     }
 
     /**
+     * Embed texts for indexing.
+     *
      * @param array<int,string> $texts
      * @param array<string,int|string|bool> $logContext Safe identifiers for failure logs, e.g. source_id.
      * @return array<int,array<int,float>>
@@ -65,10 +72,33 @@ class EmbeddingClient {
      * @throws Exception
      */
     public function embedTexts(array $texts, ?string $modelOverride = null, array $logContext = []): array {
+        return $this->embedWithPolicy($texts, $modelOverride, $logContext, self::BACKGROUND);
+    }
+
+    /**
+     * Embed a search query while a user waits for the answer: only short waits are made.
+     *
+     * @param array<string,int|string|bool> $logContext
+     * @return array<int,float> Empty when the provider returned no vector
+     * @throws EmbeddingRateLimitedException When the provider or the local rate limit asks for a longer pause.
+     * @throws Exception
+     */
+    public function embedQuery(string $query, ?string $modelOverride = null, array $logContext = []): array {
+        return $this->embedWithPolicy([$query], $modelOverride, $logContext, self::INTERACTIVE)[0] ?? [];
+    }
+
+    /**
+     * @param array<int,string> $texts
+     * @param array<string,int|string|bool> $logContext
+     * @param array{max_delay:int,budget:int,limiter_wait:int,timeout:int,attempts:int} $policy
+     * @return array<int,array<int,float>>
+     */
+    private function embedWithPolicy(array $texts, ?string $modelOverride, array $logContext, array $policy): array {
         if (count($texts) === 0) {
             return [];
         }
-        $this->inlineRetryBudget = self::MAX_INLINE_RETRY_BUDGET_SECONDS;
+        $this->policy = $policy;
+        $this->inlineRetryBudget = $policy['budget'];
 
         $settings = $this->settingsService->getSettings();
         $ragConfig = $this->settingsService->getRagConfig();
@@ -152,7 +182,7 @@ class EmbeddingClient {
     ): IResponse {
         $lastException = null;
 
-        for ($attempt = 1; $attempt <= self::MAX_REQUEST_ATTEMPTS; $attempt++) {
+        for ($attempt = 1; $attempt <= $this->policy['attempts']; $attempt++) {
             $this->waitForRateLimitCapacity($cursor, $totalTexts, count($batchTexts));
 
             try {
@@ -166,7 +196,7 @@ class EmbeddingClient {
                         'model' => $model,
                         'input' => array_values($batchTexts),
                     ],
-                    'timeout' => 120,
+                    'timeout' => $this->policy['timeout'],
                 ]);
             } catch (Exception $e) {
                 $lastException = $e;
@@ -179,8 +209,10 @@ class EmbeddingClient {
                 if ($transient) {
                     $delay = $this->retryDelaySeconds($e, $attempt);
                     $retryAfter = $this->retryAfterHeader($e);
-                    $rateLimited = $status === 429 || ($status === 503 && $retryAfter !== null && trim($retryAfter) !== '');
-                    if ($rateLimited && ($delay > self::MAX_INLINE_RETRY_DELAY_SECONDS || $delay > $this->inlineRetryBudget)) {
+                    $hasRetryAfter = $retryAfter !== null && trim($retryAfter) !== '';
+                    $rateLimited = $status === 429 || $hasRetryAfter;
+                    // A requested pause that does not fit inline is the caller's to schedule, for any status.
+                    if ($rateLimited && ($delay > $this->policy['max_delay'] || $delay > $this->inlineRetryBudget)) {
                         $this->logger->warning('Embedding provider asked for a longer pause, deferring', [
                             'attempt' => $attempt,
                             'category' => $category,
@@ -188,7 +220,7 @@ class EmbeddingClient {
                         ] + $this->safeLogContext($logContext));
                         throw new EmbeddingRateLimitedException($delay, $e);
                     }
-                    if ($attempt < self::MAX_REQUEST_ATTEMPTS && $delay <= $this->inlineRetryBudget) {
+                    if ($attempt < $this->policy['attempts'] && $delay <= $this->inlineRetryBudget) {
                         $this->logger->warning('Embedding request failed transiently, retrying', [
                             'attempt' => $attempt,
                             'next_attempt' => $attempt + 1,
@@ -486,14 +518,17 @@ class EmbeddingClient {
 
         $waited = 0;
         while (!$this->rateLimitService->canProcess(RateLimitService::ENDPOINT_EMBEDDINGS)) {
-            if ($waited >= self::RATE_LIMIT_WAIT_TIMEOUT_SECONDS) {
-                throw new Exception('Rate limit wait timeout exceeded for embedding batch');
+            $available = $this->rateLimitService->getSecondsUntilAvailable(RateLimitService::ENDPOINT_EMBEDDINGS);
+            if ($waited >= $this->policy['limiter_wait'] || $available > $this->policy['limiter_wait'] - $waited) {
+                // The configured request limit is used up for longer: retry later instead of failing.
+                $this->logger->info('Embedding rate limit reached, deferring', [
+                    'waited_seconds' => $waited,
+                    'retry_after_seconds' => max(1, $available),
+                ]);
+                throw new EmbeddingRateLimitedException(max(1, $available));
             }
 
-            $waitSeconds = max(
-                self::RATE_LIMIT_POLL_SECONDS,
-                min($this->rateLimitService->getSecondsUntilAvailable(RateLimitService::ENDPOINT_EMBEDDINGS), 10)
-            );
+            $waitSeconds = max(self::RATE_LIMIT_POLL_SECONDS, min($available, 10));
 
             $this->logger->info('Embedding batch waiting for embedding endpoint rate limit capacity', [
                 'waited_seconds' => $waited,

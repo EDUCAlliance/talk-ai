@@ -37,11 +37,10 @@ class RagRetriever {
             return [];
         }
 
-        $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel, ['purpose' => 'rag_query', 'bot_id' => $botId]);
-        if (count($vectorList) === 0) {
+        $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'rag_query', 'bot_id' => $botId]);
+        if ($queryVector === []) {
             return [];
         }
-        $queryVector = $vectorList[0];
 
         $scored = [];
         foreach ($embeddings as $embedding) {

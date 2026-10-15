@@ -337,6 +337,105 @@ class EmbeddingClientTest extends TestCase {
         $this->assertSame([1, 2], $delays);
     }
 
+    public function testQueryDefersAPauseThatIndexingWouldWaitInline(): void {
+        $failure = $this->httpException(429, $this->response('', 429, ['Retry-After' => '20']));
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->once())->method('post')->willThrowException($failure);
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+        $delays = [];
+
+        try {
+            $this->createEmbeddingClient($client, $rateLimitService, $this->createMock(LoggerInterface::class),
+                static function (int $seconds) use (&$delays): void {
+                    $delays[] = $seconds;
+                })->embedQuery('probe');
+            $this->fail('Expected a deferred retry');
+        } catch (EmbeddingRateLimitedException $caught) {
+            $this->assertSame(20, $caught->getRetryAfterSeconds());
+        }
+        $this->assertSame([], $delays);
+    }
+
+    public function testQueryWaitsAShortPauseAndUsesAShortTimeout(): void {
+        $failure = $this->httpException(429, $this->response('', 429, ['Retry-After' => '3']));
+        $timeouts = [];
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->exactly(2))->method('post')
+            ->willReturnCallback(function (string $url, array $options) use ($failure, &$timeouts): IResponse {
+                $timeouts[] = $options['timeout'];
+                if (count($timeouts) === 1) {
+                    throw $failure;
+                }
+                return $this->embeddingResponse();
+            });
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+        $delays = [];
+
+        $vector = $this->createEmbeddingClient($client, $rateLimitService, $this->createMock(LoggerInterface::class),
+            static function (int $seconds) use (&$delays): void {
+                $delays[] = $seconds;
+            })->embedQuery('probe');
+
+        $this->assertSame([0.1, 0.2, 0.3], $vector);
+        $this->assertSame([3], $delays);
+        $this->assertSame([30, 30], $timeouts);
+    }
+
+    public function testQueryMakesAtMostTwoRequestsOnServerErrors(): void {
+        $failure = $this->httpException(502, $this->response('', 502));
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->exactly(2))->method('post')->willThrowException($failure);
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+
+        $this->expectExceptionObject($failure);
+        $this->createEmbeddingClient($client, $rateLimitService, $this->createMock(LoggerInterface::class), static function (int $seconds): void {
+        })->embedQuery('probe');
+    }
+
+    public function testLongRetryAfterOnAServerErrorIsDeferredNotWaitedInline(): void {
+        $failure = $this->httpException(500, $this->response('', 500, ['Retry-After' => '60']));
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->once())->method('post')->willThrowException($failure);
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(false);
+        $delays = [];
+
+        try {
+            $this->createEmbeddingClient($client, $rateLimitService, $this->createMock(LoggerInterface::class),
+                static function (int $seconds) use (&$delays): void {
+                    $delays[] = $seconds;
+                })->embedTexts(['probe']);
+            $this->fail('Expected a deferred retry');
+        } catch (EmbeddingRateLimitedException $caught) {
+            $this->assertSame(60, $caught->getRetryAfterSeconds());
+        }
+        $this->assertSame([], $delays);
+    }
+
+    public function testExhaustedLocalRateLimitDefersInsteadOfFailing(): void {
+        $client = $this->createMock(IClient::class);
+        $client->expects($this->never())->method('post');
+        $rateLimitService = $this->createMock(RateLimitService::class);
+        $rateLimitService->method('isEnabled')->willReturn(true);
+        $rateLimitService->method('canProcess')->willReturn(false);
+        $rateLimitService->method('getSecondsUntilAvailable')->willReturn(1800);
+        $delays = [];
+
+        try {
+            $this->createEmbeddingClient($client, $rateLimitService, $this->createMock(LoggerInterface::class),
+                static function (int $seconds) use (&$delays): void {
+                    $delays[] = $seconds;
+                })->embedTexts(['probe']);
+            $this->fail('Expected a deferred retry');
+        } catch (EmbeddingRateLimitedException $caught) {
+            $this->assertSame(1800, $caught->getRetryAfterSeconds());
+        }
+        $this->assertSame([], $delays);
+    }
+
     public function testFailureLogNamesProviderErrorIdentifiersAndCallerContextButNoText(): void {
         $body = json_encode(['error' => [
             'message' => 'Input contains the private sentence from the document',

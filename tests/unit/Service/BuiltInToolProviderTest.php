@@ -156,9 +156,9 @@ class BuiltInToolProviderTest extends TestCase {
 			->with(7, 'room-a', 'embed-model')
 			->willReturn([$embedding]);
 		$embeddingClient->expects($this->once())
-			->method('embedTexts')
-			->with(['deadline'], 'embed-model')
-			->willReturn([[1.0, 0.0]]);
+			->method('embedQuery')
+			->with('deadline', 'embed-model')
+			->willReturn([1.0, 0.0]);
 
 		$result = $provider->executeTool(BuiltInToolProvider::TOOL_ROOM_SEARCH, [
 			'query' => 'deadline',
@@ -207,9 +207,9 @@ class BuiltInToolProviderTest extends TestCase {
 			->with(7, 'room-a', 'embed-model')
 			->willReturn([$currentDocumentEmbedding, $otherDocumentEmbedding]);
 		$embeddingClient->expects($this->once())
-			->method('embedTexts')
-			->with(['deadline'], 'embed-model')
-			->willReturn([[1.0, 0.0]]);
+			->method('embedQuery')
+			->with('deadline', 'embed-model')
+			->willReturn([1.0, 0.0]);
 
 		$result = $provider->executeTool(BuiltInToolProvider::TOOL_ROOM_SEARCH, [
 			'query' => 'deadline',
@@ -250,9 +250,9 @@ class BuiltInToolProviderTest extends TestCase {
 			->with(7, 'room-a', 'embed-model')
 			->willReturn([$embedding]);
 		$embeddingClient->expects($this->once())
-			->method('embedTexts')
-			->with(['meeting notes'], 'embed-model')
-			->willReturn([[1.0, 0.0]]);
+			->method('embedQuery')
+			->with('meeting notes', 'embed-model')
+			->willReturn([1.0, 0.0]);
 
 		$result = $provider->executeTool(BuiltInToolProvider::TOOL_ROOM_SEARCH, [
 			'query' => 'meeting notes',
@@ -295,9 +295,9 @@ class BuiltInToolProviderTest extends TestCase {
 			->with(7, 'room-a', 'embed-model')
 			->willReturn([$embedding]);
 		$embeddingClient->expects($this->once())
-			->method('embedTexts')
-			->with(['login error'], 'embed-model')
-			->willReturn([[1.0, 0.0]]);
+			->method('embedQuery')
+			->with('login error', 'embed-model')
+			->willReturn([1.0, 0.0]);
 
 		$result = $provider->executeTool(BuiltInToolProvider::TOOL_ROOM_IMAGE_SEARCH, [
 			'query' => 'login error',
@@ -327,7 +327,7 @@ class BuiltInToolProviderTest extends TestCase {
 		$embeddingMapper->expects($this->never())->method('findByBotAndModel');
 		$embeddingClient = $this->createMock(EmbeddingClient::class);
 		$embeddingClient->method('getActiveModel')->willReturn('embed-model');
-		$embeddingClient->expects($this->never())->method('embedTexts');
+		$embeddingClient->expects($this->never())->method('embedQuery');
 		$provider = $this->createProvider(embeddingClient: $embeddingClient, embeddingMapper: $embeddingMapper);
 		$provider->setInvocationContext(['bot_id' => 7, 'room_token' => 'room-a', 'attachments' => [], 'document_source_ids' => []]);
 
@@ -345,8 +345,8 @@ class BuiltInToolProviderTest extends TestCase {
 		$embeddingMapper->method('findRetrievableByBotAndModel')->willReturn([$embedding]);
 		$embeddingClient = $this->createMock(EmbeddingClient::class);
 		$embeddingClient->method('getActiveModel')->willReturn('embed-model');
-		$embeddingClient->expects($this->once())->method('embedTexts')
-			->with(['holidays'], 'embed-model', ['purpose' => 'rag_query', 'bot_id' => 7])
+		$embeddingClient->expects($this->once())->method('embedQuery')
+			->with('holidays', 'embed-model', ['purpose' => 'rag_query', 'bot_id' => 7])
 			->willThrowException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(150));
 		$provider = $this->createProvider(embeddingClient: $embeddingClient, embeddingMapper: $embeddingMapper);
 		$provider->setInvocationContext(['bot_id' => 7, 'room_token' => 'room-a', 'attachments' => [], 'document_source_ids' => []]);

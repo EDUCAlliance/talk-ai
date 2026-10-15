@@ -545,8 +545,8 @@ class BuiltInToolProvider {
             }
 
             // Generate embedding for the query
-            $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel, ['purpose' => 'rag_query', 'bot_id' => $botId]);
-            if (count($vectorList) === 0) {
+            $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'rag_query', 'bot_id' => $botId]);
+            if ($queryVector === []) {
                 return [
                     'content' => [
                         [
@@ -557,7 +557,6 @@ class BuiltInToolProvider {
                     'isError' => true,
                 ];
             }
-            $queryVector = $vectorList[0];
 
             // Calculate similarity scores for all chunks
             $scored = [];
@@ -710,12 +709,11 @@ class BuiltInToolProvider {
                 return $this->textResponse('No chat-uploaded documents have been indexed for this room yet.');
             }
 
-            $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-            if ($vectorList === []) {
+            $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'room_document_query']);
+            if ($queryVector === []) {
                 return $this->errorResponse('Error: Failed to generate embedding for the room search query.');
             }
 
-            $queryVector = $vectorList[0];
             $scored = $this->scoreRoomEmbeddings($embeddings, $queryVector, $minScore);
 
             if ($scored === [] && $currentDocumentSourceIds !== [] && $fallbackMinScore < $minScore) {
@@ -857,12 +855,11 @@ class BuiltInToolProvider {
                 return $this->textResponse('No image attachments have been indexed for this room yet.');
             }
 
-            $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-            if ($vectorList === []) {
+            $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'room_image_query']);
+            if ($queryVector === []) {
                 return $this->errorResponse('Error: Failed to generate embedding for the room image search query.');
             }
 
-            $queryVector = $vectorList[0];
             $scored = $this->scoreRoomImageEmbeddings($embeddings, $queryVector, $minScore, null, $imageName);
 
             if ($scored === [] && $currentImageSourceIds !== [] && $fallbackMinScore < $minScore) {

@@ -190,7 +190,7 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 
 	public function testSearchUsesOnlyMatchingModelAndIgnoresWrongDimensionVectors(): void {
 		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
-		$this->embeddings->method('embedTexts')->with(['physics'], 'embedding-v2')->willReturn([[1.0, 0.0]]);
+		$this->embeddings->method('embedQuery')->with('physics', 'embedding-v2')->willReturn([1.0, 0.0]);
 		$matching = new CatalogueEmbedding();
 		$matching->setCourseData('{"id":42,"title":"Physics"}');
 		$matching->setEmbedding('[1.0,0.0]');
