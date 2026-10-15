@@ -610,7 +610,8 @@ class Application extends App implements IBootstrap {
 				$c->get(\OCP\IDBConnection::class),
 				$c->get(\OCP\IURLGenerator::class),
 				$c->get(\Psr\Log\LoggerInterface::class),
-				$c->get(TraceService::class)
+				$c->get(TraceService::class),
+				$c->get(IL10N::class)
 			);
 		});
 

@@ -4137,3 +4137,16 @@ msgstr "Die Indizierung wurde unterbrochen, zum Beispiel durch einen Serverneust
 #: lib/Controller/SettingsController.php
 msgid "The chunk overlap must be smaller than the chunk size."
 msgstr "Die Chunk-Überlappung muss kleiner als die Chunk-Größe sein."
+
+#: lib/Webhook/TalkHandler.php
+#, php-format
+msgid "Attachment indexing is temporarily rate limited. Please try again in %s seconds."
+msgstr "Das Anfragelimit für die Indexierung von Anhängen ist vorübergehend erreicht. Bitte versuche es in %s Sekunden erneut."
+
+#: lib/Webhook/TalkHandler.php
+msgid "The uploaded image could not be indexed. Please try uploading it again later."
+msgstr "Das hochgeladene Bild konnte nicht indexiert werden. Bitte lade es später erneut hoch."
+
+#: lib/Webhook/TalkHandler.php
+msgid "The uploaded document could not be indexed. Please try uploading it again later."
+msgstr "Das hochgeladene Dokument konnte nicht indexiert werden. Bitte lade es später erneut hoch."

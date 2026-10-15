@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Webhook;
 
+use OCA\EducAI\Service\MetadataFileFilter;
+
 class TalkAttachmentNormalizer {
 	/**
 	 * @param array<string,mixed> $parameters
@@ -33,6 +35,15 @@ class TalkAttachmentNormalizer {
 		$sharedItemType = $this->resolveSharedItemType($parameter);
 		$mimeType = $this->resolveMimeType($parameter);
 		$displayName = $this->resolveDisplayName($parameter, $parameterKey);
+
+		$metadataCandidates = [$displayName, $parameter['name'] ?? null, $parameter['path'] ?? null];
+		if (is_array($parameter['file'] ?? null)) {
+			$metadataCandidates[] = $parameter['file']['name'] ?? null;
+			$metadataCandidates[] = $parameter['file']['path'] ?? null;
+		}
+		if (array_filter($metadataCandidates, static fn ($name): bool => is_string($name) && MetadataFileFilter::isMetadataPath($name)) !== []) {
+			return null;
+		}
 
 		$kind = $this->mapKind($sharedItemType, $mimeType);
 		if ($kind === null) {

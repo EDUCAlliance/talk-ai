@@ -9,6 +9,7 @@ use OCA\EducAI\Db\RoomImageEmbedding;
 use OCA\EducAI\Db\RoomImageEmbeddingMapper;
 use OCA\EducAI\Db\RoomImageSource;
 use OCA\EducAI\Db\RoomImageSourceMapper;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\Files\File;
 use Psr\Log\LoggerInterface;
@@ -102,19 +103,19 @@ class RoomImageIngestionService {
 			$source = $this->sourceMapper->update($source);
 		}
 
-		if (
-			$source->getChecksum() === $checksum
-			&& $source->getAnalysisText() !== null
-			&& trim($source->getAnalysisText()) !== ''
-		) {
-			$this->ensureEmbedding($source, $source->getAnalysisText(), $now, false);
-			$source->setStatus('ready');
-			$source->setLastIndexedAt($now);
-			$source->setUpdatedAt($now);
-			return $this->sourceMapper->update($source);
-		}
-
 		try {
+			if (
+				$source->getChecksum() === $checksum
+				&& $source->getAnalysisText() !== null
+				&& trim($source->getAnalysisText()) !== ''
+			) {
+				$this->ensureEmbedding($source, $source->getAnalysisText(), $now, false);
+				$source->setStatus('ready');
+				$source->setLastIndexedAt($now);
+				$source->setUpdatedAt($now);
+				return $this->sourceMapper->update($source);
+			}
+
 			$resolved = $this->attachmentResolver->resolveToTempFile($attachment);
 			try {
 				$analysis = $this->visionClient->analyzeImage(
@@ -140,8 +141,11 @@ class RoomImageIngestionService {
 
 			return $this->sourceMapper->update($source);
 		} catch (Exception $e) {
+			$this->embeddingMapper->deleteBySource($source->getId());
 			$source->setStatus('error');
-			$source->setErrorMessage($e->getMessage());
+			$source->setLastIndexedAt($now);
+			$source->setErrorMessage($e instanceof EmbeddingRateLimitedException ? 'Embedding provider rate limited' : 'Image indexing failed');
+			$this->logger->error('Room image indexing failed', ['source_id' => $source->getId(), 'exception' => $e]);
 			$source->setUpdatedAt($now);
 			$this->sourceMapper->update($source);
 			throw $e;
@@ -217,14 +221,19 @@ class RoomImageIngestionService {
 	}
 
 	private function ensureEmbedding(RoomImageSource $source, string $analysis, int $now, bool $rebuild): void {
-		if (!$rebuild && $this->embeddingMapper->findBySource($source->getId()) !== []) {
-			return;
-		}
-
 		$embeddingModel = $this->embeddingClient->getActiveModel();
+		if (!$rebuild) {
+			foreach ($this->embeddingMapper->findBySource($source->getId()) as $embedding) {
+				if ($embedding->getEmbeddingModel() === $embeddingModel
+					&& $embedding->getChunkText() === $analysis
+					&& is_array($vector = json_decode($embedding->getEmbedding(), true)) && $vector !== []) {
+					return;
+				}
+			}
+		}
 		$vectors = $this->embeddingClient->embedTexts([$analysis], $embeddingModel);
 		$vector = $vectors[0] ?? null;
-		if (!is_array($vector)) {
+		if (!is_array($vector) || $vector === []) {
 			throw new Exception('Failed to generate embedding for image analysis');
 		}
 

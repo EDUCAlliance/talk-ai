@@ -1,6 +1,9 @@
 OC.L10N.register(
     "educai",
     {
+    "Attachment indexing is temporarily rate limited. Please try again in %s seconds." : "Das Anfragelimit für die Indexierung von Anhängen ist vorübergehend erreicht. Bitte versuche es in %s Sekunden erneut.",
+    "The uploaded image could not be indexed. Please try uploading it again later." : "Das hochgeladene Bild konnte nicht indexiert werden. Bitte lade es später erneut hoch.",
+    "The uploaded document could not be indexed. Please try uploading it again later." : "Das hochgeladene Dokument konnte nicht indexiert werden. Bitte lade es später erneut hoch.",
     "Authentication failed. Check the saved provider credentials." : "Anmeldung fehlgeschlagen. Prüfe die gespeicherten Zugangsdaten des Anbieters.",
     "This provider does not expose a model list at the configured endpoint." : "Dieser Anbieter stellt unter dem konfigurierten Endpunkt keine Modellliste bereit.",
     "The provider rate limit was reached. The list will be retried shortly." : "Das Anfragelimit des Anbieters ist erreicht. Die Liste wird in Kürze erneut abgerufen.",

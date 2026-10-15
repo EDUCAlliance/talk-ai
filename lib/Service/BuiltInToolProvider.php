@@ -676,12 +676,12 @@ class BuiltInToolProvider {
         $botId = $this->currentInvocationContext['bot_id'];
         $roomToken = $this->currentInvocationContext['room_token'];
         if ($botId === null || $roomToken === null || $roomToken === '') {
-            return $this->errorResponse('Error: No room context available for room document search.');
+            return $this->errorResponse('Error: No room context available for room document search.', 'room_context_missing');
         }
 
         $query = isset($arguments['query']) && is_string($arguments['query']) ? trim($arguments['query']) : '';
         if ($query === '') {
-            return $this->errorResponse('Error: query parameter is required for room document search.');
+            return $this->errorResponse('Error: query parameter is required for room document search.', 'invalid_arguments');
         }
 
         $limit = isset($arguments['limit']) && is_numeric($arguments['limit'])
@@ -710,7 +710,7 @@ class BuiltInToolProvider {
 
             $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'room_document_query']);
             if ($queryVector === []) {
-                return $this->errorResponse('Error: Failed to generate embedding for the room search query.');
+                return $this->errorResponse('Error: Failed to generate embedding for the room search query.', 'embedding_failed');
             }
 
             $scored = $this->scoreRoomEmbeddings($embeddings, $queryVector, $minScore);
@@ -736,6 +736,12 @@ class BuiltInToolProvider {
             return $this->textResponse(
                 $this->buildRoomSearchResultText($results, $query, count($scored) - count($results))
             );
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Room document search is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Room document search failed', [
                 'bot_id' => $botId,
@@ -743,7 +749,7 @@ class BuiltInToolProvider {
                 'query' => $query,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error searching room documents: ' . $e->getMessage());
+            return $this->errorResponse('Room document search failed. Please try again later.', 'search_failed');
         }
     }
 
@@ -821,12 +827,12 @@ class BuiltInToolProvider {
         $botId = $this->currentInvocationContext['bot_id'];
         $roomToken = $this->currentInvocationContext['room_token'];
         if ($botId === null || $roomToken === null || $roomToken === '') {
-            return $this->errorResponse('Error: No room context available for room image search.');
+            return $this->errorResponse('Error: No room context available for room image search.', 'room_context_missing');
         }
 
         $query = isset($arguments['query']) && is_string($arguments['query']) ? trim($arguments['query']) : '';
         if ($query === '') {
-            return $this->errorResponse('Error: query parameter is required for room image search.');
+            return $this->errorResponse('Error: query parameter is required for room image search.', 'invalid_arguments');
         }
 
         $limit = isset($arguments['limit']) && is_numeric($arguments['limit'])
@@ -856,7 +862,7 @@ class BuiltInToolProvider {
 
             $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'room_image_query']);
             if ($queryVector === []) {
-                return $this->errorResponse('Error: Failed to generate embedding for the room image search query.');
+                return $this->errorResponse('Error: Failed to generate embedding for the room image search query.', 'embedding_failed');
             }
 
             $scored = $this->scoreRoomImageEmbeddings($embeddings, $queryVector, $minScore, null, $imageName);
@@ -883,6 +889,12 @@ class BuiltInToolProvider {
             return $this->textResponse(
                 $this->buildRoomImageSearchResultText($results, $query, count($scored) - count($results))
             );
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Room image search is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Room image search failed', [
                 'bot_id' => $botId,
@@ -890,7 +902,7 @@ class BuiltInToolProvider {
                 'query' => $query,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error searching room images: ' . $e->getMessage());
+            return $this->errorResponse('Room image search failed. Please try again later.', 'search_failed');
         }
     }
 
@@ -989,12 +1001,16 @@ class BuiltInToolProvider {
     private function executeAttachmentImageAnalysis(array $arguments): array {
         $attachment = $this->resolveAttachmentByKind(IncomingTalkAttachment::KIND_IMAGE, $arguments['attachment_name'] ?? null);
         if (!$attachment instanceof IncomingTalkAttachment) {
-            return $this->errorResponse('Error: No image attachment from the current message is available for analysis.');
+            return $this->errorResponse('Error: No image attachment from the current message is available for analysis.', 'attachment_not_found');
         }
 
         $question = isset($arguments['question']) && is_string($arguments['question']) && trim($arguments['question']) !== ''
             ? trim($arguments['question'])
             : 'Describe this image in detail and highlight any relevant text or visual details.';
+
+        if (!$this->visionClient->isEnabled() || MetadataFileFilter::isMetadataPath($attachment->getDisplayName())) {
+            return $this->errorResponse('Image attachment analysis is not available for this attachment.', 'attachment_unsupported');
+        }
 
         try {
             $resolved = $this->attachmentResolver->resolveToTempFile($attachment);
@@ -1005,19 +1021,29 @@ class BuiltInToolProvider {
             }
 
             return $this->textResponse("Image analysis for {$attachment->getDisplayName()}:\n\n" . $analysis);
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Attachment processing is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Image attachment analysis failed', [
                 'attachment' => $attachment->getDisplayName(),
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error analyzing image attachment: ' . $e->getMessage());
+            return $this->errorResponse('The image attachment could not be analyzed. Please try uploading it again.', 'attachment_processing_failed');
         }
     }
 
     private function executeAttachmentAudioTranscription(array $arguments): array {
         $attachment = $this->resolveAttachmentByKind(IncomingTalkAttachment::KIND_AUDIO, $arguments['attachment_name'] ?? null);
         if (!$attachment instanceof IncomingTalkAttachment) {
-            return $this->errorResponse('Error: No audio attachment from the current message is available for transcription.');
+            return $this->errorResponse('Error: No audio attachment from the current message is available for transcription.', 'attachment_not_found');
+        }
+
+        if (!$this->speechToTextClient->isEnabled() || MetadataFileFilter::isMetadataPath($attachment->getDisplayName())) {
+            return $this->errorResponse('Audio attachment transcription is not available for this attachment.', 'attachment_unsupported');
         }
 
         try {
@@ -1033,12 +1059,18 @@ class BuiltInToolProvider {
             }
 
             return $this->textResponse("Transcript for {$attachment->getDisplayName()}:\n\n" . $transcript);
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Attachment processing is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Audio attachment transcription failed', [
                 'attachment' => $attachment->getDisplayName(),
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error transcribing audio attachment: ' . $e->getMessage());
+            return $this->errorResponse('The audio attachment could not be transcribed. Please try uploading it again.', 'attachment_processing_failed');
         }
     }
 

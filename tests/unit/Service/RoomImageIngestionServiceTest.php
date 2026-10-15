@@ -111,10 +111,15 @@ class RoomImageIngestionServiceTest extends TestCase {
 			->willReturnCallback(static fn (RoomImageSource $source): RoomImageSource => $source);
 		$visionClient->method('isEnabled')->willReturn(true);
 		$visionClient->expects($this->never())->method('analyzeImage');
+		$embeddingClient->method('getActiveModel')->willReturn('embed-model');
+		$existingEmbedding = new RoomImageEmbedding();
+		$existingEmbedding->setEmbeddingModel('embed-model');
+		$existingEmbedding->setChunkText('Existing analysis');
+		$existingEmbedding->setEmbedding('[1,0]');
 		$embeddingMapper->expects($this->once())
 			->method('findBySource')
 			->with(77)
-			->willReturn([new RoomImageEmbedding()]);
+			->willReturn([$existingEmbedding]);
 		$embeddingClient->expects($this->never())->method('embedTexts');
 
 		$service = new RoomImageIngestionService(

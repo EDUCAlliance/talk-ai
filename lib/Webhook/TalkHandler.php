@@ -7,8 +7,10 @@ namespace OCA\EducAI\Webhook;
 use Exception;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\ChatRoom;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCA\EducAI\Exception\InvalidWebhookException;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\MetadataFileFilter;
 use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
 use OCA\EducAI\Service\RoomImageIngestionService;
@@ -18,6 +20,7 @@ use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Http\Client\IClientService;
 use OCP\IDBConnection;
+use OCP\IL10N;
 use OCP\IURLGenerator;
 use Psr\Log\LoggerInterface;
 
@@ -49,6 +52,7 @@ class TalkHandler {
 	private IURLGenerator $urlGenerator;
 	private LoggerInterface $logger;
 	private ?TraceService $traceService;
+	private ?IL10N $l10n;
 
 	public function __construct(
 		BotService $botService,
@@ -62,6 +66,7 @@ class TalkHandler {
 		IURLGenerator $urlGenerator,
 		LoggerInterface $logger,
 		?TraceService $traceService = null,
+		?IL10N $l10n = null,
 	) {
 		$this->botService = $botService;
 		$this->settingsService = $settingsService;
@@ -74,6 +79,7 @@ class TalkHandler {
 		$this->urlGenerator = $urlGenerator;
 		$this->logger = $logger;
 		$this->traceService = $traceService;
+		$this->l10n = $l10n;
 	}
 
 	/**
@@ -461,6 +467,7 @@ class TalkHandler {
 			$isAttachmentOnly = trim($message) === '';
 			$messageContext['context']['attachment_only'] = $isAttachmentOnly;
 			$effectiveMessage = !$isAttachmentOnly ? $message : $this->buildAttachmentOnlyPrompt($incomingMessage);
+			$effectiveMessage = $this->appendEmptyAttachmentNotice($effectiveMessage, $messageContext['empty_document_names']);
 			$this->processNormalMessage($effectiveBot, $room, $roomToken, $userId, $effectiveMessage, $replyTargetId, null, $incomingMessage, $messageContext['context'], $threadRootMessageId);
 			return;
 		}
@@ -533,6 +540,7 @@ class TalkHandler {
 			$cleanMessage = $this->buildAttachmentOnlyPrompt($incomingMessage);
 		}
 
+		$cleanMessage = $this->appendEmptyAttachmentNotice($cleanMessage, $messageContext['empty_document_names']);
 		$this->processNormalMessage($effectiveBot, $room, $roomToken, $userId, $cleanMessage, $replyTargetId, $message, $incomingMessage, $messageContext['context'], $threadRootMessageId);
 	}
 
@@ -936,6 +944,7 @@ class TalkHandler {
 	/**
 	 * @return array{
 	 *   context: MessageContext,
+	 *   empty_document_names?:array<int,string>,
 	 *   capability_error:?string
 	 * }
 	 */
@@ -946,7 +955,7 @@ class TalkHandler {
 		int $messageId,
 		IncomingTalkMessage $incomingMessage
 	): array {
-		$attachments = $incomingMessage->getAttachments();
+		$attachments = array_values(array_filter($incomingMessage->getAttachments(), static fn (IncomingTalkAttachment $attachment): bool => !MetadataFileFilter::isMetadataPath($attachment->getDisplayName())));
 		if ($attachments === []) {
 			return [
 				'context' => [
@@ -955,6 +964,7 @@ class TalkHandler {
 					'image_source_ids' => [],
 					'attachment_only' => false,
 				],
+				'empty_document_names' => [],
 				'capability_error' => null,
 			];
 		}
@@ -967,6 +977,8 @@ class TalkHandler {
 
 		$documentSourceIds = [];
 		$imageSourceIds = [];
+		$emptyDocumentNames = [];
+		$emptyAttachments = [];
 
 		foreach ($attachments as $attachment) {
 			if (!$attachment->isSupported()) {
@@ -1026,7 +1038,14 @@ class TalkHandler {
 						$messageId,
 						$attachment
 					);
-					$documentSourceIds[] = $source->getId();
+					if ($source->getStatus() === 'empty') {
+						$emptyDocumentNames[] = $attachment->getDisplayName();
+						$emptyAttachments[] = $attachment;
+					} elseif ($source->getStatus() !== 'skipped') {
+						$documentSourceIds[] = $source->getId();
+					} else {
+						$emptyAttachments[] = $attachment;
+					}
 				} catch (Exception $e) {
 					$this->logger->error('Failed to ingest room document attachment', [
 						'bot_id' => $bot->getId(),
@@ -1042,7 +1061,7 @@ class TalkHandler {
 							'image_source_ids' => [],
 							'attachment_only' => false,
 						],
-						'capability_error' => 'The uploaded document could not be indexed for this bot: ' . $e->getMessage(),
+						'capability_error' => $this->roomIngestionError($e, false),
 					];
 				}
 			}
@@ -1072,7 +1091,7 @@ class TalkHandler {
 							'image_source_ids' => [],
 							'attachment_only' => false,
 						],
-						'capability_error' => 'The uploaded image could not be indexed for this bot: ' . $e->getMessage(),
+						'capability_error' => $this->roomIngestionError($e, true),
 					];
 				}
 			}
@@ -1080,13 +1099,39 @@ class TalkHandler {
 
 		return [
 			'context' => [
-				'attachments' => $attachments,
+				'attachments' => array_values(array_filter($attachments, static fn (IncomingTalkAttachment $attachment): bool => !in_array($attachment, $emptyAttachments, true))),
 				'document_source_ids' => $documentSourceIds,
 				'image_source_ids' => $imageSourceIds,
 				'attachment_only' => false,
 			],
+			'empty_document_names' => $emptyDocumentNames,
 			'capability_error' => null,
 		];
+	}
+
+	private function roomIngestionError(Exception $e, bool $image): string {
+		if ($e instanceof EmbeddingRateLimitedException) {
+			return $this->l10n?->t('Attachment indexing is temporarily rate limited. Please try again in %s seconds.', [$e->getRetryAfterSeconds()])
+				?? sprintf('Attachment indexing is temporarily rate limited. Please try again in %s seconds.', $e->getRetryAfterSeconds());
+		}
+		if ($image) {
+			return $this->l10n?->t('The uploaded image could not be indexed. Please try uploading it again later.')
+				?? 'The uploaded image could not be indexed. Please try uploading it again later.';
+		}
+		return $this->l10n?->t('The uploaded document could not be indexed. Please try uploading it again later.')
+			?? 'The uploaded document could not be indexed. Please try uploading it again later.';
+	}
+
+	/**
+	 * @param array<int,string> $names
+	 */
+	private function appendEmptyAttachmentNotice(string $message, array $names): string {
+		if ($names === []) {
+			return $message;
+		}
+		return $message . "\n\n[Attachment processing result: the following uploaded documents contained no readable text and were not indexed: "
+			. json_encode($names, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+			. '. Tell the user that these files had no readable text; do not infer their contents from older search results.]';
 	}
 
 	private function buildAttachmentOnlyPrompt(IncomingTalkMessage $incomingMessage): string {
