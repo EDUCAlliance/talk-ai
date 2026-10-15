@@ -25,6 +25,8 @@ class WikiService {
 	private const MAX_LIST_FILES = 5000;
 	private const DEFAULT_LIST_LIMIT = 50;
 	private const MAX_LIST_LIMIT = 100;
+	/** Web address of a Collectives page: collective segment, title path, query, fragment. */
+	private const COLLECTIVES_URL_PATTERN = '#^(?:https?://[^/\s]+)?(?:/index\.php)?/apps/collectives/([^/?\#\s]+)/?([^?\#\s]*)(\?[^\#\s]*)?(\#\S*)?$#i';
 	private const MAX_REPORTED_BROKEN_LINKS = 20;
 	private const DEFAULT_READ_LIMIT = 3000;
 	private const MAX_READ_LIMIT = 3500;
@@ -184,10 +186,16 @@ class WikiService {
 			$layout = $collective
 				? $this->planCollectivePage($wikiRoot, $pagePath)
 				: ['path' => $pagePath, 'parent' => null, 'moves' => [], 'warnings' => []];
+			[$content, $linkedById] = $this->linkWikiPages($wikiRoot, $layout['path'], $content, $collective, $context['collective_url_path'] ?? null, $pagePath);
+			$this->assertTextSize($content);
+			$isNewPage = $this->getNodeOrNull($wikiRoot, $layout['path']) === null && !in_array($layout['path'], array_column($layout['moves'], 'to'), true);
 			$this->preflightWrite($wikiRoot, $layout['path'], $layout['moves'], $mode, $content);
 			$warnings = $layout['warnings'];
 			$converted = $this->applyCollectiveMoves($wikiRoot, $layout['moves'], $warnings);
 			$file = $this->writeRelativeFile($wikiRoot, $layout['path'], $content, $mode);
+			$backLinked = $isNewPage
+				? $this->linkForwardReferences($wikiRoot, $layout['path'], $file, $collective, $context['collective_url_path'] ?? null, $warnings)
+				: [];
 
 			$result = [
 				'success' => true,
@@ -203,6 +211,13 @@ class WikiService {
 			}
 			if ($collective) {
 				$result['parent_page'] = $layout['parent'];
+			}
+			if ($linkedById > 0) {
+				// Collectives opens pages by ID; plain "page.md" links end on "page not found".
+				$result['links_with_page_id'] = $linkedById;
+			}
+			if ($backLinked !== []) {
+				$result['pages_linked_to_this_page'] = $backLinked;
 			}
 			$events = [['action' => $mode === 'append' ? 'appended' : ($mode === 'overwrite' ? 'overwritten' : 'created'), 'path' => $layout['path']]];
 			$this->logPageChanges($wikiRoot, $events, $warnings);
@@ -537,7 +552,7 @@ class WikiService {
 	/**
 	 * @param array{owner_uid:string,root_path:string,visibility:string,bot:Bot,location:string,collective_id:?int} $context
 	 */
-	private function ensureWikiRoot(array $context): Folder {
+	private function ensureWikiRoot(array &$context): Folder {
 		if ($context['location'] === 'collective') {
 			if ($this->wikiLocationService === null || $context['collective_id'] === null) {
 				throw new WikiException(WikiException::WIKI_UNAVAILABLE, 'Collective wiki locations are not available.');
@@ -547,8 +562,8 @@ class WikiService {
 			} catch (Exception $e) {
 				throw $this->locationError($e, 'The selected collective cannot be used as wiki location right now: it may have been deleted, or the bot owner is no longer a collective admin with edit rights. Ask the bot owner to check the wiki settings.');
 			}
-			$context['root_path'] = $resolved['label'];
-			$this->ensureDefaultFiles($resolved['folder'], $context);
+			$context['collective_url_path'] = $resolved['url_path'] ?? null;
+			$this->ensureDefaultFiles($resolved['folder'], ['root_path' => $resolved['label']] + $context);
 			return $resolved['folder'];
 		}
 
@@ -642,6 +657,7 @@ class WikiService {
 				'path' => $path,
 				'title' => $this->extractIndexTitle($path, $content),
 				'size' => $file->getSize(),
+				'file_id' => (int)$file->getId(),
 			];
 		}
 
@@ -665,7 +681,8 @@ class WikiService {
 		} else {
 			foreach ($entries as $entry) {
 				$title = $entry['title'] !== '' ? $entry['title'] : $entry['path'];
-				$line = '- [' . $this->escapeMarkdownLinkText($title) . '](' . $this->encodeMarkdownLinkTarget($entry['path']) . ')';
+				$target = $this->encodeMarkdownLinkTarget($entry['path']) . (($entry['file_id'] ?? 0) > 0 ? '?fileId=' . $entry['file_id'] : '');
+				$line = '- [' . $this->escapeMarkdownLinkText($title) . '](' . $target . ')';
 				if ($title !== $entry['path']) {
 					$line .= ' - `' . $entry['path'] . '`';
 				}
@@ -1140,7 +1157,8 @@ class WikiService {
 			if ($moved instanceof File) {
 				$content = (string)$moved->getContent();
 				[$rebasedContent, $rebased] = $this->rebaseRelativeLinks($content);
-				if ($rebased > 0) {
+				[$rebasedContent, $linkedById] = $this->linkWikiPages($wikiRoot, $move['to'], $rebasedContent, true, null);
+				if ($rebased > 0 || $linkedById > 0) {
 					$moved->putContent($rebasedContent);
 					$this->textSessionResetService->resetFileSession($moved);
 					$this->verifyContent($moved, $rebasedContent, $move['to']);
@@ -1275,8 +1293,23 @@ class WikiService {
 			$raw = trim($match['raw']);
 			$angled = str_starts_with($raw, '<') && str_ends_with($raw, '>');
 			$target = $angled ? substr($raw, 1, -1) : $raw;
+			if (preg_match(self::COLLECTIVES_URL_PATTERN, $target) === 1) {
+				// Not resolvable to a page of this wiki, otherwise it would have been rewritten.
+				$checked++;
+				if (count($broken) < self::MAX_REPORTED_BROKEN_LINKS) {
+					$broken[] = ['text' => mb_substr($match['text'], 0, 120), 'target' => mb_substr($target, 0, 300), 'path' => basename((string)parse_url($target, PHP_URL_PATH)) . '.md', 'malformed' => false, 'web_address' => true];
+				}
+				continue;
+			}
 			// External URLs, anchors, absolute app links and mail links are not wiki pages.
 			if ($target === '' || preg_match('/^(?:[a-z][a-z0-9+.\-]*:|#|\/|\?)/i', $target) === 1) {
+				continue;
+			}
+			if (preg_match('/^[^#]*\?(?:[^#]*&)?fileId=(\d+)/', $target, $idMatch) === 1) {
+				$checked++;
+				if ($this->pageById($wikiRoot, (int)$idMatch[1]) === null && count($broken) < self::MAX_REPORTED_BROKEN_LINKS) {
+					$broken[] = ['text' => mb_substr($match['text'], 0, 120), 'target' => mb_substr($target, 0, 300), 'path' => rawurldecode(preg_replace('/[?#].*$/', '', $target) ?? $target), 'malformed' => false];
+				}
 				continue;
 			}
 			$path = rawurldecode(preg_replace('/[?#].*$/', '', $target) ?? $target);
@@ -1330,6 +1363,9 @@ class WikiService {
 			if ($link['wikilink'] ?? false) {
 				$entry['problem'] = 'Nextcloud does not show [[...]] as a link; write a Markdown link [text](target.md).';
 			}
+			if ($link['web_address'] ?? false) {
+				$entry['problem'] = 'Do not link Collectives web addresses; link the page with a relative Markdown link [text](page.md).';
+			}
 			$name = basename($link['path']);
 			$candidates = $byName[$this->nameKey(pathinfo($name, PATHINFO_FILENAME))] ?? [];
 			if (count($candidates) === 1) {
@@ -1355,9 +1391,197 @@ class WikiService {
 	}
 
 	/**
+	 * Collectives opens a page by its ID; a relative "page.md" link ends on "page not
+	 * found" there (and Files rewrites "?fileId=" links to the file). Internal links to
+	 * existing pages therefore get "?fileId=<id>". In a collective the link path starts at
+	 * the collective root, because the browser resolves it against the page address, never
+	 * leaving the collective; on the landing page it starts with the collective's own path.
+	 * Copied Collectives web addresses of pages of this wiki become such links as well.
+	 *
+	 * @param string|null $requestedPath The path the model wrote the page for, if it was stored elsewhere
+	 * @param int|null $onlyFileId Only rewrite links to this page
+	 * @return array{0:string,1:int}
+	 */
+	private function linkWikiPages(Folder $wikiRoot, string $pagePath, string $content, bool $collective, ?string $collectiveUrlPath, ?string $requestedPath = null, ?int $onlyFileId = null): array {
+		$bases = [$this->folderSegments($pagePath)];
+		if ($requestedPath !== null && dirname($requestedPath) !== dirname($pagePath)) {
+			$bases[] = $this->folderSegments($requestedPath);
+		}
+		$landingPage = $collective && $pagePath === self::COLLECTIVE_PARENT_PAGE;
+		$destinations = $this->markdownLinkDestinations($content);
+		usort($destinations, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+		$count = 0;
+		foreach ($destinations as $destination) {
+			if ($destination['image']) {
+				continue;
+			}
+			$raw = $destination['raw'];
+			$trimmed = trim($raw);
+			$angled = str_starts_with($trimmed, '<') && str_ends_with($trimmed, '>');
+			$target = $angled ? substr($trimmed, 1, -1) : $trimmed;
+			$page = $this->resolveLinkedPage($wikiRoot, $bases, $target, $collective);
+			if ($page === null || ($onlyFileId !== null && $page['id'] !== $onlyFileId)) {
+				continue;
+			}
+			$path = $collective
+				? $this->encodeMarkdownLinkTarget($page['path'])
+				: $this->encodeMarkdownLinkTarget($this->relativeLink($bases[0], $page['path']));
+			if ($landingPage && $collectiveUrlPath !== null && $collectiveUrlPath !== '') {
+				$path = rawurlencode($collectiveUrlPath) . '/' . $path;
+			}
+			$linked = $path . '?' . ($page['query'] !== '' ? $page['query'] . '&' : '') . 'fileId=' . $page['id'] . $page['fragment'];
+			if ($linked === $target) {
+				continue;
+			}
+			$offset = $destination['offset'] + strlen($raw) - strlen(ltrim($raw));
+			$content = substr_replace($content, $linked, $offset, strlen($trimmed));
+			$count++;
+		}
+
+		return [$content, $count];
+	}
+
+	/**
+	 * The page an internal link points to: by "?fileId=", a Collectives web address, or a
+	 * relative path (also "topic.md" for "topic/Readme.md" in a collective).
+	 *
+	 * @param list<list<string>> $bases Folders the link may be relative to
+	 * @return array{id:int,path:string,query:string,fragment:string}|null
+	 */
+	private function resolveLinkedPage(Folder $wikiRoot, array $bases, string $target, bool $collective): ?array {
+		if ($target === '') {
+			return null;
+		}
+		if (preg_match(self::COLLECTIVES_URL_PATTERN, $target, $web) === 1) {
+			parse_str(ltrim($web[3] ?? '', '?'), $query);
+			$fragment = $web[4] ?? '';
+			$page = isset($query['fileId']) && is_numeric($query['fileId']) ? $this->pageById($wikiRoot, (int)$query['fileId']) : null;
+			if ($page === null && $web[2] !== '') {
+				$titles = array_map('rawurldecode', explode('/', trim($web[2], '/')));
+				foreach ([implode('/', $titles) . '.md', implode('/', $titles) . '/' . self::COLLECTIVE_PARENT_PAGE] as $candidate) {
+					if (($node = $this->getNodeOrNull($wikiRoot, $candidate)) instanceof File) {
+						$page = $node;
+						break;
+					}
+				}
+				// Slug form "<title>-<page id>".
+				if ($page === null && preg_match('/-(\d+)$/', end($titles), $slug) === 1) {
+					$page = $this->pageById($wikiRoot, (int)$slug[1]);
+				}
+			}
+			return $page === null ? null : ['id' => (int)$page->getId(), 'path' => $this->wikiPath($wikiRoot, $page), 'query' => '', 'fragment' => $fragment];
+		}
+		if (preg_match('/^(?:[a-z][a-z0-9+.\-]*:|#|\/|\?)/i', $target) === 1 || preg_match('/\s/u', $target) === 1) {
+			return null;
+		}
+		if (preg_match('/^([^?#]*)(\?[^#]*)?(#.*)?$/', $target, $parts) !== 1) {
+			return null;
+		}
+		$fragment = $parts[3] ?? '';
+		parse_str(ltrim($parts[2] ?? '', '?'), $query);
+		// Other parameters are kept as written.
+		$otherQuery = implode('&', array_filter(explode('&', ltrim($parts[2] ?? '', '?')), static fn (string $pair): bool => $pair !== '' && !str_starts_with($pair, 'fileId=')));
+		if (isset($query['fileId']) && is_numeric($query['fileId'])) {
+			$page = $this->pageById($wikiRoot, (int)$query['fileId']);
+			return $page === null ? null : ['id' => (int)$page->getId(), 'path' => $this->wikiPath($wikiRoot, $page), 'query' => $otherQuery, 'fragment' => $fragment];
+		}
+		$path = rawurldecode($parts[1]);
+		if ($path === '' || !$this->isAllowedTextPath(str_ends_with($path, '/') ? $path . 'x.md' : (pathinfo($path, PATHINFO_EXTENSION) === '' ? $path . '.md' : $path))) {
+			return null;
+		}
+		foreach ($bases as $base) {
+			$node = $this->linkTargetNode($wikiRoot, $base, $path, $collective);
+			if ($node instanceof File) {
+				return ['id' => (int)$node->getId(), 'path' => $this->wikiPath($wikiRoot, $node), 'query' => $otherQuery, 'fragment' => $fragment];
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * After a new page was created, give earlier links to it (written before it existed) its page ID.
+	 *
+	 * @param list<string|array<string,string>> $warnings
+	 * @return list<string> Paths of the pages that were updated
+	 */
+	private function linkForwardReferences(Folder $wikiRoot, string $pagePath, File $page, bool $collective, ?string $collectiveUrlPath, array &$warnings): array {
+		$name = pathinfo($pagePath, PATHINFO_FILENAME);
+		$updated = [];
+		try {
+			foreach ($this->collectTextFiles($wikiRoot, '', 'wiki', self::MAX_INDEX_FILES) as $entry) {
+				$path = $entry['path'];
+				if ($path === $pagePath || in_array($path, ['index.md', 'log.md', 'schema.md'], true) || strtolower(pathinfo($path, PATHINFO_EXTENSION)) !== 'md') {
+					continue;
+				}
+				/** @var File $file */
+				$file = $entry['file'];
+				$content = (string)$file->getContent();
+				if (!str_contains($content, $name) && !str_contains($content, rawurlencode($name)) && !str_contains($content, str_replace(' ', '%20', $name))) {
+					continue;
+				}
+				[$linked, $count] = $this->linkWikiPages($wikiRoot, $path, $content, $collective, $collectiveUrlPath, null, (int)$page->getId());
+				if ($count === 0 || strlen($linked) > self::MAX_FILE_BYTES) {
+					continue;
+				}
+				$file->putContent($linked);
+				$this->textSessionResetService->resetFileSession($file);
+				$this->verifyContent($file, $linked, $path);
+				$updated[] = $path;
+			}
+		} catch (Throwable $e) {
+			$this->logger->warning('Wiki page saved but links to it could not be completed', ['exception' => $e]);
+			$warnings[] = ['code' => 'links_not_updated', 'message' => 'The page was saved, but links to it on other pages could not be updated.'];
+		}
+		if ($updated !== []) {
+			$this->logPageChanges($wikiRoot, array_map(static fn (string $path): array => ['action' => 'linked', 'path' => $path], $updated), $warnings);
+		}
+
+		return $updated;
+	}
+
+	private function pageById(Folder $wikiRoot, int $fileId): ?File {
+		if ($fileId <= 0) {
+			return null;
+		}
+		try {
+			foreach ($wikiRoot->getById($fileId) as $node) {
+				if ($node instanceof File && $this->isAllowedTextPath($node->getName())) {
+					return $node;
+				}
+			}
+		} catch (Throwable) {
+		}
+
+		return null;
+	}
+
+	private function wikiPath(Folder $wikiRoot, Node $node): string {
+		$root = rtrim((string)$wikiRoot->getPath(), '/') . '/';
+		$path = (string)$node->getPath();
+		return str_starts_with($path, $root) ? substr($path, strlen($root)) : (string)$node->getName();
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private function folderSegments(string $pagePath): array {
+		$segments = explode('/', $pagePath);
+		array_pop($segments);
+		return $segments;
+	}
+
+	/**
 	 * @param list<string> $baseSegments
 	 */
 	private function linkTargetExists(Folder $wikiRoot, array $baseSegments, string $path, bool $collective): bool {
+		return $this->linkTargetNode($wikiRoot, $baseSegments, $path, $collective) !== null;
+	}
+
+	/**
+	 * @param list<string> $baseSegments
+	 */
+	private function linkTargetNode(Folder $wikiRoot, array $baseSegments, string $path, bool $collective): ?Node {
 		$segments = $baseSegments;
 		foreach (explode('/', $path) as $segment) {
 			if ($segment === '' || $segment === '.') {
@@ -1373,7 +1597,7 @@ class WikiService {
 			$segments[] = $segment;
 		}
 		if ($segments === []) {
-			return true;
+			return $wikiRoot;
 		}
 		$resolved = implode('/', $segments);
 		$candidates = [$resolved];
@@ -1383,13 +1607,20 @@ class WikiService {
 		if ($collective && ($parentPage = $this->collectiveParentPagePath(str_ends_with(strtolower($resolved), '.md') ? $resolved : $resolved . '.md')) !== null) {
 			$candidates[] = $parentPage;
 		}
+		$found = null;
 		foreach ($candidates as $candidate) {
-			if ($this->getNodeOrNull($wikiRoot, $candidate) !== null) {
-				return true;
+			$node = $this->getNodeOrNull($wikiRoot, $candidate);
+			if ($node instanceof File) {
+				return $node;
 			}
+			$found ??= $node;
+		}
+		// A folder: its page in a collective.
+		if ($found instanceof Folder && ($index = $this->getNodeOrNull($found, self::COLLECTIVE_PARENT_PAGE)) instanceof File) {
+			return $index;
 		}
 
-		return false;
+		return $found;
 	}
 
 	private function isAllowedTextPath(string $path): bool {

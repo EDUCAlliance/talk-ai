@@ -88,7 +88,7 @@ class WikiLocationService {
 	}
 
 	/**
-	 * @return array{folder:Folder,label:string}
+	 * @return array{folder:Folder,label:string,url_path:?string} url_path: the collective's segment in page addresses
 	 * @throws Exception
 	 */
 	public function resolveCollectiveWikiRoot(int $collectiveId, string $userId): array {
@@ -110,6 +110,7 @@ class WikiLocationService {
 			return [
 				'folder' => $folder,
 				'label' => $label,
+				'url_path' => method_exists($collective, 'getUrlPath') ? (string)$collective->getUrlPath() : null,
 			];
 		} catch (\Throwable $e) {
 			throw new Exception('Unable to use selected collective as wiki location: ' . $e->getMessage(), 0, $e);

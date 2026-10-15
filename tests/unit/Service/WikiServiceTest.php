@@ -157,8 +157,9 @@ class WikiServiceTest extends TestCase {
 		$content = (string)$index->getContent();
 		$this->assertStringNotContainsString('EDUC-AI-WIKI-FILE-INDEX', $content);
 		$this->assertStringContainsString('## Existing Files', $content);
-		$this->assertStringContainsString('[Existing Topic](existing-topic.md) - `existing-topic.md`', $content);
-		$this->assertStringContainsString('[Nested Note](pages/nested-note.md) - `pages/nested-note.md`', $content);
+		// Links carry the page ID: Collectives opens pages by ID, a plain "page.md" link ends on "page not found".
+		$this->assertMatchesRegularExpression('/\[Existing Topic\]\(existing-topic\.md\?fileId=\d+\) - `existing-topic\.md`/', $content);
+		$this->assertMatchesRegularExpression('/\[Nested Note\]\(pages\/nested-note\.md\?fileId=\d+\) - `pages\/nested-note\.md`/', $content);
 		$this->assertStringNotContainsString('schema.md', $content);
 		$this->assertStringNotContainsString('log.md', $content);
 	}
@@ -181,7 +182,7 @@ class WikiServiceTest extends TestCase {
 		$content = (string)$index->getContent();
 		$this->assertStringNotContainsString('EDUC-AI-WIKI-FILE-INDEX', $content);
 		$this->assertStringNotContainsString('Old visible block', $content);
-		$this->assertStringContainsString('[Notes](notes.md) - `notes.md`', $content);
+		$this->assertMatchesRegularExpression('/\[Notes\]\(notes\.md\?fileId=\d+\) - `notes\.md`/', $content);
 	}
 
 	public function testOverwriteExistingPageResetsTextSession(): void {
@@ -499,7 +500,7 @@ class WikiServiceTest extends TestCase {
 		$result = $service->writePage(42, 'topic/sub.md', "# Sub\n", 'create', null, self::COLLECTIVE);
 
 		$this->assertSame(
-			"# Topic\n\nSee [Target](../target.md), [Web](https://example.com) and ![Logo](../logo.png).\n\n```\n[Code](target.md)\n```\n",
+			"# Topic\n\nSee [Target](target.md?fileId=" . $collectiveRoot->get('target.md')->getId() . "), [Web](https://example.com) and ![Logo](../logo.png).\n\n```\n[Code](target.md)\n```\n",
 			$collectiveRoot->get('topic/Readme.md')->getContent()
 		);
 		$this->assertSame([['from' => 'topic.md', 'to' => 'topic/Readme.md', 'links_rebased' => 2]], $result['converted_to_parent_pages']);
@@ -800,11 +801,88 @@ class WikiServiceTest extends TestCase {
 
 	private const COLLECTIVE = ['wiki_location' => 'collective', 'wiki_collective_id' => 99];
 
+	public function testLinksToExistingPagesGetThePageIdSoCollectivesCanOpenThem(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$tools = $wikiRoot->newFile('Tools.md');
+		$tools->putContent('# Tools');
+		$team = $wikiRoot->newFolder('Collaboration')->newFile('How to create a team.md');
+		$team->putContent('# Team');
+		$wikiRoot->get('Collaboration')->newFile('Readme.md')->putContent('# Collaboration');
+		$readme = $wikiRoot->get('Collaboration/Readme.md');
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$result = $service->writePage(42, 'Kalender/Termin.md', "# Termin\n\n[Tools](../Tools.md), [Team](../Collaboration/How%20to%20create%20a%20team.md#steps), [Collaboration](../Collaboration.md), `[Code](../Tools.md)` and [Web](https://example.com).", 'create', null, self::COLLECTIVE);
+
+		// Paths start at the collective root: the browser resolves them against the page
+		// address, so "../" could leave the collective; the ID decides which page opens.
+		$this->assertSame(
+			"# Termin\n\n[Tools](Tools.md?fileId=" . $tools->getId() . "), [Team](Collaboration/How%20to%20create%20a%20team.md?fileId=" . $team->getId() . "#steps), [Collaboration](Collaboration/Readme.md?fileId=" . $readme->getId() . "), `[Code](../Tools.md)` and [Web](https://example.com).",
+			$wikiRoot->get('Kalender/Termin.md')->getContent()
+		);
+		$this->assertSame(3, $result['links_with_page_id']);
+		$this->assertArrayNotHasKey('broken_links', $result);
+	}
+
+	public function testCollectivesWebAddressesOfWikiPagesBecomePageLinks(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$page = $wikiRoot->newFolder('educ-portal')->newFile('access-and-initial-setup.md');
+		$page->putContent('# Access');
+		$wikiRoot->get('educ-portal')->newFile('Readme.md')->putContent('# EDUC Portal');
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$result = $service->writePage(42, 'index-of-topics.md', "[Access](https://nc.example/apps/collectives/Wiki-for-Portal-4/educ-portal/access-and-initial-setup)\n[Gone](https://nc.example/index.php/apps/collectives/Wiki-for-Portal-4/educ-portal/missing-page)", 'create', null, self::COLLECTIVE);
+
+		$content = $wikiRoot->get('index-of-topics.md')->getContent();
+		$this->assertStringContainsString('[Access](educ-portal/access-and-initial-setup.md?fileId=' . $page->getId() . ')', $content);
+		$this->assertSame('Do not link Collectives web addresses; link the page with a relative Markdown link [text](page.md).', $result['broken_links'][0]['problem']);
+	}
+
+	public function testLinksOnTheLandingPageStartWithTheCollectivePath(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$wikiRoot->newFile('Readme.md')->putContent('# Welcome');
+		$tools = $wikiRoot->newFile('Tools.md');
+		$tools->putContent('# Tools');
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$service->writePage(42, 'Readme.md', "# Welcome\n\n[Tools](Tools.md)", 'overwrite', null, self::COLLECTIVE);
+
+		// The landing page address has no trailing folder, so a relative link would leave the collective.
+		$this->assertSame("# Welcome\n\n[Tools](Team-Notes-99/Tools.md?fileId=" . $tools->getId() . ')', $wikiRoot->get('Readme.md')->getContent());
+	}
+
+	public function testLinksWrittenBeforeTheirPageExistedGetThePageIdWhenItIsCreated(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$overview = $service->writePage(42, 'Overview.md', "# Overview\n\n[Data protection](Data%20protection.md)", 'create', null, self::COLLECTIVE);
+		$this->assertSame('Data%20protection.md', $overview['broken_links'][0]['target']);
+
+		$created = $service->writePage(42, 'Data protection.md', '# Data protection', 'create', null, self::COLLECTIVE);
+
+		$page = $wikiRoot->get('Data protection.md');
+		$this->assertSame("# Overview\n\n[Data protection](Data%20protection.md?fileId=" . $page->getId() . ')', $wikiRoot->get('Overview.md')->getContent());
+		$this->assertSame(['Overview.md'], $created['pages_linked_to_this_page']);
+		$this->assertMatchesRegularExpression('/linked Overview\.md/', $wikiRoot->get('log.md')->getContent());
+	}
+
+	public function testPersonalWikiLinksKeepTheirRelativePathAndGetThePageId(): void {
+		$root = new InMemoryRootFolder();
+		$service = $this->createService($root, $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'target.md', '# Target', 'create');
+		$wiki = Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/';
+		$target = $root->getUserFolder('alice')->get($wiki . 'target.md');
+
+		$result = $service->writePage(42, 'notes/page.md', '[Target](../target.md) [Stale](missing.md?fileId=999999)', 'create');
+
+		// Files opens "?fileId=" links directly; other Markdown viewers still follow the relative path.
+		$this->assertSame('[Target](../target.md?fileId=' . $target->getId() . ') [Stale](missing.md?fileId=999999)', $root->getUserFolder('alice')->get($wiki . 'notes/page.md')->getContent());
+		$this->assertSame('missing.md?fileId=999999', $result['broken_links'][0]['target']);
+	}
+
 	private function createCollectiveService(InMemoryFolder $collectiveRoot): WikiService {
 		$locationService = $this->createMock(WikiLocationService::class);
 		$locationService->method('resolveCollectiveWikiRoot')
 			->with(99, 'alice')
-			->willReturn(['folder' => $collectiveRoot, 'label' => 'Collective: Team Notes']);
+			->willReturn(['folder' => $collectiveRoot, 'label' => 'Collective: Team Notes', 'url_path' => 'Team-Notes-99']);
 
 		return $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'), $locationService);
 	}
@@ -965,9 +1043,10 @@ class WikiServiceTest extends TestCase {
 		$converted = $result['converted_to_parent_pages'][0];
 		$this->assertSame(5, $converted['links_rebased']);
 		$moved = $wikiRoot->get('topic/Readme.md')->getContent();
-		$this->assertStringContainsString('[full]: ../target.md#section "Target title"', $moved);
-		$this->assertStringContainsString("[collapsed]: <../target.md?mode=1#part> 'Title'", $moved);
-		$this->assertStringContainsString('[shortcut]: ../target.md (Title)', $moved);
+		$id = $wikiRoot->get('target.md')->getId();
+		$this->assertStringContainsString('[full]: target.md?fileId=' . $id . '#section "Target title"', $moved);
+		$this->assertStringContainsString("[collapsed]: target.md?mode=1&fileId=" . $id . "#part 'Title'", $moved);
+		$this->assertStringContainsString('[shortcut]: target.md?fileId=' . $id . ' (Title)', $moved);
 		$this->assertStringContainsString('[image]: ../.attachments.1/photo.png "Photo"', $moved);
 		$this->assertContains(['text' => 'missing', 'target' => '../missing.md'], $converted['broken_links']);
 		$this->assertNotContains('full', array_column($converted['broken_links'], 'text'));
@@ -1011,7 +1090,7 @@ MD;
 		$result = $service->writePage(42, 'note.md', '[Lesson](lesson%231%2520%20%28%C3%A4%29.md)', 'create', null, self::COLLECTIVE);
 
 		$target = 'folder%20%23%3F%25/lesson%231%2520%20%28%C3%A4%29.md';
-		$this->assertStringContainsString('[Lesson](' . $target . ')', $wikiRoot->get('index.md')->getContent());
+		$this->assertStringContainsString('[Lesson](' . $target . '?fileId=' . $wikiRoot->get('folder #?%/lesson#1%20 (ä).md')->getId() . ')', $wikiRoot->get('index.md')->getContent());
 		$this->assertSame($target, $result['broken_links'][0]['suggested_target']);
 	}
 
@@ -1030,7 +1109,7 @@ MD;
 		}
 		$service->writePage(42, 'cost$1.md', '# Cost $100 ${1} \\1', 'create', null, self::COLLECTIVE);
 
-		$this->assertStringContainsString('[Cost $100 ${1} \\1](cost%241.md) - `cost$1.md`', $wikiRoot->get('index.md')->getContent());
+		$this->assertMatchesRegularExpression('/\[Cost \$100 \$\{1\} \\\\1\]\(cost%241\.md\?fileId=\d+\) - `cost\$1\.md`/', $wikiRoot->get('index.md')->getContent());
 		$this->assertSame('# Cost $100 ${1} \\1', $wikiRoot->get('cost$1.md')->getContent());
 	}
 
@@ -1099,7 +1178,7 @@ MD;
 		$this->assertTrue($result['success']);
 		$this->assertSame('# Page', $wikiRoot->get('page.md')->getContent());
 		$this->assertSame('log_not_updated', $result['warnings'][0]['code']);
-		$this->assertStringContainsString('[Page](page.md)', $wikiRoot->get('index.md')->getContent());
+		$this->assertStringContainsString('[Page](page.md?fileId=', $wikiRoot->get('index.md')->getContent());
 	}
 
 	public function testNewSchemasDescribeAutomaticLoggingWithoutRewritingExistingSchemas(): void {

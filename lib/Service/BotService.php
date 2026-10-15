@@ -1074,7 +1074,7 @@ class BotService {
 			$systemPrompt .= $wikiInCollective
 				? "Write a subpage as `topic/subpage.md`. In this Collectives wiki a page with subpages is stored as `topic/Readme.md`; an existing `topic.md` is moved there automatically. From then on read and write that page as `topic/Readme.md` (see `resolved_path`): links inside it are relative to `topic/`, so a subpage is linked as `subpage.md`.\n"
 				: "For a subpage write `topic/subpage.md` next to the page `topic.md`.\n";
-			$systemPrompt .= "When you create pages that link to each other, write the linked pages first and the page with the links last. Link with Markdown links `[text](page.md)` (not `[[page]]`) and encode spaces in link targets as `%20`.\n";
+			$systemPrompt .= "When you create pages that link to each other, write the linked pages first and the page with the links last. Link with Markdown links `[text](page.md)` (not `[[page]]`) and encode spaces in link targets as `%20`. Never link web addresses of wiki pages; the wiki tool adds the page ID (`?fileId=`) to links so they open in Nextcloud. Keep these IDs when you rewrite a page.\n";
 			$systemPrompt .= "If the write result lists `broken_links`, create the missing pages or correct the links; a `suggested_target` is the right link to an existing page.\n";
 			$systemPrompt .= "For a complete overview of the wiki, list all pages with `wiki_search` and query `*` (continue with `next_offset`); a normal search only finds literal text matches.\n";
 		}
