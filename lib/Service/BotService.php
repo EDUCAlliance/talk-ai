@@ -1066,7 +1066,7 @@ class BotService {
 			$systemPrompt .= "Only save new information when the user explicitly asks you to save, remember, document, or maintain it.\n";
 			$systemPrompt .= "If the user explicitly asks you to write, save, document, or remember information in the wiki, call `wiki_write_page` before claiming that it was written or saved.\n";
 			$systemPrompt .= 'After accepted wiki updates, check whether `index.md` needs a curated overview update: add or revise short summaries, topic/entity groupings, important pages, open questions, or synthesis notes. Leave the `Existing Files` section to ' . $this->brandingService->getDisplayName() . " automation.\n";
-			$systemPrompt .= "Append a concise event to `log.md` after accepted wiki updates.\n";
+			$systemPrompt .= "Page changes and automatic parent-page conversions are logged to `log.md` automatically. Use `wiki_log_event` only for extra decisions or context, not duplicate page-change entries.\n";
 			$systemPrompt .= "Treat the wiki tool response as authoritative for where a page was stored.\n";
 			$systemPrompt .= "A page only counts as written when `wiki_write_page` returned `success: true`. Never claim that a page was created, updated or reviewed otherwise; if a write failed, tell the user which page failed and the error code.\n";
 			$systemPrompt .= "If a write fails with `already_exists`, read the page, merge your changes and write it again with `mode` `overwrite` (or `append` to add text at the end).\n";

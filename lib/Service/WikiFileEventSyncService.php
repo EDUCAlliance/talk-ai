@@ -36,12 +36,15 @@ class WikiFileEventSyncService {
 	 */
 	public function scheduleForChangedNodes(array $nodes): void {
 		$ancestorIds = [];
+		$candidates = [];
 		foreach ($nodes as $node) {
 			if (!$node instanceof Node || $this->isIgnoredNode($node)) {
 				continue;
 			}
 
-			foreach ($this->collectAncestorIds($node) as $id) {
+			$ids = $this->collectAncestorIds($node);
+			$candidates[] = ['node' => $node, 'ancestors' => $ids];
+			foreach ($ids as $id) {
 				$ancestorIds[$id] = $id;
 			}
 		}
@@ -69,6 +72,27 @@ class WikiFileEventSyncService {
 				continue;
 			}
 
+			$relevant = false;
+			foreach ($candidates as $candidate) {
+				$node = $candidate['node'];
+				if (!in_array((int)$root->getRootNodeId(), $candidate['ancestors'], true)) {
+					continue;
+				}
+				try {
+					$managed = in_array((string)$node->getName(), self::MANAGED_ROOT_FILES, true)
+						&& (int)$node->getParent()?->getId() === (int)$root->getRootNodeId();
+				} catch (Throwable) {
+					continue;
+				}
+				if (!$managed) {
+					$relevant = true;
+					break;
+				}
+			}
+			if (!$relevant) {
+				continue;
+			}
+
 			$args = ['root_id' => $rootId];
 			if (!$this->jobList->has(SyncWikiRootIndexJob::class, $args)) {
 				$this->jobList->scheduleAfter(SyncWikiRootIndexJob::class, time() + self::SYNC_DELAY_SECONDS, $args);
@@ -85,10 +109,6 @@ class WikiFileEventSyncService {
 			$this->logger->debug('Skipping wiki file event for unreadable node metadata', [
 				'exception' => $e,
 			]);
-			return true;
-		}
-
-		if ($name !== '' && in_array($name, self::MANAGED_ROOT_FILES, true)) {
 			return true;
 		}
 

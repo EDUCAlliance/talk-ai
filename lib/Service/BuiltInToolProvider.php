@@ -370,7 +370,7 @@ class BuiltInToolProvider {
 
         $tools[] = $this->withPolicy([
             'name' => self::TOOL_WIKI_LOG_EVENT,
-            'description' => 'Append a concise maintenance event to the bot wiki log.md file.',
+            'description' => 'Append extra decisions or context to the bot wiki log.md file. Page changes are logged automatically; do not duplicate them here.',
             'schema' => [
                 'type' => 'object',
                 'properties' => [

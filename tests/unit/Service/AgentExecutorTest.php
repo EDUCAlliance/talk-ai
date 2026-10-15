@@ -1739,6 +1739,65 @@ class AgentExecutorTest extends TestCase {
 		}
 	}
 
+	public function testWikiSearchOutputBudgetKeepsWholeResultsAndMarksOmissions(): void {
+		foreach ([false, true] as $list) {
+			$name = BuiltInToolProvider::TOOL_WIKI_SEARCH;
+			[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($name)]);
+			$entries = [];
+			for ($i = 0; $i < 20; $i++) {
+				$entries[] = ['path' => 'page-' . $i . '.md', 'snippet' => str_repeat('🐈"', 100), 'score' => 20 - $i];
+			}
+			$payload = $list
+				? ['success' => true, 'action' => 'list', 'pages' => $entries, 'total' => 30, 'offset' => 10, 'has_more' => false, 'next_offset' => null]
+				: ['success' => true, 'action' => 'search', 'query' => 'cat', 'results' => $entries, 'searched_files' => 30, 'truncated' => false];
+			$toolProvider->method('executeTool')->willReturn(['content' => [['type' => 'text', 'text' => json_encode($payload, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)]]]);
+			$this->expectSyncTurns($llmClient, [
+				$this->turn('', [$this->toolCall('search-page', $name, '{}')], 'tool_calls'),
+				$this->turn('Done', [], 'stop'),
+			], function (int $index, array $messages) use ($list, $entries): void {
+				if ($index !== 1) {
+					return;
+				}
+				$output = $messages[2]['content'];
+				$this->assertLessThanOrEqual(4000, mb_strlen($output, 'UTF-8'));
+				$delivered = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+				$count = $delivered['returned_count'];
+				$this->assertGreaterThan(0, $count);
+				$this->assertLessThan(20, $count);
+				$this->assertSame(array_slice($entries, 0, $count), $delivered[$list ? 'pages' : 'results']);
+				if ($list) {
+					$this->assertSame(30, $delivered['total']);
+					$this->assertTrue($delivered['has_more']);
+					$this->assertSame(10 + $count, $delivered['next_offset']);
+				} else {
+					$this->assertTrue($delivered['results_omitted']);
+					$this->assertSame(20 - $count, $delivered['omitted_count']);
+					$this->assertFalse($delivered['truncated'], 'Search traversal truncation is independent of output omission');
+				}
+			});
+			$result = $executor->run('system', [['role' => 'user', 'content' => 'Search']], [], $this->builtInOptions([$name]));
+			$this->assertSame('ok', $result['toolInvocations'][0]['status']);
+		}
+	}
+
+	public function testWikiSearchNeverCutsJsonWhenEvenOneEntryCannotFit(): void {
+		$name = BuiltInToolProvider::TOOL_WIKI_SEARCH;
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->toolDefinition($name)]);
+		$payload = ['success' => true, 'action' => 'list', 'pages' => [['path' => str_repeat('x', 4100)]], 'total' => 1, 'offset' => 0];
+		$toolProvider->method('executeTool')->willReturn(['text' => json_encode($payload, JSON_THROW_ON_ERROR)]);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [$this->toolCall('search-page', $name, '{}')], 'tool_calls'),
+			$this->turn('Done', [], 'stop'),
+		], function (int $index, array $messages): void {
+			if ($index === 1) {
+				$this->assertSame('tool_execution_failed', $this->decodeToolError($messages[2]['content'])['code']);
+				$this->assertStringNotContainsString('next_offset', $messages[2]['content']);
+			}
+		});
+		$result = $executor->run('system', [['role' => 'user', 'content' => 'Search']], [], $this->builtInOptions([$name]));
+		$this->assertSame('error', $result['toolInvocations'][0]['status']);
+	}
+
 	public function testExecutionExceptionProducesSecretSafeStructuredObservation(): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
 		$toolProvider->expects($this->once())

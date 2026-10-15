@@ -1112,6 +1112,9 @@ class BotServiceTest extends TestCase {
 			->with(
 				$this->callback(function (string $systemPrompt): bool {
 					$this->assertStringContainsString('## Wiki Instructions', $systemPrompt);
+					$this->assertStringContainsString('conversions are logged to `log.md` automatically', $systemPrompt);
+					$this->assertStringContainsString('Use `wiki_log_event` only for extra decisions or context', $systemPrompt);
+					$this->assertStringNotContainsString('Append a concise event to `log.md` after accepted wiki updates', $systemPrompt);
 					$this->assertStringContainsString('When `wiki_read_page` returns `has_more=true`', $systemPrompt);
 					$this->assertStringContainsString('offset=next_offset', $systemPrompt);
 					$this->assertStringContainsString('explicitly mention the page path and `next_offset`', $systemPrompt);

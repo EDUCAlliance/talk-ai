@@ -184,10 +184,10 @@ class WikiService {
 			$layout = $collective
 				? $this->planCollectivePage($wikiRoot, $pagePath)
 				: ['path' => $pagePath, 'parent' => null, 'moves' => [], 'warnings' => []];
-			$this->preflightWrite($wikiRoot, $layout['path'], $layout['moves'], $mode);
-			$converted = $this->applyCollectiveMoves($wikiRoot, $layout['moves']);
+			$this->preflightWrite($wikiRoot, $layout['path'], $layout['moves'], $mode, $content);
+			$warnings = $layout['warnings'];
+			$converted = $this->applyCollectiveMoves($wikiRoot, $layout['moves'], $warnings);
 			$file = $this->writeRelativeFile($wikiRoot, $layout['path'], $content, $mode);
-			$this->syncIndexForRoot($wikiRoot);
 
 			$result = [
 				'success' => true,
@@ -204,7 +204,9 @@ class WikiService {
 			if ($collective) {
 				$result['parent_page'] = $layout['parent'];
 			}
-			$warnings = $layout['warnings'];
+			$events = [['action' => $mode === 'append' ? 'appended' : ($mode === 'overwrite' ? 'overwritten' : 'created'), 'path' => $layout['path']]];
+			$this->logPageChanges($wikiRoot, $events, $warnings);
+			$this->maintainIndexAfterWrite($wikiRoot, $warnings);
 			if ($layout['path'] !== $pagePath && dirname($layout['path']) !== dirname($pagePath)) {
 				$warnings[] = $this->storedAsNote($layout['path']);
 			}
@@ -249,8 +251,9 @@ class WikiService {
 			}
 
 			$file = $this->writeRelativeFile($wikiRoot, 'log.md', $entry, 'append');
-			$this->syncIndexForRoot($wikiRoot);
-			return [
+			$warnings = [];
+			$this->maintainIndexAfterWrite($wikiRoot, $warnings);
+			$result = [
 				'success' => true,
 				'action' => 'logged',
 				'path' => 'log.md',
@@ -259,7 +262,48 @@ class WikiService {
 				'size' => $file->getSize(),
 				'verified' => true,
 			];
+			if ($warnings !== []) {
+				$result['warnings'] = $warnings;
+			}
+			return $result;
 		});
+	}
+
+	/** @param list<string|array<string,string>> $warnings */
+	private function maintainIndexAfterWrite(Folder $wikiRoot, array &$warnings): void {
+		try {
+			$this->syncIndexForRoot($wikiRoot);
+		} catch (Throwable $e) {
+			$this->logger->warning('Wiki page saved but index maintenance failed', ['exception' => $e]);
+			$warnings[] = ['code' => 'index_not_updated', 'message' => 'The page was saved, but index.md could not be updated. Retry wiki initialization to refresh the index.'];
+		}
+	}
+
+	/**
+	 * @param list<array{action:string,path:string,from?:string}> $events
+	 * @param list<string|array<string,string>> $warnings
+	 */
+	private function logPageChanges(Folder $wikiRoot, array $events, array &$warnings): void {
+		$entry = '';
+		foreach ($events as $event) {
+			if (in_array($event['path'], ['index.md', 'log.md', 'schema.md'], true)
+				|| in_array($event['from'] ?? '', ['index.md', 'log.md', 'schema.md'], true)) {
+				continue;
+			}
+			$entry .= "\n- [" . date('Y-m-d H:i') . '] ' . $event['action'] . ' ' . str_replace(["\r", "\n"], ' ', $event['path']);
+			if (isset($event['from'])) {
+				$entry .= ' (from ' . str_replace(["\r", "\n"], ' ', $event['from']) . ')';
+			}
+		}
+		if ($entry === '') {
+			return;
+		}
+		try {
+			$this->writeRelativeFile($wikiRoot, 'log.md', $entry . "\n", 'append');
+		} catch (Throwable $e) {
+			$this->logger->warning('Wiki page saved but automatic change logging failed', ['exception' => $e]);
+			$warnings[] = ['code' => 'log_not_updated', 'message' => 'The page was saved, but its automatic change entry could not be appended to log.md.'];
+		}
 	}
 
 	/**
@@ -543,7 +587,6 @@ class WikiService {
 	private function syncIndexFile(Folder $wikiRoot): array {
 		$truncated = false;
 		$entries = $this->buildIndexEntries($wikiRoot, $truncated);
-		$managedBlock = $this->buildManagedIndexBlock($entries, $truncated);
 
 		try {
 			$node = $wikiRoot->get('index.md');
@@ -555,25 +598,28 @@ class WikiService {
 			$content = "# Index\n\nThis wiki is maintained by " . $this->brandingService->getDisplayName() . ".\n";
 		}
 
+		$budget = self::MAX_FILE_BYTES - strlen($this->upsertManagedIndexBlock($content, '')) - 4;
+		$indexedCount = 0;
+		$managedBlock = $this->buildManagedIndexBlock($entries, $truncated, $budget, $indexedCount);
 		$nextContent = $this->upsertManagedIndexBlock($content, $managedBlock);
 
 		if ($nextContent !== $content) {
 			$this->writeRelativeFile($wikiRoot, 'index.md', $nextContent, 'overwrite');
 		}
 
-		return ['count' => count($entries)];
+		return ['count' => $indexedCount];
 	}
 
 	private function upsertManagedIndexBlock(string $content, string $managedBlock): string {
 		$replacement = "\n\n" . $managedBlock;
 		$legacyMarkerPattern = '/\n*<!-- EDUC-AI-WIKI-FILE-INDEX:START -->\n?.*?\n?<!-- EDUC-AI-WIKI-FILE-INDEX:END -->/s';
 		if (preg_match($legacyMarkerPattern, $content) === 1) {
-			return rtrim(preg_replace($legacyMarkerPattern, $replacement, $content) ?? $content) . "\n";
+			return rtrim(preg_replace_callback($legacyMarkerPattern, static fn (): string => $replacement, $content) ?? $content) . "\n";
 		}
 
 		$managedSectionPattern = '/\n*## Existing Files\n\nThis section is updated automatically when the wiki is initialized or changed\.\n\n.*?(?=\n## [^\n]+|\z)/s';
 		if (preg_match($managedSectionPattern, $content) === 1) {
-			return rtrim(preg_replace($managedSectionPattern, $replacement, $content) ?? $content) . "\n";
+			return rtrim(preg_replace_callback($managedSectionPattern, static fn (): string => $replacement, $content) ?? $content) . "\n";
 		}
 
 		return rtrim($content) . "\n\n" . $managedBlock . "\n";
@@ -606,23 +652,34 @@ class WikiService {
 	/**
 	 * @param array<int,array{path:string,title:string,size:int}> $entries
 	 */
-	private function buildManagedIndexBlock(array $entries, bool $truncated = false): string {
+	private function buildManagedIndexBlock(array $entries, bool $truncated = false, int $maxBytes = self::MAX_FILE_BYTES, ?int &$indexedCount = null): string {
+		$indexedCount = 0;
 		$block = "## Existing Files\n\n";
 		$block .= "This section is updated automatically when the wiki is initialized or changed.\n\n";
+		$notice = '- More files exist than listed here (entry limit ' . self::MAX_INDEX_FILES . " or index byte limit reached).\n";
+		if (strlen($block . $notice) > $maxBytes) {
+			throw new WikiException(WikiException::TOO_LARGE, 'The curated index leaves no room for the managed file list. Shorten index.md and initialize the wiki again.');
+		}
 		if (count($entries) === 0) {
 			$block .= "- No content files found yet.\n";
 		} else {
 			foreach ($entries as $entry) {
 				$title = $entry['title'] !== '' ? $entry['title'] : $entry['path'];
-				$block .= '- [' . $this->escapeMarkdownLinkText($title) . '](' . $this->encodeMarkdownLinkTarget($entry['path']) . ')';
+				$line = '- [' . $this->escapeMarkdownLinkText($title) . '](' . $this->encodeMarkdownLinkTarget($entry['path']) . ')';
 				if ($title !== $entry['path']) {
-					$block .= ' - `' . $entry['path'] . '`';
+					$line .= ' - `' . $entry['path'] . '`';
 				}
-				$block .= ' (' . $entry['size'] . " bytes)\n";
+				$line .= ' (' . $entry['size'] . " bytes)\n";
+				if (strlen($block . $line . $notice) > $maxBytes) {
+					$truncated = true;
+					break;
+				}
+				$block .= $line;
+				$indexedCount++;
 			}
-			if ($truncated) {
-				$block .= '- More files exist than listed here (limit ' . self::MAX_INDEX_FILES . ").\n";
-			}
+		}
+		if ($truncated) {
+			$block .= $notice;
 		}
 		return rtrim($block);
 	}
@@ -645,7 +702,7 @@ class WikiService {
 	}
 
 	private function encodeMarkdownLinkTarget(string $path): string {
-		return str_replace([' ', ')', '('], ['%20', '%29', '%28'], $path);
+		return implode('/', array_map('rawurlencode', explode('/', $path)));
 	}
 
 	/**
@@ -661,7 +718,7 @@ class WikiService {
 			. "- Keep `index.md` as the content-oriented map of the wiki: short summaries, topic/entity groupings, important pages, current synthesis, open questions, and useful entry points.\n"
 			. "- Review `index.md` after accepted wiki updates and update the curated overview when new or changed pages affect navigation or synthesis.\n"
 			. "- The `Existing Files` section in `index.md` is maintained automatically by " . $this->brandingService->getDisplayName() . " and should not be rewritten manually.\n"
-			. "- Append a concise entry to `log.md` for every accepted wiki update.\n"
+			. "- Page changes and parent-page conversions are logged automatically in `log.md`. Use `wiki_log_event` only for extra decisions or context, not duplicate page-change entries.\n"
 			. "- Mark contradictions and uncertainty instead of silently replacing claims.\n"
 			. "- Use Markdown links between related pages.\n"
 			. "- Wiki tools are only available for personal bots.\n";
@@ -957,7 +1014,7 @@ class WikiService {
 	 *
 	 * @param list<array{from:string,to:string}> $moves
 	 */
-	private function preflightWrite(Folder $wikiRoot, string $target, array $moves, string $mode): void {
+	private function preflightWrite(Folder $wikiRoot, string $target, array $moves, string $mode, string $content): void {
 		$folders = explode('/', $target);
 		array_pop($folders);
 		$prefix = '';
@@ -976,6 +1033,15 @@ class WikiService {
 		$exists = $node !== null || in_array($target, array_column($moves, 'to'), true);
 		if ($exists && $mode === 'create') {
 			throw $this->alreadyExists($target);
+		}
+		if ($mode === 'append') {
+			$existingContent = $node instanceof File ? (string)$node->getContent() : '';
+			foreach ($moves as $move) {
+				if ($move['to'] === $target && ($source = $this->getNodeOrNull($wikiRoot, $move['from'])) instanceof File) {
+					$existingContent = $this->rebaseRelativeLinks((string)$source->getContent())[0];
+				}
+			}
+			$this->assertTextSize($existingContent . $content);
 		}
 		if (!$exists) {
 			$this->assertNoNearDuplicate($wikiRoot, $target);
@@ -1056,9 +1122,10 @@ class WikiService {
 	 * so they are rewritten to keep their targets.
 	 *
 	 * @param list<array{from:string,to:string}> $moves
+	 * @param list<string|array<string,string>> $warnings
 	 * @return list<array{from:string,to:string,links_rebased:int,broken:list<array{text:string,target:string}>}>
 	 */
-	private function applyCollectiveMoves(Folder $wikiRoot, array $moves): array {
+	private function applyCollectiveMoves(Folder $wikiRoot, array $moves, array &$warnings): array {
 		$done = [];
 		foreach ($moves as $move) {
 			$leaf = $this->getNodeOrNull($wikiRoot, $move['from']);
@@ -1082,6 +1149,7 @@ class WikiService {
 				$broken = $this->auditInternalLinks($wikiRoot, $move['to'], $content, true)['broken'];
 			}
 			$done[] = ['from' => $move['from'], 'to' => $move['to'], 'links_rebased' => $rebased, 'broken' => $broken];
+			$this->logPageChanges($wikiRoot, [['action' => 'converted', 'path' => $move['to'], 'from' => $move['from']]], $warnings);
 		}
 
 		return $done;
@@ -1096,15 +1164,29 @@ class WikiService {
 		return 'If you create the missing pages next, keep these links as they are; otherwise fix them (use suggested_target where given). ' . $base;
 	}
 
-	/**
-	 * Markdown without fenced code blocks: links inside code are examples, not links.
-	 */
-	private function withoutFencedCode(string $content): string {
+	/** Mask code and escaped brackets without changing destination byte offsets. */
+	private function linkSource(string $content): string {
 		$lines = explode("\n", $content);
 		foreach ($this->fencedLines($lines) as $index) {
-			$lines[$index] = '';
+			$lines[$index] = str_repeat(' ', strlen($lines[$index]));
 		}
-		return implode("\n", $lines);
+		$plain = implode("\n", $lines);
+		$plain = (string)preg_replace_callback('/(?<!`)(`+)(?!`)(.*?)(?<!`)\1(?!`)/s', static function (array $match): string {
+			return (string)preg_replace('/[^\n]/', ' ', $match[0]);
+		}, $plain);
+		for ($i = 0, $length = strlen($plain); $i < $length; $i++) {
+			if ($plain[$i] !== '[' && $plain[$i] !== ']') {
+				continue;
+			}
+			$slashes = 0;
+			for ($j = $i - 1; $j >= 0 && $plain[$j] === '\\'; $j--) {
+				$slashes++;
+			}
+			if ($slashes % 2 === 1) {
+				$plain[$i] = ' ';
+			}
+		}
+		return $plain;
 	}
 
 	/**
@@ -1113,42 +1195,64 @@ class WikiService {
 	 */
 	private function fencedLines(array $lines): array {
 		$fenced = [];
-		$inFence = false;
+		$marker = null;
+		$length = 0;
 		foreach ($lines as $index => $line) {
-			$isFence = preg_match('/^\s*(```|~~~)/', $line) === 1;
-			if ($inFence || $isFence) {
+			if ($marker === null) {
+				if (preg_match('/^ {0,3}(`{3,}|~{3,})/', $line, $match) === 1) {
+					$marker = $match[1][0];
+					$length = strlen($match[1]);
+					$fenced[] = $index;
+				}
+			} else {
 				$fenced[] = $index;
-			}
-			if ($isFence) {
-				$inFence = !$inFence;
+				if (preg_match('/^ {0,3}' . preg_quote($marker, '/') . '{' . $length . ',}[ \t]*$/', $line) === 1) {
+					$marker = null;
+				}
 			}
 		}
 		return $fenced;
 	}
 
 	/**
-	 * Prefix relative link and image targets with ../ (outside fenced code blocks).
+	 * @return list<array{text:string,raw:string,offset:int,image:bool}>
+	 */
+	private function markdownLinkDestinations(string $content): array {
+		$plain = $this->linkSource($content);
+		$destinations = [];
+		preg_match_all('/(!?)\[([^\]\n]{0,200})\]\(\s*(<[^>\n]*>|[^)\n]*?)(?:\s+"[^"\n]*")?\s*\)/u', $plain, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+		foreach ($matches as $match) {
+			$destinations[] = ['text' => $match[2][0], 'raw' => $match[3][0], 'offset' => $match[3][1], 'image' => $match[1][0] === '!'];
+		}
+		preg_match_all('/^ {0,3}\[([^\]\n]{1,200})\]:[ \t]*(<[^>\n]*>|[^\s\n]+)/mu', $plain, $definitions, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+		foreach ($definitions as $match) {
+			$destinations[] = ['text' => $match[1][0], 'raw' => $match[2][0], 'offset' => $match[2][1], 'image' => false];
+		}
+		return $destinations;
+	}
+
+	/**
+	 * Prefix actual relative Markdown destinations with ../, including definitions.
 	 *
 	 * @return array{0:string,1:int}
 	 */
 	private function rebaseRelativeLinks(string $content): array {
 		$count = 0;
-		$lines = explode("\n", $content);
-		$fenced = array_flip($this->fencedLines($lines));
-		foreach ($lines as $index => $line) {
-			if (isset($fenced[$index])) {
+		$destinations = $this->markdownLinkDestinations($content);
+		usort($destinations, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+		foreach ($destinations as $destination) {
+			$raw = $destination['raw'];
+			$target = trim($raw);
+			$angled = str_starts_with($target, '<');
+			$target = $angled ? substr($target, 1, -1) : $target;
+			if ($target === '' || preg_match('/^(?:[a-z][a-z0-9+.\-]*:|#|\/|\?)/i', $target) === 1) {
 				continue;
 			}
-			$lines[$index] = (string)preg_replace_callback('/(!?\[[^\]\n]{0,200}\]\(\s*<?)([^)\s>]+)/u', static function (array $match) use (&$count): string {
-				if (preg_match('/^(?:[a-z][a-z0-9+.\-]*:|#|\/|\?)/i', $match[2]) === 1) {
-					return $match[0];
-				}
-				$count++;
-				return $match[1] . '../' . $match[2];
-			}, $line);
+			$offset = $destination['offset'] + strlen($raw) - strlen(ltrim($raw)) + ($angled ? 1 : 0);
+			$content = substr_replace($content, '../', $offset, 0);
+			$count++;
 		}
-
-		return [implode("\n", $lines), $count];
+		return [$content, $count];
 	}
 
 	/**
@@ -1159,15 +1263,16 @@ class WikiService {
 	private function auditInternalLinks(Folder $wikiRoot, string $pagePath, string $content, bool $collective): array {
 		$checked = 0;
 		$broken = [];
-		$plain = $this->withoutFencedCode($content);
-		if (preg_match_all('/(?<!!)\[([^\]\n]{0,200})\]\(\s*(<[^>\n]*>|[^)\n]*?)(?:\s+"[^"\n]*")?\s*\)/u', $plain, $matches, PREG_SET_ORDER) === false) {
-			return ['checked' => 0, 'broken' => []];
-		}
+		$plain = $this->linkSource($content);
+		$matches = $this->markdownLinkDestinations($content);
 		$baseSegments = explode('/', $pagePath);
 		array_pop($baseSegments);
 
 		foreach ($matches as $match) {
-			$raw = trim($match[2]);
+			if ($match['image']) {
+				continue;
+			}
+			$raw = trim($match['raw']);
 			$angled = str_starts_with($raw, '<') && str_ends_with($raw, '>');
 			$target = $angled ? substr($raw, 1, -1) : $raw;
 			// External URLs, anchors, absolute app links and mail links are not wiki pages.
@@ -1182,7 +1287,7 @@ class WikiService {
 			// Markdown does not treat a target with unencoded spaces as a link.
 			$malformed = !$angled && preg_match('/\s/u', $target) === 1;
 			if (($malformed || !$this->linkTargetExists($wikiRoot, $baseSegments, $path, $collective)) && count($broken) < self::MAX_REPORTED_BROKEN_LINKS) {
-				$broken[] = ['text' => mb_substr($match[1], 0, 120), 'target' => mb_substr($target, 0, 300), 'path' => $path, 'malformed' => $malformed];
+				$broken[] = ['text' => mb_substr($match['text'], 0, 120), 'target' => mb_substr($target, 0, 300), 'path' => $path, 'malformed' => $malformed];
 			}
 		}
 		// Nextcloud Text and Collectives do not render wiki-style [[Page]] links.
@@ -1228,7 +1333,7 @@ class WikiService {
 			$name = basename($link['path']);
 			$candidates = $byName[$this->nameKey(pathinfo($name, PATHINFO_FILENAME))] ?? [];
 			if (count($candidates) === 1) {
-				$entry['suggested_target'] = str_replace(' ', '%20', $this->relativeLink($baseSegments, $candidates[0]));
+				$entry['suggested_target'] = $this->encodeMarkdownLinkTarget($this->relativeLink($baseSegments, $candidates[0]));
 			}
 			$result[] = $entry;
 		}

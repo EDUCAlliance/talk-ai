@@ -818,6 +818,302 @@ class WikiServiceTest extends TestCase {
 		$this->fail('Expected a WikiException');
 	}
 
+	public function testAgentCanEnumerateAllPagesUsingOnlyDeliveredListingOffsets(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		for ($i = 0; $i < 219; $i++) {
+			$wikiRoot->newFile(sprintf('page-%03d.md', $i))->putContent('# ' . str_repeat('猫"\\', 25));
+		}
+		$service = $this->createCollectiveService($wikiRoot);
+		$reflection = new \ReflectionClass(AgentExecutor::class);
+		$executor = $reflection->newInstanceWithoutConstructor();
+		$sanitize = $reflection->getMethod('sanitizeOutput');
+		$offset = 0;
+		$seen = [];
+		do {
+			$page = $service->search(42, '*', 100, 'wiki', self::COLLECTIVE, $offset);
+			$text = json_encode($page, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+			$output = $sanitize->invoke($executor, ['content' => [['type' => 'text', 'text' => $text]]], false, true);
+			$this->assertLessThanOrEqual(4000, mb_strlen($output, 'UTF-8'));
+			$delivered = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+			$this->assertSame(222, $delivered['total']);
+			$this->assertSame($offset, $delivered['offset']);
+			$this->assertSame(count($delivered['pages']), $delivered['returned_count']);
+			$this->assertSame(array_slice($page['pages'], 0, $delivered['returned_count']), $delivered['pages']);
+			array_push($seen, ...array_column($delivered['pages'], 'path'));
+			$this->assertLessThanOrEqual(222, count($seen));
+			if ($delivered['has_more']) {
+				$this->assertGreaterThan(0, $delivered['returned_count']);
+				$this->assertSame($offset + $delivered['returned_count'], $delivered['next_offset']);
+				$offset = $delivered['next_offset'];
+			} else {
+				$this->assertNull($delivered['next_offset']);
+			}
+		} while ($delivered['has_more']);
+		$this->assertCount(222, array_unique($seen));
+		$this->assertContains('page-218.md', $seen);
+	}
+
+	public function testRejectedOversizedAppendDoesNotMoveAnAncestorOrChangeTheIndex(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$wikiRoot->newFile('topic.md')->putContent('# Topic');
+		$child = $wikiRoot->newFolder('topic')->newFile('child.md');
+		$child->putContent(str_repeat('x', 524288));
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$indexBefore = $wikiRoot->get('index.md')->getContent();
+		$logBefore = $wikiRoot->get('log.md')->getContent();
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'topic/child.md', 'x', 'append', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::TOO_LARGE, $error->getErrorCode());
+		$this->assertSame('# Topic', $wikiRoot->get('topic.md')->getContent());
+		$this->assertNull($this->nodeOrNull($wikiRoot, 'topic/Readme.md'));
+		$this->assertSame(524288, $child->getSize());
+		$this->assertSame($indexBefore, $wikiRoot->get('index.md')->getContent());
+		$this->assertSame($logBefore, $wikiRoot->get('log.md')->getContent());
+	}
+
+	public function testAppendPreflightIncludesTheRebasedPageSuppliedByAPlannedMove(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$content = str_repeat('x', 524270) . '[T](target.md)';
+		$wikiRoot->newFile('topic.md')->putContent($content);
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'topic/Readme.md', 'xxxx', 'append', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::TOO_LARGE, $error->getErrorCode());
+		$this->assertSame($content, $wikiRoot->get('topic.md')->getContent());
+		$this->assertNull($this->nodeOrNull($wikiRoot, 'topic/Readme.md'));
+	}
+
+	public function testManagedIndexFitsTheByteLimitAndPreservesTheCuratedSections(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		for ($i = 0; $i < 850; $i++) {
+			$wikiRoot->newFile(sprintf('%04d-', $i) . str_repeat('x', 173) . '.md')->putContent('# ' . str_repeat('猫', 160));
+		}
+		$curated = '# Index' . "\n\n## Overview\n" . str_repeat('Curated knowledge. ', 1000);
+		$wikiRoot->newFile('index.md')->putContent($curated . "\n\n## Existing Files\n\nThis section is updated automatically when the wiki is initialized or changed.\n\n- Old entry\n\n## Questions\nKeep this question.\n");
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$result = $service->writePage(42, 'new.md', '# New', 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertSame('# New', $wikiRoot->get('new.md')->getContent());
+		$index = $wikiRoot->get('index.md')->getContent();
+		$this->assertLessThanOrEqual(524288, strlen($index));
+		$this->assertTrue(mb_check_encoding($index, 'UTF-8'));
+		$this->assertStringContainsString($curated, $index);
+		$this->assertStringContainsString("## Questions\nKeep this question.", $index);
+		$this->assertStringContainsString('index byte limit reached', $index);
+		$this->assertStringNotContainsString('- Old entry', $index);
+		foreach (explode("\n", $index) as $line) {
+			if (str_starts_with($line, '- [')) {
+				$this->assertMatchesRegularExpression('/\([0-9]+ bytes\)$/', $line);
+			}
+		}
+	}
+
+	/** @return array<string,array{bool}> */
+	public static function savedWikiOperations(): array {
+		return ['page write' => [false], 'explicit log event' => [true]];
+	}
+
+	#[DataProvider('savedWikiOperations')]
+	public function testIndexFailureDoesNotTurnASavedOperationIntoAFailure(bool $logEvent): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$wikiRoot->get('index.md')->putContent(str_repeat('x', 524288));
+
+		$result = $logEvent
+			? $service->logEvent(42, 'Decision', 'Keep context', self::COLLECTIVE)
+			: $service->writePage(42, 'new.md', '# New', 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertTrue($result['verified']);
+		$this->assertSame('index_not_updated', $result['warnings'][0]['code']);
+		$this->assertStringContainsString($logEvent ? 'Keep context' : 'created new.md', $wikiRoot->get('log.md')->getContent());
+		if (!$logEvent) {
+			$this->assertSame('# New', $wikiRoot->get('new.md')->getContent());
+		}
+	}
+
+	public function testIndexStorageFailureAfterVerifiedWriteIsNonFatal(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$wikiRoot->get('index.md')->dropWrites = true;
+
+		$result = $service->writePage(42, 'new.md', '# New', 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertSame('index_not_updated', $result['warnings'][0]['code']);
+		$this->assertSame('# New', $wikiRoot->get('new.md')->getContent());
+	}
+
+	public function testReferenceDefinitionsAreRebasedAndAuditedOnConversion(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$wikiRoot->newFile('target.md')->putContent('# Target');
+		$source = "# Topic\n[Target][full], [collapsed][] and [shortcut].\n![Image][image]\n"
+			. "[full]: target.md#section \"Target title\"\n[collapsed]: <target.md?mode=1#part> 'Title'\n"
+			. "[shortcut]: target.md (Title)\n[image]: .attachments.1/photo.png \"Photo\"\n[missing]: missing.md \"Missing\"\n";
+		$wikiRoot->newFile('topic.md')->putContent($source);
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$result = $service->writePage(42, 'topic/child.md', '# Child', 'create', null, self::COLLECTIVE);
+
+		$converted = $result['converted_to_parent_pages'][0];
+		$this->assertSame(5, $converted['links_rebased']);
+		$moved = $wikiRoot->get('topic/Readme.md')->getContent();
+		$this->assertStringContainsString('[full]: ../target.md#section "Target title"', $moved);
+		$this->assertStringContainsString("[collapsed]: <../target.md?mode=1#part> 'Title'", $moved);
+		$this->assertStringContainsString('[shortcut]: ../target.md (Title)', $moved);
+		$this->assertStringContainsString('[image]: ../.attachments.1/photo.png "Photo"', $moved);
+		$this->assertContains(['text' => 'missing', 'target' => '../missing.md'], $converted['broken_links']);
+		$this->assertNotContains('full', array_column($converted['broken_links'], 'text'));
+	}
+
+	public function testCodeSpansAndEscapedBracketsAreNeitherRebasedNorAudited(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$examples = <<<'MD'
+`[single](missing.md)` and `![image](photo.png)`.
+``[double](missing.md) ` literal backtick``
+Examples: ```[triple](missing.md) `` literal double```
+``[multiline](missing.md)
+[code]: missing.md "title"``
+\[escaped](missing.md) and !\[image](photo.png)
+\[reference]: missing.md "title"
+\[[wiki]]
+~~~markdown
+[fenced](missing.md)
+```
+[still fenced]: missing.md
+~~~
+MD;
+		$wikiRoot->newFile('topic.md')->putContent($examples);
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$result = $service->writePage(42, 'topic/child.md', '# Child', 'create', null, self::COLLECTIVE);
+
+		$this->assertSame($examples, $wikiRoot->get('topic/Readme.md')->getContent());
+		$this->assertSame([['from' => 'topic.md', 'to' => 'topic/Readme.md']], $result['converted_to_parent_pages']);
+		$this->assertArrayNotHasKey('warnings', $result);
+		$write = $service->writePage(42, 'examples.md', $examples, 'create', null, self::COLLECTIVE);
+		$this->assertSame(0, $write['links_checked']);
+		$this->assertArrayNotHasKey('broken_links', $write);
+	}
+
+	public function testIndexAndSuggestedTargetsEncodeEveryPathSegment(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$wikiRoot->newFolder('folder #?%')->newFile('lesson#1%20 (ä).md')->putContent('# Lesson');
+		$service = $this->createCollectiveService($wikiRoot);
+
+		$result = $service->writePage(42, 'note.md', '[Lesson](lesson%231%2520%20%28%C3%A4%29.md)', 'create', null, self::COLLECTIVE);
+
+		$target = 'folder%20%23%3F%25/lesson%231%2520%20%28%C3%A4%29.md';
+		$this->assertStringContainsString('[Lesson](' . $target . ')', $wikiRoot->get('index.md')->getContent());
+		$this->assertSame($target, $result['broken_links'][0]['suggested_target']);
+	}
+
+	/** @return array<string,array{bool}> */
+	public static function managedIndexFormats(): array {
+		return ['current section' => [false], 'legacy markers' => [true]];
+	}
+
+	#[DataProvider('managedIndexFormats')]
+	public function testDollarNumberTitlesAndPathsAreLiteralInManagedIndex(bool $legacy): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		if ($legacy) {
+			$wikiRoot->get('index.md')->putContent("# Index\n<!-- EDUC-AI-WIKI-FILE-INDEX:START -->\nOld\n<!-- EDUC-AI-WIKI-FILE-INDEX:END -->\n");
+		}
+		$service->writePage(42, 'cost$1.md', '# Cost $100 ${1} \\1', 'create', null, self::COLLECTIVE);
+
+		$this->assertStringContainsString('[Cost $100 ${1} \\1](cost%241.md) - `cost$1.md`', $wikiRoot->get('index.md')->getContent());
+		$this->assertSame('# Cost $100 ${1} \\1', $wikiRoot->get('cost$1.md')->getContent());
+	}
+
+	public function testEveryWriteModeAndEachParentConversionIsLoggedWithoutPageContent(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$wikiRoot->newFile('topic.md')->putContent('# Secret parent content');
+		$wikiRoot->newFolder('topic')->newFile('nested.md')->putContent('# Secret nested content');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->writePage(42, 'topic/nested/child.md', 'Secret child content', 'create', null, self::COLLECTIVE);
+		$service->writePage(42, 'topic/nested/child.md', 'Changed secret', 'overwrite', null, self::COLLECTIVE);
+		$service->writePage(42, 'topic/nested/child.md', ' Appended secret', 'append', null, self::COLLECTIVE);
+		$log = $wikiRoot->get('log.md')->getContent();
+
+		foreach (['converted topic/Readme.md (from topic.md)', 'converted topic/nested/Readme.md (from topic/nested.md)', 'created topic/nested/child.md', 'overwritten topic/nested/child.md', 'appended topic/nested/child.md'] as $event) {
+			$this->assertSame(1, substr_count($log, $event));
+		}
+		$this->assertMatchesRegularExpression('/- \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] created topic\/nested\/child.md/', $log);
+		$this->assertStringNotContainsString('secret', strtolower($log));
+	}
+
+	public function testAutomaticLogKeepsTheFullPathAndLogsCompletedConversionsEvenIfTheChildWriteFails(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$path = str_repeat('a', 180) . '.md';
+		$service->writePage(42, $path, '# Page', 'create', null, self::COLLECTIVE);
+		$this->assertStringContainsString('created ' . $path, $wikiRoot->get('log.md')->getContent());
+		$wikiRoot->newFile('topic.md')->putContent('# Topic');
+		$wikiRoot->newFolder('topic')->failNewFileWith = new NotPermittedException('Child creation denied');
+
+		$error = $this->wikiError(fn () => $service->writePage(42, 'topic/child.md', '# Child', 'create', null, self::COLLECTIVE));
+
+		$this->assertSame(WikiException::FORBIDDEN, $error->getErrorCode());
+		$this->assertSame('# Topic', $wikiRoot->get('topic/Readme.md')->getContent());
+		$log = $wikiRoot->get('log.md')->getContent();
+		$this->assertStringContainsString('converted topic/Readme.md (from topic.md)', $log);
+		$this->assertStringNotContainsString('created topic/child.md', $log);
+	}
+
+	public function testManagedRootWritesDoNotGenerateRecursiveLogEntriesButNestedPagesDo(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$before = $wikiRoot->get('log.md')->getContent();
+		foreach (['index.md', 'schema.md'] as $path) {
+			$service->writePage(42, $path, '# Updated', 'overwrite', null, self::COLLECTIVE);
+			$this->assertSame($before, $wikiRoot->get('log.md')->getContent());
+		}
+		$service->writePage(42, 'log.md', '# User log', 'overwrite', null, self::COLLECTIVE);
+		$this->assertSame('# User log', $wikiRoot->get('log.md')->getContent());
+		$service->writePage(42, 'topic/index.md', '# Nested', 'create', null, self::COLLECTIVE);
+		$this->assertStringContainsString('created topic/index.md', $wikiRoot->get('log.md')->getContent());
+		$service->logEvent(42, 'Extra decision', 'Useful context', self::COLLECTIVE);
+		$log = $wikiRoot->get('log.md')->getContent();
+		$this->assertStringContainsString('Useful context', $log);
+		$this->assertStringNotContainsString('appended log.md', $log);
+	}
+
+	public function testAutomaticLogFailureIsReportedWithoutLosingTheSavedPage(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$wikiRoot->get('log.md')->putContent(str_repeat('x', 524288));
+
+		$result = $service->writePage(42, 'page.md', '# Page', 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertSame('# Page', $wikiRoot->get('page.md')->getContent());
+		$this->assertSame('log_not_updated', $result['warnings'][0]['code']);
+		$this->assertStringContainsString('[Page](page.md)', $wikiRoot->get('index.md')->getContent());
+	}
+
+	public function testNewSchemasDescribeAutomaticLoggingWithoutRewritingExistingSchemas(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$this->assertStringContainsString('logged automatically', $wikiRoot->get('schema.md')->getContent());
+		$this->assertStringContainsString('not duplicate page-change entries', $wikiRoot->get('schema.md')->getContent());
+		$wikiRoot->get('schema.md')->putContent('# Custom schema');
+		$service->writePage(42, 'page.md', '# Page', 'create', null, self::COLLECTIVE);
+		$service->initializeWiki(42, self::COLLECTIVE);
+		$this->assertSame('# Custom schema', $wikiRoot->get('schema.md')->getContent());
+	}
+
 	private function nodeOrNull(InMemoryFolder $folder, string $path): mixed {
 		try {
 			return $folder->get($path);

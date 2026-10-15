@@ -62,6 +62,20 @@ class WikiRootMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	public function hasActiveAssignments(int $rootId): bool {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('root_id')
+			->from('educai_wiki_root_bots')
+			->where($qb->expr()->eq('root_id', $qb->createNamedParameter($rootId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('active', $qb->createNamedParameter(true, IQueryBuilder::PARAM_BOOL)))
+			->setMaxResults(1);
+
+		$result = $qb->executeQuery();
+		$found = $result->fetchOne() !== false;
+		$result->closeCursor();
+		return $found;
+	}
+
 	/**
 	 * @return array<int,WikiRoot>
 	 */
