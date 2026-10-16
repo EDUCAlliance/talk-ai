@@ -110,7 +110,7 @@ test('refresh keeps admin default, fallback, allowed models and overrides unchan
 	assert.equal(state.modelProviders[1].status, 'stale')
 	const missing = modelSelection.modelOptionsWithCurrent(state.availableModelOptions, state.settings.defaultModel).find(option => option.id === 'secondary:missing')
 	assert.equal(missing.availability, 'missing')
-	assert.match(missing.label, /not in current catalogue/)
+	assert.match(missing.label, /not listed/)
 })
 
 test('full HTTP failure retains prior model choices and exposes a useful status', async () => {
@@ -344,7 +344,7 @@ test('stored models of a provider without a model list are manual entries, not m
 	assert.equal(byId['primary:microsoft/gpt-5.4'].availability, 'manual')
 	assert.equal(byId['primary:microsoft/gpt-5.4'].label, 'Primary · microsoft/gpt-5.4')
 	assert.equal(byId['secondary:gone'].availability, 'missing')
-	assert.match(byId['secondary:gone'].label, /not in current catalogue/)
+	assert.match(byId['secondary:gone'].label, /not listed/)
 })
 
 test('a bot with an unqualified model can pin it to a provider without a release', () => {

@@ -1094,12 +1094,12 @@ export default {
 				this.settings.modelOptions = modelSelection.normalizeModelOptions(response.data?.model_options, response.data?.models)
 				this.modelProviders = Array.isArray(response.data?.providers) ? response.data.providers : []
 				this.modelLoadError = this.modelProviders.some(provider => ['stale', 'error'].includes(provider.status))
-					? t('educai', 'Some provider catalogues could not be updated. Saved model choices are still available.')
+					? t('educai', 'Some provider model lists could not be updated. Saved model choices are still available.')
 					: ''
 				await this.refreshSavedModelBindings()
 			} catch (e) {
 				this.settings.modelOptions = this.settings.modelOptions.map(option => ({ ...option, availability: 'stale' }))
-				this.modelLoadError = t('educai', 'Could not update the model catalogue. Saved model choices are still available.')
+				this.modelLoadError = t('educai', 'Could not update the model list. Saved model choices are still available.')
 			}
 		},
 		async refreshSavedModelBindings() {

@@ -16,10 +16,10 @@
 				{{ t('educai', 'This saved model has no provider binding. Choose a provider-specific model to make routing explicit. Keeping it unchanged preserves the saved value.') }}
 			</template>
 			<template v-else-if="selectedAvailability === 'missing'">
-				{{ t('educai', 'This model is not in the current catalogue. Your selection is preserved; it may still be usable.') }}
+				{{ t('educai', 'The provider does not list this model. Your selection is preserved; it may still be usable.') }}
 			</template>
 			<template v-else-if="selectedAvailability === 'stale'">
-				{{ t('educai', 'Shown from the last successful catalogue. Model availability has not been verified again.') }}
+				{{ t('educai', 'Shown from the last model list that loaded successfully. Model availability has not been verified again.') }}
 			</template>
 		</p>
 		<details v-if="allowManual" class="model-selector__manual">
@@ -53,7 +53,7 @@
 				</button>
 			</div>
 			<p class="model-selector__hint">
-				{{ t('educai', 'Useful when a provider does not publish a model catalogue. Use the model ID expected by that provider.') }}
+				{{ t('educai', 'Useful when a provider does not publish a model list. Use the model ID expected by that provider.') }}
 			</p>
 			<p v-if="manualError" class="model-selector__error" role="alert">
 				{{ manualError }}

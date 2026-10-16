@@ -42,7 +42,8 @@
 					<span v-for="tag in item.tags"
 						:key="tag"
 						class="ta-chip"
-						:class="tagClass(tag)">{{ tagLabel(tag) }}</span>
+						:class="tagClass(tag)"
+						:title="tagTitle(tag)">{{ tagLabel(tag) }}</span>
 				</span>
 			</div>
 			<div v-if="group.hiddenCount > 0" :key="`${group.endpoint}-more`" class="ta-allow__more">
@@ -138,7 +139,7 @@ export default {
 			if (group.endpoint === 'unbound') return name
 			const parts = []
 			if (group.total > 0) parts.push(t('educai', '{selected} of {total} released', { selected: group.selectedCount, total: group.total }))
-			if (group.missingCount > 0) parts.push(n('educai', '{count} not in catalogue', '{count} not in catalogue', group.missingCount, { count: group.missingCount }))
+			if (group.missingCount > 0) parts.push(n('educai', '{count} not listed', '{count} not listed', group.missingCount, { count: group.missingCount }))
 			if (group.manualCount > 0) parts.push(n('educai', '{count} entered manually', '{count} entered manually', group.manualCount, { count: group.manualCount }))
 			return parts.length > 0 ? `${name} — ${parts.join(' · ')}` : name
 		},
@@ -146,10 +147,15 @@ export default {
 			switch (tag) {
 			case 'default': return t('educai', 'Default')
 			case 'fallback': return t('educai', 'Fallback')
-			case 'new': return t('educai', 'New in catalogue')
+			case 'new': return t('educai', 'Newly listed')
 			case 'stale': return t('educai', 'Last known list')
-			default: return t('educai', 'Not in catalogue')
+			default: return t('educai', 'Not listed')
 			}
+		},
+		tagTitle(tag) {
+			return tag === 'missing'
+				? t('educai', 'The provider does not list this model. Requests may fail; Talk AI then uses the fallback model if one is set.')
+				: null
 		},
 		tagClass(tag) {
 			if (tag === 'missing') return 'ta-chip--warn'
