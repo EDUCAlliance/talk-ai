@@ -100,7 +100,8 @@ class RagIngestionService {
         foreach ($this->queuedJobs($sourceId) as $job) {
             $argument = $job->getArgument();
             if ((int)($argument['attempt'] ?? 0) > 0) {
-                $this->jobList->removeById((int)$job->getId());
+                // Job IDs are integers up to Nextcloud 32 and strings from 33 on, as removeById() expects.
+                $this->jobList->removeById($job->getId());
             }
         }
         $this->jobList->add(ReindexBotSourceJob::class, [

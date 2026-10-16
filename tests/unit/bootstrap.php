@@ -446,7 +446,8 @@ interface IJobList {
 	public function add($job, mixed $argument = null): void;
 	public function scheduleAfter(string $job, int $runAfter, mixed $argument = null): void;
 	public function remove($job, mixed $argument = null): void;
-	public function removeById(int $id): void;
+	// int up to Nextcloud 32, string from 33 on
+	public function removeById($id): void;
 	public function has($job, mixed $argument): bool;
 	public function getJobsIterator($job, ?int $limit, int $offset): iterable;
 }

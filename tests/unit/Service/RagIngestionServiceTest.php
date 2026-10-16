@@ -316,6 +316,35 @@ class RagIngestionServiceTest extends TestCase {
 		$this->assertFalse($service->isQueued(3));
 	}
 
+	public static function jobIds(): array {
+		return [
+			'Nextcloud 30 to 32' => [81],
+			'Nextcloud 33 and later' => ['141125627021864960'],
+		];
+	}
+
+	#[DataProvider('jobIds')]
+	public function testExplicitReindexPassesTheIdOfAScheduledRetryOnUnchanged(int|string $jobId): void {
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willReturn($this->source());
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('getJobsIterator')->willReturn([$this->job($jobId, ['sourceId' => 1, 'force' => false, 'attempt' => 1])]);
+		$jobs->expects($this->once())->method('removeById')->with($this->identicalTo($jobId));
+		$service = new RagIngestionService(
+			$mapper,
+			$this->createMock(EmbeddingMapper::class),
+			$this->createMock(EmbeddingClient::class),
+			$this->createMock(DoclingClient::class),
+			$this->createMock(UrlContentFetcher::class),
+			$this->createMock(SettingsService::class),
+			$this->createMock(IRootFolder::class),
+			$jobs,
+			$this->createMock(LoggerInterface::class)
+		);
+
+		$service->enqueueSource(1, true);
+	}
+
 	public function testBackendFailureDuringLookupKeepsTheIndexAndSchedulesARetry(): void {
 		$source = $this->source();
 		$folder = $this->createMock(Folder::class);
@@ -618,7 +647,7 @@ class RagIngestionServiceTest extends TestCase {
 	/**
 	 * @param array<string,mixed> $argument
 	 */
-	private function job(int $id, array $argument): IJob {
+	private function job(int|string $id, array $argument): IJob {
 		$job = $this->createMock(IJob::class);
 		$job->method('getId')->willReturn($id);
 		$job->method('getArgument')->willReturn($argument);
