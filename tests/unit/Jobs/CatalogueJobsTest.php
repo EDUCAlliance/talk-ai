@@ -28,7 +28,7 @@ class CatalogueJobsTest extends TestCase {
 		$configuration->expects($this->never())->method('isRequired');
 		$configuration->expects($this->never())->method('markQueued');
 
-		(new ReindexCatalogueEmbeddingsJob($time, $service, $logger))->run(['trigger' => 'admin_manual']);
+		(new ReindexCatalogueEmbeddingsJob($time, $service, $logger, $jobs))->run(['trigger' => 'admin_manual']);
 		$refresh = new RefreshCatalogueEmbeddingsJob($time, $service, $jobs, $logger, $configuration);
 		(new \ReflectionMethod($refresh, 'run'))->invoke($refresh, null);
 	}
@@ -38,7 +38,7 @@ class CatalogueJobsTest extends TestCase {
 		$service->method('isEnabled')->willReturn(true);
 		$service->expects($this->once())->method('reindex')->willReturn(['success' => true, 'count' => 2]);
 		$job = new ReindexCatalogueEmbeddingsJob(
-			$this->createMock(ITimeFactory::class), $service, $this->createMock(LoggerInterface::class),
+			$this->createMock(ITimeFactory::class), $service, $this->createMock(LoggerInterface::class), $this->createMock(IJobList::class),
 		);
 
 		$job->run(null);
@@ -113,5 +113,16 @@ class CatalogueJobsTest extends TestCase {
 
 		$this->expectException(\RuntimeException::class);
 		(new \ReflectionMethod($refresh, 'run'))->invoke($refresh, null);
+	}
+
+	public function testRunPausedByTheProviderIsScheduledForTheRequestedTime(): void {
+		$service = $this->createMock(CatalogueEmbeddingService::class);
+		$service->method('isEnabled')->willReturn(true);
+		$service->method('reindex')->willReturn(['success' => false, 'count' => 10, 'retry_at' => 1900000000]);
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('has')->with(ReindexCatalogueEmbeddingsJob::class, null)->willReturn(false);
+		$jobs->expects($this->once())->method('scheduleAfter')->with(ReindexCatalogueEmbeddingsJob::class, 1900000000);
+
+		(new ReindexCatalogueEmbeddingsJob($this->createMock(ITimeFactory::class), $service, $this->createMock(LoggerInterface::class), $jobs))->run(null);
 	}
 }

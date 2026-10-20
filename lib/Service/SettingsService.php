@@ -10,6 +10,9 @@ use OCP\AppFramework\Db\DoesNotExistException;
 use Psr\Log\LoggerInterface;
 
 class SettingsService {
+	/** Code of the InvalidArgumentException for an invalid chunk size or overlap. */
+	public const INVALID_CHUNK_SETTINGS = 4221;
+
 	public const DEFAULT_TEMPERATURE = 0.2;
 	public const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
 	/** Administrative ceiling, not a guarantee of any model's output capacity. */
@@ -243,6 +246,9 @@ class SettingsService {
 		$this->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
 		$clear = array_fill_keys(self::validateClearCredentials($clearCredentials), true);
 		$settings = $this->mapper->getSettings();
+		if ($ragChunkSize !== null || $ragChunkOverlap !== null) {
+			$this->validateChunkSettings($ragChunkSize ?? $settings->getRagChunkSize(), $ragChunkOverlap ?? $settings->getRagChunkOverlap());
+		}
 		$previousSettings = clone $settings;
 		$shouldSyncTalkBot = false;
 		$talkBotSecret = '';
@@ -825,6 +831,17 @@ class SettingsService {
 		}
 
 		return array_values(array_unique($clearCredentials));
+	}
+
+	/**
+	 * An overlap of the chunk size or more never advances through the text.
+	 */
+	private function validateChunkSettings(?int $chunkSize, ?int $chunkOverlap): void {
+		$chunkSize ??= 750;
+		$chunkOverlap ??= 50;
+		if ($chunkSize < 1 || $chunkOverlap < 0 || $chunkOverlap >= $chunkSize) {
+			throw new \InvalidArgumentException('The chunk overlap must be smaller than the chunk size', self::INVALID_CHUNK_SETTINGS);
+		}
 	}
 
 	public function validateDoclingOptions(?string $profile, ?string $authMode): void {

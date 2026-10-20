@@ -9,15 +9,34 @@ use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\Embedding;
 use OCA\EducAI\Db\EmbeddingMapper;
+use OCA\EducAI\Exception\DoclingEmptyResultException;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
+use OCA\EducAI\Exception\KnowledgeSourceException;
 use OCA\EducAI\Jobs\ReindexBotSourceJob;
+use OCP\AppFramework\Db\DoesNotExistException;
+use OCP\BackgroundJob\IJob;
 use OCP\BackgroundJob\IJobList;
 use OCP\Files\File;
 use OCP\Files\Folder;
+use OCP\Files\ForbiddenException;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
+use OCP\Files\NotPermittedException;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 class RagIngestionService {
+    /** Retries after a source lookup failed for a backend reason (storage, database). */
+    private const TEMPORARY_FAILURE_RETRY_DELAYS = [600, 1800, 3600];
+    /** Retries after the embedding provider asked for a pause without any progress in between. */
+    private const MAX_RATE_LIMIT_RETRIES = 5;
+    private const MAX_REPORTED_EXTENSIONS = 5;
+    /** Chunks embedded per provider call; each batch is kept, so a retry continues where it stopped. */
+    private const EMBEDDING_BATCH_SIZE = 50;
+    /** A running index updates its progress far more often; older "running" rows were interrupted. */
+    public const RUNNING_LEASE_SECONDS = 1800;
+    private const RUNNING_STAGES = ['collecting', 'extracting', 'chunking', 'embedding', 'storing'];
+
     private BotSourceMapper $botSourceMapper;
     private EmbeddingMapper $embeddingMapper;
     private EmbeddingClient $embeddingClient;
@@ -27,6 +46,9 @@ class RagIngestionService {
     private IRootFolder $rootFolder;
     private IJobList $jobList;
     private LoggerInterface $logger;
+    private RagSourceLocator $sourceLocator;
+    /** Chunks newly staged by the current run, to tell a stalled retry chain from a progressing one. */
+    private int $stagedInThisRun = 0;
 
     public function __construct(
         BotSourceMapper $botSourceMapper,
@@ -37,7 +59,8 @@ class RagIngestionService {
         SettingsService $settingsService,
         IRootFolder $rootFolder,
         IJobList $jobList,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        ?RagSourceLocator $sourceLocator = null
     ) {
         $this->botSourceMapper = $botSourceMapper;
         $this->embeddingMapper = $embeddingMapper;
@@ -48,14 +71,18 @@ class RagIngestionService {
         $this->rootFolder = $rootFolder;
         $this->jobList = $jobList;
         $this->logger = $logger;
+        $this->sourceLocator = $sourceLocator ?? new RagSourceLocator($rootFolder);
     }
 
     public function enqueueSource(int $sourceId, bool $force = false): void {
         // Mark source as pending immediately so UI can show progress
         try {
             $source = $this->botSourceMapper->findById($sourceId);
-            $source->setStatus('pending');
-            $source->setErrorMessage(null);
+            // An unreachable source stays out of answers until its job has found it again.
+            if ($source->getStatus() !== KnowledgeSourceStatus::UNAVAILABLE) {
+                $source->setStatus(KnowledgeSourceStatus::PENDING);
+                $source->setErrorMessage(null);
+            }
             $source->setProgress(0);
             $source->setProgressStage(null);
             $source->setProgressCurrent(0);
@@ -69,15 +96,65 @@ class RagIngestionService {
             ]);
         }
 
+        // This run replaces scheduled retries, so only one retry chain exists per source.
+        foreach ($this->queuedJobs($sourceId) as $job) {
+            $argument = $job->getArgument();
+            if ((int)($argument['attempt'] ?? 0) > 0) {
+                // Job IDs are integers up to Nextcloud 32 and strings from 33 on, as removeById() expects.
+                $this->jobList->removeById($job->getId());
+            }
+        }
         $this->jobList->add(ReindexBotSourceJob::class, [
             'sourceId' => $sourceId,
             'force' => $force,
         ]);
     }
 
-    public function ingestSourceById(int $sourceId, bool $force = false): void {
+    /**
+     * Whether an indexing job for the source is queued, including retries scheduled for later.
+     */
+    public function isQueued(int $sourceId): bool {
+        return $this->queuedJobs($sourceId) !== [];
+    }
+
+    /**
+     * Whether the source is queued, waiting for a scheduled retry, or being indexed right now.
+     * One-shot jobs leave the job list when they start, so a running index is recognised by
+     * its recent progress.
+     */
+    public function isBusy(BotSource $source): bool {
+        return $this->isQueued($source->getId()) || self::isRunning($source, time());
+    }
+
+    public static function isRunning(BotSource $source, int $now): bool {
+        return $source->getStatus() === KnowledgeSourceStatus::PENDING
+            && in_array($source->getProgressStage(), self::RUNNING_STAGES, true)
+            && $source->getUpdatedAt() > $now - self::RUNNING_LEASE_SECONDS;
+    }
+
+    /**
+     * @return list<IJob>
+     */
+    private function queuedJobs(int $sourceId): array {
+        $jobs = [];
+        foreach ($this->jobList->getJobsIterator(ReindexBotSourceJob::class, null, 0) as $job) {
+            $argument = $job->getArgument();
+            if (is_array($argument) && (int)($argument['sourceId'] ?? 0) === $sourceId) {
+                $jobs[] = $job;
+            }
+        }
+
+        return $jobs;
+    }
+
+    public function ingestSourceById(int $sourceId, bool $force = false, int $attempt = 0): void {
         $source = $this->botSourceMapper->findById($sourceId);
-        $this->ingestSource($source, $force);
+        if ($attempt > 0 && $source->getStatus() === KnowledgeSourceStatus::READY) {
+            // Another run indexed the source after this retry was scheduled.
+            $this->logger->debug('Skipping obsolete RAG source retry', ['sourceId' => $sourceId, 'attempt' => $attempt]);
+            return;
+        }
+        $this->ingestSource($source, $force, $attempt);
     }
 
     /**
@@ -102,21 +179,25 @@ class RagIngestionService {
         $source->setProgressStage(null);
     }
 
-    public function ingestSource(BotSource $source, bool $force = false): void {
+    public function ingestSource(BotSource $source, bool $force = false, int $attempt = 0): void {
+        $this->stagedInThisRun = 0;
         $now = time();
         $source->setUpdatedAt($now);
-        $source->setStatus('pending');
-        $source->setErrorMessage(null);
+        // An unreachable source keeps its status, and stays out of answers, until it is found again.
+        if ($source->getStatus() !== KnowledgeSourceStatus::UNAVAILABLE) {
+            $source->setStatus(KnowledgeSourceStatus::PENDING);
+            $source->setErrorMessage(null);
+        }
         $this->resetProgress($source);
         $this->botSourceMapper->update($source);
 
         $ragConfig = $this->settingsService->getRagConfig();
         if (!$ragConfig['rag_enabled']) {
-            $source->setStatus('error');
-            $source->setErrorMessage('RAG is disabled by the administrator');
-            $source->setUpdatedAt(time());
-            $this->resetProgress($source);
-            $this->botSourceMapper->update($source);
+            $this->markFailed($source, KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::encode(
+                KnowledgeSourceStatus::RAG_DISABLED,
+                [],
+                'RAG is disabled by the administrator'
+            ));
             return;
         }
 
@@ -128,19 +209,109 @@ class RagIngestionService {
             }
 
             // Handle file/folder sources
-            $this->ingestFileSource($source, $force, $ragConfig);
-            
-        } catch (Exception $e) {
+            $this->ingestFileSource($source, $force, $ragConfig, $attempt);
+        } catch (EmbeddingRateLimitedException $e) {
+            // The previous index stays untouched: embeddings are replaced only after all batches succeeded.
+            $this->deferAfterRateLimit($source, $force, $attempt, $e);
+        } catch (KnowledgeSourceException $e) {
+            $this->logger->warning('RAG source could not be indexed', [
+                'sourceId' => $source->getId(),
+                'code' => $e->getErrorCode(),
+                'parameters' => $e->getParameters(),
+                'detail' => $e->getMessage(),
+            ]);
+            // A file the owner may no longer read must not stay answerable through the old index.
+            $status = $e->getErrorCode() === KnowledgeSourceStatus::SOURCE_ACCESS_DENIED
+                ? KnowledgeSourceStatus::UNAVAILABLE
+                : KnowledgeSourceStatus::ERROR;
+            $this->markFailed($source, $status, KnowledgeSourceStatus::encode(
+                $e->getErrorCode(),
+                $e->getParameters(),
+                $e->getMessage()
+            ));
+        } catch (Throwable $e) {
+            // Also PHP errors: the source must not stay "pending" without a running job.
             $this->logger->error('RAG ingestion failed', [
                 'sourceId' => $source->getId(),
                 'exception' => $e,
             ]);
-            $source->setStatus('error');
-            $source->setErrorMessage($e->getMessage());
-            $source->setUpdatedAt(time());
-            $this->resetProgress($source);
-            $this->botSourceMapper->update($source);
+            $this->markFailed($source, KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::encode(
+                KnowledgeSourceStatus::INDEXING_FAILED,
+                [],
+                $e->getMessage()
+            ));
         }
+    }
+
+    private function markFailed(BotSource $source, string $status, string $errorMessage): void {
+        if ($source->getStatus() === KnowledgeSourceStatus::UNAVAILABLE && $status !== KnowledgeSourceStatus::READY) {
+            // Not indexed again in this run: its old index must stay out of answers.
+            $status = KnowledgeSourceStatus::UNAVAILABLE;
+        }
+        $source->setStatus($status);
+        $source->setErrorMessage($errorMessage);
+        $source->setUpdatedAt(time());
+        $this->resetProgress($source);
+        $this->botSourceMapper->update($source);
+    }
+
+    private function deferAfterRateLimit(BotSource $source, bool $force, int $attempt, EmbeddingRateLimitedException $e): void {
+        $retryAfter = max(1, $e->getRetryAfterSeconds());
+        $retryAt = time() + $retryAfter + 5;
+        // Embedded batches are kept, so only retries without progress count against the limit.
+        $nextAttempt = $this->stagedInThisRun > 0 ? 1 : $attempt + 1;
+        $willRetry = $nextAttempt <= self::MAX_RATE_LIMIT_RETRIES;
+        $this->logger->warning('Embedding provider is rate limiting; RAG source indexing deferred', [
+            'sourceId' => $source->getId(),
+            'retry_after_seconds' => $retryAfter,
+            'attempt' => $attempt,
+            'staged_chunks' => $this->stagedInThisRun,
+            'will_retry' => $willRetry,
+        ]);
+        $message = KnowledgeSourceStatus::encode(
+            KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED,
+            ['retry_at' => $willRetry ? $retryAt : 0],
+            $e->getMessage()
+        );
+        if (!$willRetry) {
+            $this->markFailed($source, KnowledgeSourceStatus::ERROR, $message);
+            return;
+        }
+
+        $this->markFailed($source, KnowledgeSourceStatus::PENDING, $message);
+        $source->setProgressStage(KnowledgeSourceStatus::STAGE_WAITING);
+        $this->botSourceMapper->update($source);
+        $this->scheduleRetry($source->getId(), $retryAt, $force, $nextAttempt);
+    }
+
+    /**
+     * Schedule the next attempt unless another job for the source is already queued
+     * (an explicit reindex started meanwhile): one retry chain per source.
+     */
+    private function scheduleRetry(int $sourceId, int $retryAt, bool $force, int $attempt): void {
+        if ($this->isQueued($sourceId)) {
+            $this->logger->debug('RAG source already has a queued job; no extra retry scheduled', ['sourceId' => $sourceId]);
+            return;
+        }
+        $this->jobList->scheduleAfter(ReindexBotSourceJob::class, $retryAt, [
+            'sourceId' => $sourceId,
+            'force' => $force,
+            'attempt' => $attempt,
+        ]);
+    }
+
+    private function httpStatusFromThrowable(Throwable $exception): ?int {
+        for ($candidate = $exception; $candidate instanceof Throwable; $candidate = $candidate->getPrevious()) {
+            if (method_exists($candidate, 'hasResponse') && method_exists($candidate, 'getResponse') && $candidate->hasResponse()) {
+                $response = $candidate->getResponse();
+                if (is_object($response) && method_exists($response, 'getStatusCode')) {
+                    $status = (int)$response->getStatusCode();
+                    return $status >= 100 && $status <= 599 ? $status : null;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -162,12 +333,16 @@ class RagIngestionService {
         // Stage 1: Fetching URL (0-20%)
         $this->updateProgress($source, 'collecting', 0, 0, 1);
         
-        $fetchResult = $this->urlContentFetcher->fetchAndExtract($url);
+        try {
+            $fetchResult = $this->urlContentFetcher->fetchAndExtract($url);
+        } catch (Exception $e) {
+            throw new KnowledgeSourceException(KnowledgeSourceStatus::URL_FETCH_FAILED, [], $e->getMessage(), $e);
+        }
         $content = $fetchResult['content'];
         $contentType = $fetchResult['content_type'];
         
-        if ($content === '') {
-            throw new Exception('No content could be extracted from URL');
+        if (trim($content) === '') {
+            throw new KnowledgeSourceException(KnowledgeSourceStatus::NO_TEXT, ['empty' => 1], 'No content could be extracted from URL');
         }
 
         $this->updateProgress($source, 'collecting', 20, 1, 1);
@@ -201,15 +376,14 @@ class RagIngestionService {
         }
 
         if (count($chunks) === 0) {
-            throw new Exception('Unable to extract text content from URL');
+            throw new KnowledgeSourceException(KnowledgeSourceStatus::NO_TEXT, ['empty' => 1], 'Unable to extract text content from URL');
         }
 
         $this->updateProgress($source, 'extracting', 30, 1, 1);
 
-        // Check checksum
-        $newChecksum = sha1($checksumSeed);
-        if (!$force && $source->getChecksum() !== null && $source->getChecksum() === $newChecksum) {
-            $source->setStatus('ready');
+        $newChecksum = $this->indexFingerprint($checksumSeed, $chunkSize, $chunkOverlap);
+        if (!$force && $this->isUnchanged($source, $newChecksum)) {
+            $source->setStatus(KnowledgeSourceStatus::READY);
             $source->setUpdatedAt(time());
             $source->setLastIndexedAt(time());
             $source->setProgress(100);
@@ -219,7 +393,7 @@ class RagIngestionService {
         }
 
         // Stage 3: Generate and store embeddings
-        $this->generateAndStoreEmbeddings($source, $chunks, $newChecksum);
+        $this->generateAndStoreEmbeddings($source, $chunks, $newChecksum, null, $force);
     }
 
     /**
@@ -227,36 +401,32 @@ class RagIngestionService {
      * 
      * @param array<string,mixed> $ragConfig
      */
-    private function ingestFileSource(BotSource $source, bool $force, array $ragConfig): void {
+    private function ingestFileSource(BotSource $source, bool $force, array $ragConfig, int $attempt = 0): void {
         // Stage 1: Collecting files (0-5%)
         $this->updateProgress($source, 'collecting', 0, 0, 0);
-        
-        $ownerFolder = $this->rootFolder->getUserFolder($source->getOwnerUid());
-        
-        // Try to resolve the target node - if the file/folder was deleted, clean up
-        try {
-            $targetNode = $this->resolveTargetNode($source, $ownerFolder);
-        } catch (Exception $e) {
-            // File/folder no longer exists - clean up embeddings and mark as deleted
-            $this->logger->info('RAG source file/folder no longer exists, cleaning up embeddings', [
-                'sourceId' => $source->getId(),
-                'nodeId' => $source->getNodeId(),
-            ]);
-            $this->embeddingMapper->deleteBySource($source->getId());
-            $source->setStatus('error');
-            $source->setErrorMessage('File or folder no longer exists. Embeddings have been cleaned up. You can remove this source.');
-            $source->setChecksum(null);
-            $source->setUpdatedAt(time());
-            $this->resetProgress($source);
-            $this->botSourceMapper->update($source);
+
+        $location = $this->sourceLocator->locate($source);
+        if ($location['state'] !== RagSourceLocator::FOUND || $location['node'] === null || $location['folder'] === null) {
+            $this->handleUnresolvedSource($source, $location['state'], $location['exception'], $force, $attempt);
             return;
         }
-        
-        $files = $this->collectFiles($targetNode, $ownerFolder->getPath());
+        $targetNode = $location['node'];
+        $ownerFolder = $location['folder'];
+
+        $stats =['metadata' => 0, 'unsupported' => 0, 'needs_converter' => 0, 'empty' => 0, 'failed' => 0, 'indexed' => 0];
+        $unsupportedExtensions = [];
+        try {
+            $files = $this->collectFiles($targetNode, $ownerFolder->getPath(), $stats);
+        } catch (NotPermittedException|ForbiddenException $e) {
+            // A folder the owner may no longer list must not stay answerable through the old index.
+            throw new KnowledgeSourceException(KnowledgeSourceStatus::SOURCE_ACCESS_DENIED, ['folders_denied' => true], 'Listing a folder was denied', $e);
+        }
         $totalFiles = count($files);
-        
+
         if ($totalFiles === 0) {
-            throw new Exception('No readable files found for source');
+            throw $stats['metadata'] > 0
+                ? new KnowledgeSourceException(KnowledgeSourceStatus::METADATA_ONLY, ['metadata' => $stats['metadata']], 'Only operating-system metadata files were found')
+                : new KnowledgeSourceException(KnowledgeSourceStatus::NO_FILES, [], 'No readable files found for source');
         }
         
         $this->updateProgress($source, 'collecting', 5, $totalFiles, $totalFiles);
@@ -279,25 +449,44 @@ class RagIngestionService {
         
         foreach ($files as $fileIndex => $fileInfo) {
             [$file, $relativePath] = $fileInfo;
-            $extractionError = null;
-            $content = $this->extractText($file, $extractionError);
-            if ($content === '') {
-                if ($extractionError !== null) {
-                    $extractionErrors[] = $relativePath . ': ' . $extractionError;
-                }
-                continue;
-            }
-            $checksumSeed .= sha1($content);
-            $segments = $this->chunkText($content, $chunkSize, $chunkOverlap);
-            foreach ($segments as $idx => $segment) {
-                $chunks[] = [
-                    'text' => $segment,
-                    'metadata' => [
-                        'path' => $relativePath,
-                        'offset' => $idx,
-                        'size' => strlen($segment),
-                    ],
-                ];
+            $extraction = $this->extractText($file);
+            switch ($extraction['status']) {
+                case 'denied':
+                    throw new KnowledgeSourceException(
+                        KnowledgeSourceStatus::SOURCE_ACCESS_DENIED,
+                        ['files_denied' => true],
+                        'Reading a file was denied: ' . $relativePath
+                    );
+                case 'failed':
+                    $stats['failed']++;
+                    $extractionErrors[] = $relativePath . ': ' . ($extraction['error'] ?? 'unknown error');
+                    break;
+                case 'unsupported':
+                case 'needs_converter':
+                    $stats[$extraction['status']]++;
+                    $extension = strtolower(pathinfo((string)$file->getName(), PATHINFO_EXTENSION));
+                    if ($extension !== '' && preg_match('/^[a-z0-9]{1,10}$/', $extension) === 1) {
+                        $unsupportedExtensions[$extension] = true;
+                    }
+                    break;
+                case 'empty':
+                    $stats['empty']++;
+                    break;
+                default:
+                    $stats['indexed']++;
+                    $content = $extraction['text'];
+                    $checksumSeed .= sha1($content);
+                    $segments = $this->chunkText($content, $chunkSize, $chunkOverlap);
+                    foreach ($segments as $idx => $segment) {
+                        $chunks[] = [
+                            'text' => $segment,
+                            'metadata' => [
+                                'path' => $relativePath,
+                                'offset' => $idx,
+                                'size' => strlen($segment),
+                            ],
+                        ];
+                    }
             }
             
             // Update progress: 5% to 30% during extraction
@@ -305,21 +494,50 @@ class RagIngestionService {
             $this->updateProgress($source, 'extracting', $extractProgress, $fileIndex + 1, $totalFiles);
         }
 
+        $this->logger->info('RAG source files classified',['sourceId' => $source->getId(), 'files' => $totalFiles] + $stats);
+        $extensions = array_slice(array_keys($unsupportedExtensions), 0, self::MAX_REPORTED_EXTENSIONS);
+
         if (count($extractionErrors) > 0) {
+            // Keep the previous complete index instead of replacing it with a partial one.
             $lastExtractionError = $extractionErrors[count($extractionErrors) - 1];
-            throw new Exception('Unable to extract text content for ingestion. Last extraction error: ' . $lastExtractionError);
+            throw new KnowledgeSourceException(
+                KnowledgeSourceStatus::EXTRACTION_FAILED,
+                ['failed' => $stats['failed'], 'total' => $totalFiles],
+                'Unable to extract text content for ingestion. Last extraction error: ' . $lastExtractionError
+            );
         }
         if (count($chunks) === 0) {
-            throw new Exception('Unable to extract text content for ingestion');
+            $unsupported = $stats['unsupported'] + $stats['needs_converter'];
+            if ($unsupported > 0 && $stats['empty'] === 0) {
+                throw new KnowledgeSourceException(KnowledgeSourceStatus::NO_SUPPORTED_FILES, [
+                    'unsupported' => $unsupported,
+                    'extensions' => $extensions,
+                    'converter_disabled' => $stats['needs_converter'] > 0,
+                ], 'No supported files found for source');
+            }
+            throw new KnowledgeSourceException(KnowledgeSourceStatus::NO_TEXT, [
+                'empty' => $stats['empty'],
+                'unsupported' => $unsupported,
+            ], 'Unable to extract text content for ingestion');
         }
+
+        $skipped = $stats['unsupported'] + $stats['needs_converter'] + $stats['empty'];
+        $notice = $skipped > 0 ? KnowledgeSourceStatus::encode(KnowledgeSourceStatus::SKIPPED_FILES, [
+            'indexed' => $stats['indexed'],
+            'unsupported' => $stats['unsupported'] + $stats['needs_converter'],
+            'empty' => $stats['empty'],
+            'extensions' => $extensions,
+            'converter_disabled' => $stats['needs_converter'] > 0,
+        ]) : null;
 
         // Stage 3: Chunking complete, check checksum (30-35%)
         $this->updateProgress($source, 'chunking', 30, count($chunks), count($chunks));
         
-        $newChecksum = sha1($checksumSeed);
-        if (!$force && $source->getChecksum() !== null && $source->getChecksum() === $newChecksum) {
-            // Content unchanged, skip embedding
-            $source->setStatus('ready');
+        $newChecksum = $this->indexFingerprint($checksumSeed, $chunkSize, $chunkOverlap);
+        if (!$force && $this->isUnchanged($source, $newChecksum)) {
+            // Same content, model and chunking, and every file was readable: the stored index is current.
+            $source->setStatus(KnowledgeSourceStatus::READY);
+            $source->setErrorMessage($notice);
             $source->setUpdatedAt(time());
             $source->setLastIndexedAt(time());
             $source->setProgress(100);
@@ -331,67 +549,135 @@ class RagIngestionService {
         $this->updateProgress($source, 'chunking', 35, count($chunks), count($chunks));
 
         // Generate and store embeddings
-        $this->generateAndStoreEmbeddings($source, $chunks, $newChecksum);
+        $this->generateAndStoreEmbeddings($source, $chunks, $newChecksum, $notice, $force, $attempt);
     }
 
     /**
-     * Generate embeddings and store them in the database
-     * 
-     * @param array<int,array{text:string,metadata:array<string,mixed>}> $chunks
+     * Identity of an index: the extracted content plus everything that shapes its vectors.
      */
-    private function generateAndStoreEmbeddings(BotSource $source, array $chunks, string $newChecksum): void {
-        // Stage 4: Generating embeddings (35-90%)
-        $totalChunks = count($chunks);
-        $this->updateProgress($source, 'embedding', 35, 0, $totalChunks);
-        $embeddingModel = $this->embeddingClient->getActiveModel();
-        
-        // Process embeddings in batches to provide more granular progress updates
-        $batchSize = 50;
-        $allEmbeddings = [];
-        $chunkTexts = array_column($chunks, 'text');
-        
-        for ($i = 0; $i < $totalChunks; $i += $batchSize) {
-            $batchTexts = array_slice($chunkTexts, $i, $batchSize);
-            $batchEmbeddings = $this->embeddingClient->embedTexts($batchTexts, $embeddingModel);
-            $allEmbeddings = array_merge($allEmbeddings, $batchEmbeddings);
-            
-            // Update progress: 35% to 90% during embedding
-            $processedCount = min($i + $batchSize, $totalChunks);
-            $embeddingProgress = 35 + (int)(($processedCount / $totalChunks) * 55);
-            $this->updateProgress($source, 'embedding', $embeddingProgress, $processedCount, $totalChunks);
+    private function indexFingerprint(string $contentSeed, int $chunkSize, int $chunkOverlap): string {
+        return sha1($contentSeed . "\n" . $this->embeddingClient->getActiveModel() . "\n" . $chunkSize . "\n" . min($chunkOverlap, max(0, $chunkSize - 1)));
+    }
+
+    private function isUnchanged(BotSource $source, string $fingerprint): bool {
+        return $source->getChecksum() === $fingerprint
+            && $this->embeddingMapper->countBySourceAndModel($source->getId(), $this->embeddingClient->getActiveModel()) > 0;
+    }
+
+    /**
+     * The owner can no longer reach the node, or the lookup failed.
+     *
+     * Missing or denied sources keep their embeddings but are excluded from answers
+     * (status "unavailable") until the node becomes reachable again or the source
+     * is removed. Backend failures keep the previous index usable and retry later.
+     */
+    private function handleUnresolvedSource(BotSource $source, string $state, ?Throwable $exception, bool $force, int $attempt): void {
+        $context = [
+            'sourceId' => $source->getId(),
+            'nodeId' => $source->getNodeId(),
+            'state' => $state,
+            'exception_class' => $exception !== null ? get_class($exception) : null,
+        ];
+
+        if ($state === RagSourceLocator::MISSING || $state === RagSourceLocator::DENIED) {
+            $this->logger->info('RAG source is not reachable for its owner; excluding it from answers', $context);
+            $code = $state === RagSourceLocator::DENIED
+                ? KnowledgeSourceStatus::SOURCE_ACCESS_DENIED
+                : KnowledgeSourceStatus::SOURCE_MISSING;
+            $this->markFailed($source, KnowledgeSourceStatus::UNAVAILABLE, KnowledgeSourceStatus::encode(
+                $code,
+                [],
+                'File or folder is not reachable for its owner (' . $state . ')'
+            ));
+            return;
         }
 
-        // Stage 5: Storing embeddings (90-100%)
-        $this->updateProgress($source, 'storing', 90, 0, $totalChunks);
-        
-        $this->embeddingMapper->deleteBySource($source->getId());
+        $delay = self::TEMPORARY_FAILURE_RETRY_DELAYS[$attempt] ?? null;
+        $this->logger->warning('RAG source lookup failed temporarily; keeping the previous index', $context + [
+            'retry_in_seconds' => $delay,
+        ]);
+        $this->markFailed($source, KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::encode(
+            KnowledgeSourceStatus::SOURCE_TEMPORARILY_UNAVAILABLE,
+            ['retry_scheduled' => $delay !== null],
+            'Source lookup failed: ' . ($exception !== null ? get_class($exception) : 'unknown')
+        ));
+        if ($delay !== null) {
+            $this->scheduleRetry($source->getId(), time() + $delay, $force, $attempt + 1);
+        }
+    }
 
-        foreach ($allEmbeddings as $index => $vector) {
-            $chunk = $chunks[$index];
-            $embedding = new Embedding();
-            $embedding->setBotId($source->getBotId());
-            $embedding->setSourceId($source->getId());
-            $embedding->setChunkId($source->getId() . ':' . $index);
-            $embedding->setChunkText($chunk['text']);
-            $embedding->setEmbedding(json_encode($vector) ?: '[]');
-            $embedding->setEmbeddingModel($embeddingModel);
-            $embedding->setTokenCount(strlen($chunk['text']));
-            $embedding->setMetadata(json_encode($chunk['metadata']) ?: '{}');
-            $embedding->setScore(null);
-            $embedding->setCreatedAt(time());
-            $embedding->setUpdatedAt(time());
-            $this->embeddingMapper->insert($embedding);
-            
-            // Update progress during storing (90-99%)
-            if ($index % 10 === 0 || $index === $totalChunks - 1) {
-                $storeProgress = 90 + (int)(($index + 1) / $totalChunks * 9);
-                $this->updateProgress($source, 'storing', $storeProgress, $index + 1, $totalChunks);
+    /**
+     * Embed all chunks and publish them as the index of the source.
+     *
+     * Every embedded batch is staged right away, so a retry after a provider pause
+     * continues where it stopped. The finished index replaces the old one in a single
+     * transaction, and only if the source still exists and its owner can still reach it.
+     *
+     * @param array<int,array{text:string,metadata:array<string,mixed>}> $chunks
+     */
+    private function generateAndStoreEmbeddings(BotSource $source, array $chunks, string $newChecksum, ?string $notice = null, bool $force = false, int $attempt = 0): void {
+        $totalChunks = count($chunks);
+        $embeddingModel = $this->embeddingClient->getActiveModel();
+        $staged = $this->embeddingMapper->stagedChunkIndexes($source->getId(), $embeddingModel, $newChecksum);
+        $missing = array_values(array_diff(array_keys($chunks), array_keys($staged)));
+        $this->updateProgress($source, 'embedding', $this->embeddingProgress(count($staged), $totalChunks), count($staged), $totalChunks);
+
+        foreach (array_chunk($missing, self::EMBEDDING_BATCH_SIZE) as $batch) {
+            $texts = array_map(static fn (int $index): string => $chunks[$index]['text'], $batch);
+            try {
+                $vectors = $this->embeddingClient->embedTexts($texts, $embeddingModel, [
+                    'purpose' => 'rag_source',
+                    'source_id' => $source->getId(),
+                    'bot_id' => $source->getBotId(),
+                ]);
+            } catch (EmbeddingRateLimitedException $e) {
+                throw $e;
+            } catch (Exception $e) {
+                $status = $this->httpStatusFromThrowable($e);
+                throw new KnowledgeSourceException(
+                    KnowledgeSourceStatus::EMBEDDING_FAILED,
+                    $status !== null ? ['http_status' => $status] : [],
+                    'Embedding request failed (' . get_class($e) . ')',
+                    $e
+                );
             }
+            if (count($vectors) !== count($batch)) {
+                throw new KnowledgeSourceException(KnowledgeSourceStatus::EMBEDDING_FAILED, [], 'The embedding provider returned ' . count($vectors) . ' vectors for ' . count($batch) . ' chunks');
+            }
+            foreach ($batch as $position => $index) {
+                $this->embeddingMapper->insertStaged($this->newEmbedding($source, $chunks[$index], $vectors[$position], $embeddingModel), $index, $newChecksum);
+                $staged[$index] = true;
+                $this->stagedInThisRun++;
+            }
+            $this->updateProgress($source, 'embedding', $this->embeddingProgress(count($staged), $totalChunks), count($staged), $totalChunks);
+        }
+
+        // The source may have been removed or become unreachable while it was embedded.
+        if (!$this->sourceExists($source->getId())) {
+            $this->embeddingMapper->deleteBySource($source->getId());
+            $this->logger->info('RAG source was removed while it was indexed; nothing published', ['sourceId' => $source->getId()]);
+            return;
+        }
+        if ($source->getNodeType() !== 'url') {
+            $location = $this->sourceLocator->locate($source);
+            if ($location['state'] !== RagSourceLocator::FOUND) {
+                $this->handleUnresolvedSource($source, $location['state'], $location['exception'], $force, $attempt);
+                return;
+            }
+        }
+
+        $this->updateProgress($source, 'storing', 95, $totalChunks, $totalChunks);
+        $this->embeddingMapper->publishStaged($source->getId(), $embeddingModel, $newChecksum, $totalChunks);
+        if (!$this->sourceExists($source->getId())) {
+            // Removed during publication: nothing of it may stay in the index.
+            $this->embeddingMapper->deleteBySource($source->getId());
+            return;
         }
 
         // Complete
         $source->setChecksum($newChecksum);
-        $source->setStatus('ready');
+        $source->setStatus(KnowledgeSourceStatus::READY);
+        $source->setErrorMessage($notice);
         $source->setLastIndexedAt(time());
         $source->setUpdatedAt(time());
         $source->setProgress(100);
@@ -401,12 +687,50 @@ class RagIngestionService {
         $this->botSourceMapper->update($source);
     }
 
+    private function embeddingProgress(int $done, int $total): int {
+        return 35 + (int)($total > 0 ? $done / $total * 55 : 55);
+    }
+
+    private function sourceExists(int $sourceId): bool {
+        try {
+            $this->botSourceMapper->findById($sourceId);
+            return true;
+        } catch (DoesNotExistException $e) {
+            return false;
+        }
+    }
+
     /**
+     * @param array{text:string,metadata:array<string,mixed>} $chunk
+     * @param array<int,float> $vector
+     */
+    private function newEmbedding(BotSource $source, array $chunk, array $vector, string $embeddingModel): Embedding {
+        $embedding = new Embedding();
+        $embedding->setBotId($source->getBotId());
+        $embedding->setSourceId($source->getId());
+        $embedding->setChunkText($chunk['text']);
+        $embedding->setEmbedding(json_encode($vector) ?: '[]');
+        $embedding->setEmbeddingModel($embeddingModel);
+        $embedding->setTokenCount(strlen($chunk['text']));
+        $embedding->setMetadata(json_encode($chunk['metadata']) ?: '{}');
+        $embedding->setScore(null);
+        $embedding->setCreatedAt(time());
+        $embedding->setUpdatedAt(time());
+
+        return $embedding;
+    }
+
+    /**
+     * @param array<string,int> $stats
      * @return array<int,array{0:File,1:string}>
      */
-    private function collectFiles(Node $node, string $basePath): array {
+    private function collectFiles(Node $node, string $basePath, array &$stats): array {
         $result = [];
         if ($node instanceof File) {
+            if ($this->isMetadataFile($node)) {
+                $stats['metadata']++;
+                return $result;
+            }
             $result[] = [$node, $this->relativePath($node, $basePath)];
             return $result;
         }
@@ -414,8 +738,16 @@ class RagIngestionService {
         if ($node instanceof Folder) {
             foreach ($node->getDirectoryListing() as $child) {
                 if ($child instanceof Folder) {
-                    $result = array_merge($result, $this->collectFiles($child, $basePath));
+                    if (MetadataFileFilter::isMetadataFolderName((string)$child->getName())) {
+                        $stats['metadata']++;
+                        continue;
+                    }
+                    $result = array_merge($result, $this->collectFiles($child, $basePath, $stats));
                 } elseif ($child instanceof File) {
+                    if ($this->isMetadataFile($child)) {
+                        $stats['metadata']++;
+                        continue;
+                    }
                     $result[] = [$child, $this->relativePath($child, $basePath)];
                 }
             }
@@ -424,12 +756,24 @@ class RagIngestionService {
         return $result;
     }
 
-    private function extractText(File $file, ?string &$extractionError = null): string {
+    /**
+     * AppleDouble companions (._name) and known Finder/Explorer files carry no document content.
+     */
+    private function isMetadataFile(File $file): bool {
+        return MetadataFileFilter::isMetadataPath((string)$file->getName());
+    }
+
+    /**
+     * @return array{status:string,text:string,error:?string}
+     */
+    private function extractText(File $file): array {
         $mime = $file->getMimeType();
+        $isText = strpos($mime, 'text/') === 0 || in_array($mime, ['application/json', 'application/xml'], true);
+        $doclingSupported = $this->doclingClient->isSupported($file);
         $extractionError = null;
         
         // First, try Docling for supported binary formats (PDF, DOCX, etc.)
-        if ($this->doclingClient->isEnabled() && $this->doclingClient->isSupported($file)) {
+        if ($doclingSupported && $this->doclingClient->isEnabled()) {
             try {
                 $this->logger->debug('Using Docling for file extraction', [
                     'file' => $file->getName(),
@@ -437,7 +781,11 @@ class RagIngestionService {
                 ]);
                 $markdown = $this->doclingClient->convertToMarkdown($file);
                 // Ensure valid UTF-8
-                return mb_convert_encoding($markdown, 'UTF-8', 'UTF-8');
+                return $this->textResult(mb_convert_encoding($markdown, 'UTF-8', 'UTF-8'));
+            } catch (DoclingEmptyResultException $e) {
+                return ['status' => 'empty', 'text' => '', 'error' => null];
+            } catch (NotPermittedException|ForbiddenException $e) {
+                return ['status' => 'denied', 'text' => '', 'error' => null];
             } catch (Exception $e) {
                 $this->logger->warning('Docling conversion failed, falling back to text extraction', [
                     'file' => $file->getName(),
@@ -449,21 +797,36 @@ class RagIngestionService {
         }
 
         // Standard text extraction for text files
-        try {
-            if (strpos($mime, 'text/') === 0 || in_array($mime, ['application/json', 'application/xml'], true)) {
+        if ($isText) {
+            try {
                 $content = (string)$file->getContent();
                 // Ensure valid UTF-8 to avoid json_encode errors
-                return mb_convert_encoding($content, 'UTF-8', 'UTF-8');
+                return $this->textResult(mb_convert_encoding($content, 'UTF-8', 'UTF-8'));
+            } catch (NotPermittedException|ForbiddenException $e) {
+                return ['status' => 'denied', 'text' => '', 'error' => null];
+            } catch (Exception $e) {
+                $this->logger->warning('Failed to read file during ingestion', [
+                    'path' => $file->getPath(),
+                    'exception' => $e,
+                ]);
+                return ['status' => 'failed', 'text' => '', 'error' => $e->getMessage()];
             }
-        } catch (Exception $e) {
-            $this->logger->warning('Failed to read file during ingestion', [
-                'path' => $file->getPath(),
-                'exception' => $e,
-            ]);
-            $extractionError = $e->getMessage();
         }
 
-        return '';
+        if ($extractionError !== null) {
+            return ['status' => 'failed', 'text' => '', 'error' => $extractionError];
+        }
+
+        return ['status' => $doclingSupported ? 'needs_converter' : 'unsupported', 'text' => '', 'error' => null];
+    }
+
+    /**
+     * @return array{status:string,text:string,error:?string}
+     */
+    private function textResult(string $text): array {
+        return trim($text) === ''
+            ? ['status' => 'empty', 'text' => '', 'error' => null]
+            : ['status' => 'text', 'text' => $text, 'error' => null];
     }
 
     /**
@@ -476,6 +839,8 @@ class RagIngestionService {
         if ($chunkSize <= 0) {
             return [$text];
         }
+        // An overlap of the chunk size or more would never advance (or skip the rest of the text).
+        $overlap = min(max(0, $overlap), $chunkSize - 1);
 
         while ($offset < $length) {
             $chunk = mb_substr($text, $offset, $chunkSize, 'UTF-8');
@@ -490,18 +855,6 @@ class RagIngestionService {
         }
 
         return $chunks;
-    }
-
-    private function resolveTargetNode(BotSource $source, Folder $userFolder): Node {
-        $nodes = $userFolder->getById($source->getNodeId());
-        if (is_array($nodes) && count($nodes) > 0) {
-            $node = $nodes[0];
-            if ($node instanceof Node) {
-                return $node;
-            }
-        }
-
-        throw new Exception('Unable to resolve file or folder for ingestion');
     }
 
     private function relativePath(Node $node, string $rootPath): string {

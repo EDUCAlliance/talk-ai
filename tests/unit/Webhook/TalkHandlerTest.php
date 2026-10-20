@@ -18,6 +18,7 @@ use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
 use OCP\IDBConnection;
+use OCP\IL10N;
 use OCP\IURLGenerator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -914,6 +915,89 @@ class TalkHandlerTest extends TestCase {
 		]);
 	}
 
+	#[DataProvider('attachmentMessageModes')]
+	public function testEmptyDocumentNoticeReachesModelWhileOtherDocumentsAreIndexed(bool $always, bool $attachmentOnly): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$bot->setMentionName('@bot');
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$bots = $this->createMock(BotService::class);
+		$bots->method('userCanAccessBot')->willReturn(true);
+		$bots->method('getEffectiveBotForUser')->willReturn($bot);
+		$bots->method('getEffectiveBuiltInToolNames')->willReturn(['room_search_documents']);
+		$bots->expects($this->once())->method('processMessage')->willReturnCallback(function (...$arguments) use ($attachmentOnly): string {
+			$this->assertStringContainsString('contained no readable text', $arguments[1]);
+			$this->assertStringContainsString('no-text.pdf', $arguments[1]);
+			$this->assertStringNotContainsString('/srv/private', $arguments[1]);
+			$this->assertSame([34], $arguments[8]['document_source_ids']);
+			$this->assertSame($attachmentOnly, $arguments[8]['attachment_only']);
+			$this->assertCount(1, $arguments[8]['attachments']);
+			$this->assertSame('useful.pdf', $arguments[8]['attachments'][0]->getDisplayName());
+			return 'The first document has no readable text.';
+		});
+		$onboarding = $this->createMock(OnboardingService::class);
+		$onboarding->method('getRoomState')->willReturn($room);
+		$onboarding->method('getOnboardingInProgressBotsForRoom')->willReturn([]);
+		$onboarding->method('getAlwaysModeBotsForRoom')->willReturn([['bot' => $bot, 'room' => $room]]);
+		$onboarding->method('buildOnboardingContext')->willReturn('');
+		$docs = $this->createMock(RoomDocumentIngestionService::class);
+		$docs->expects($this->exactly(2))->method('ingestAttachment')->willReturnCallback(static function (...$arguments): \OCA\EducAI\Db\RoomDocumentSource {
+			$source = new \OCA\EducAI\Db\RoomDocumentSource();
+			$empty = $arguments[4]->getDisplayName() === 'no-text.pdf';
+			$source->setId($empty ? 33 : 34);
+			$source->setStatus($empty ? 'empty' : 'ready');
+			return $source;
+		});
+		$handler = $this->getMockBuilder(TalkHandler::class)->setConstructorArgs([
+			$bots, $this->createMock(SettingsService::class), $onboarding,
+			$this->createMock(TalkMessageParser::class), $docs,
+			$this->createMock(RoomImageIngestionService::class), $this->createMock(IClientService::class),
+			$this->createMock(IDBConnection::class), $this->createMock(IURLGenerator::class), $this->createMock(LoggerInterface::class),
+		])->onlyMethods(['sendReplyToTalkWithOutcome'])->getMock();
+		$handler->method('sendReplyToTalkWithOutcome')->willReturn(['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201]);
+		$attachments = [];
+		foreach (['._document.pdf', 'no-text.pdf', 'useful.pdf'] as $name) {
+			$attachments[] = new IncomingTalkAttachment('document', 'file', 'application/pdf', $name, 'file');
+		}
+		$text = $attachmentOnly ? '' : 'Summarize these documents.';
+		$message = new IncomingTalkMessage($text, $text, 'room', 'alice', 5, null, $attachments);
+		$arguments = ['room', 'alice', $text, 5, 5, null, $message];
+		if (!$always) {
+			array_unshift($arguments, $bot);
+		}
+		$this->invokePrivateMethod($handler, $always ? 'handleAlwaysModeMessage' : 'handleMentionedBot', $arguments);
+	}
+
+	public static function attachmentMessageModes(): array {
+		return [[true, true], [true, false], [false, true], [false, false]];
+	}
+
+	public function testRoomIndexingErrorsAreLocalizedWithoutRawExceptionText(): void {
+		foreach ([false, true] as $image) {
+			foreach ([false, true] as $rateLimited) {
+				$builder = $this->getMockBuilder(IL10N::class);
+				if (!method_exists(IL10N::class, 't')) {
+					$builder->addMethods(['t']);
+				}
+				$l10n = $builder->getMock();
+				$expected = $rateLimited
+					? 'Attachment indexing is temporarily rate limited. Please try again in %s seconds.'
+					: ($image ? 'The uploaded image could not be indexed. Please try uploading it again later.' : 'The uploaded document could not be indexed. Please try uploading it again later.');
+				$translation = $l10n->expects($this->once())->method('t');
+				if ($rateLimited) {
+					$translation->with($expected, [120]);
+				} else {
+					$translation->with($expected);
+				}
+				$translation->willReturn('Sichere übersetzte Fehlermeldung');
+				$handler = $this->createTalkHandler(l10n: $l10n);
+				$failure = $rateLimited ? new \OCA\EducAI\Exception\EmbeddingRateLimitedException(120) : new \RuntimeException('/srv/private/secret');
+				$this->assertSame('Sichere übersetzte Fehlermeldung', $this->invokePrivateMethod($handler, 'roomIngestionError', [$failure, $image]));
+			}
+		}
+	}
+
 	private function createTalkHandler(
 		?BotService $botService = null,
 		?SettingsService $settingsService = null,
@@ -925,6 +1009,7 @@ class TalkHandlerTest extends TestCase {
 		?IDBConnection $db = null,
 		?IURLGenerator $urlGenerator = null,
 		?LoggerInterface $logger = null,
+		?IL10N $l10n = null,
 	): TalkHandler {
 		return new TalkHandler(
 			$botService ?? $this->createMock(BotService::class),
@@ -936,7 +1021,8 @@ class TalkHandlerTest extends TestCase {
 			$clientService ?? $this->createMock(IClientService::class),
 			$db ?? $this->createMock(IDBConnection::class),
 			$urlGenerator ?? $this->createMock(IURLGenerator::class),
-			$logger ?? $this->createMock(LoggerInterface::class)
+			$logger ?? $this->createMock(LoggerInterface::class),
+			l10n: $l10n
 		);
 	}
 

@@ -786,13 +786,17 @@ class AgentExecutor {
 
 			if (($result['isError'] ?? false) === true) {
 				$status = 'error';
-				$output = $this->encodeToolError(
-					'tool_execution_failed',
-					'The tool reported an execution error.',
-					$toolName
-				);
+				// Built-in tools may report a safe, actionable error; MCP errors stay generic.
+				$builtInError = $isBuiltIn ? $this->safeBuiltInToolError($result) : null;
+				$output = $builtInError !== null
+					? $this->encodeToolError($builtInError['code'], $builtInError['message'], $toolName, $builtInError['details'])
+					: $this->encodeToolError(
+						'tool_execution_failed',
+						'The tool reported an execution error.',
+						$toolName
+					);
 			} else {
-				$output = $this->sanitizeOutput($result, $isBuiltIn && $toolName === BuiltInToolProvider::TOOL_WIKI_READ_PAGE);
+				$output = $this->sanitizeOutput($result, $isBuiltIn && $toolName === BuiltInToolProvider::TOOL_WIKI_READ_PAGE, $isBuiltIn && $toolName === BuiltInToolProvider::TOOL_WIKI_SEARCH);
 			}
 		} catch (AgentRunInterruptedException $e) {
 			throw $e;
@@ -908,6 +912,32 @@ class AgentExecutor {
 		}
 
 		return ['arguments' => $decoded, 'error' => null];
+	}
+
+	/**
+	 * The structured error of a built-in tool result, if it carries one.
+	 *
+	 * @param array<string,mixed> $result
+	 * @return array{code:string,message:string,details:array<string,int|float|bool|string>}|null
+	 */
+	private function safeBuiltInToolError(array $result): ?array {
+		$error = $result['error'] ?? null;
+		if (!is_array($error) || !is_string($error['code'] ?? null) || preg_match('/^[a-z_]{1,64}$/', $error['code']) !== 1
+			|| !is_string($error['message'] ?? null) || trim($error['message']) === '') {
+			return null;
+		}
+		$details = [];
+		foreach (is_array($error['details'] ?? null) ? $error['details'] : [] as $key => $value) {
+			if (is_string($key) && (is_int($value) || is_float($value) || is_bool($value) || is_string($value))) {
+				$details[$key] = is_string($value) ? $this->truncateUtf8($value, 300) : $value;
+			}
+		}
+
+		return [
+			'code' => $error['code'],
+			'message' => $this->truncateUtf8($this->ensureValidUtf8($error['message']), 1000),
+			'details' => $details,
+		];
 	}
 
 	/**
@@ -1308,8 +1338,11 @@ class AgentExecutor {
 	/**
 	 * @param array<string,mixed> $result
 	 */
-	private function sanitizeOutput(array $result, bool $wikiPage = false): string {
+	private function sanitizeOutput(array $result, bool $wikiPage = false, bool $wikiSearch = false): string {
 		$textContent = $this->extractTextFromToolPayload($result);
+		if ($wikiSearch) {
+			return $this->sanitizeWikiSearchOutput($textContent ?? json_encode($result, JSON_THROW_ON_ERROR));
+		}
 		if ($textContent !== null) {
 			if ($wikiPage) {
 				return $this->sanitizeWikiPageOutput($textContent);
@@ -1322,6 +1355,51 @@ class AgentExecutor {
 			return 'Received invalid tool response';
 		}
 		return $this->truncateUtf8($encoded, 4000);
+	}
+
+	/** Keep whole search entries and pagination metadata within the model's budget. */
+	private function sanitizeWikiSearchOutput(string $text): string {
+		$result = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+		if (!is_array($result)) {
+			throw new \RuntimeException('Invalid wiki search response');
+		}
+		$list = ($result['action'] ?? null) === 'list';
+		$key = $list ? 'pages' : 'results';
+		$entries = $result[$key] ?? [];
+		if (!is_array($entries)) {
+			throw new \RuntimeException('Invalid wiki search entries');
+		}
+		$encode = static function (int $count) use ($result, $list, $key, $entries): string {
+			$result[$key] = array_slice($entries, 0, $count);
+			$result['returned_count'] = $count;
+			if ($list) {
+				$next = (int)($result['offset'] ?? 0) + $count;
+				$result['has_more'] = $next < (int)($result['total'] ?? 0);
+				$result['next_offset'] = $result['has_more'] ? $next : null;
+			} else {
+				$result['results_omitted'] = $count < count($entries);
+				$result['omitted_count'] = count($entries) - $count;
+			}
+			return json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+		};
+		$minimum = min(1, count($entries));
+		$best = $encode($minimum);
+		if (mb_strlen($best, 'UTF-8') > 4000) {
+			throw new \RuntimeException('Wiki search metadata or entry exceeds the tool output limit');
+		}
+		$low = $minimum;
+		$high = count($entries);
+		while ($low <= $high) {
+			$count = intdiv($low + $high, 2);
+			$candidate = $encode($count);
+			if (mb_strlen($candidate, 'UTF-8') <= 4000) {
+				$best = $candidate;
+				$low = $count + 1;
+			} else {
+				$high = $count - 1;
+			}
+		}
+		return $best;
 	}
 
 	/** Keep pagination offsets aligned with the content actually sent to the model. */

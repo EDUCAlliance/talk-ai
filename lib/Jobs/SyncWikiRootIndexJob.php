@@ -48,6 +48,9 @@ class SyncWikiRootIndexJob extends QueuedJob {
 
 		try {
 			$root = $this->rootMapper->findById((int)$rootId);
+			if (!$root->getActive() || !$this->rootMapper->hasActiveAssignments((int)$rootId)) {
+				return;
+			}
 		} catch (Throwable $e) {
 			$this->logger->warning('SyncWikiRootIndexJob could not load wiki root', [
 				'root_id' => $rootId,

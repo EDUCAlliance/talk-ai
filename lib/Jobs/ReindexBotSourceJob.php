@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\Jobs;
 
 use OCA\EducAI\Service\RagIngestionService;
+use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\QueuedJob;
 use Psr\Log\LoggerInterface;
@@ -36,6 +37,15 @@ class ReindexBotSourceJob extends QueuedJob {
             return;
         }
 
-        $this->ingestionService->ingestSourceById($sourceId, $force);
+        $attempt = is_int($arguments['attempt'] ?? null) ? max(0, $arguments['attempt']) : 0;
+
+        try {
+            $this->ingestionService->ingestSourceById($sourceId, $force, $attempt);
+        } catch (DoesNotExistException $e) {
+            // The source was removed before a scheduled retry ran.
+            $this->logger->debug('ReindexBotSourceJob skipped a removed source', [
+                'sourceId' => $sourceId,
+            ]);
+        }
     }
 }

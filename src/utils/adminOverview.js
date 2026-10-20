@@ -118,8 +118,8 @@ export function deriveOverview({
 			id: `provider-${provider.id}`,
 			tone: provider.status === 'error' ? 'error' : 'warn',
 			text: provider.status === 'stale'
-				? t('educai', 'The model catalogue of the {provider} has been unreachable since {time}. The last known list is still used.', { provider: name, time: formatWhen(provider.checked_at ?? provider.last_success_at, now) })
-				: t('educai', 'The model catalogue of the {provider} is unavailable. No models are known for it.', { provider: name }),
+				? t('educai', 'The model list of the {provider} has been unreachable since {time}. The last known list is still used.', { provider: name, time: formatWhen(provider.checked_at ?? provider.last_success_at, now) })
+				: t('educai', 'The model list of the {provider} is unavailable. No models are known for it.', { provider: name }),
 			action: { tab: 'models', target: 'educai-admin-providers', label: t('educai', 'Check provider') },
 		})
 	}
@@ -361,7 +361,7 @@ export function deriveOverview({
 					title: t('educai', 'Send a test request'),
 					detail: testDone
 						? checkValue(modelCheck, now).value
-						: t('educai', 'Checks with one short real request that access and credit are available.'),
+						: t('educai', 'Checks whether the selected model can return a real answer.'),
 					action: { tab: 'models', target: 'educai-admin-model-test', label: testDone ? t('educai', 'Test again') : t('educai', 'Test now') },
 				},
 				{

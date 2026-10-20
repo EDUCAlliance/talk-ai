@@ -969,6 +969,13 @@ class BotService {
 		$hasImageAttachmentTool = in_array(BuiltInToolProvider::TOOL_ATTACHMENT_IMAGE, $builtInToolNames, true);
 		$hasAudioAttachmentTool = in_array(BuiltInToolProvider::TOOL_ATTACHMENT_AUDIO, $builtInToolNames, true);
 		$hasWikiTools = count(array_intersect($builtInToolNames, BuiltInToolProvider::WIKI_TOOLS)) > 0;
+		$wikiInCollective = false;
+		foreach ($builtInToolLoadout as $entry) {
+			if (in_array((string)($entry['name'] ?? ''), BuiltInToolProvider::WIKI_TOOLS, true)
+				&& is_array($entry['config'] ?? null) && ($entry['config']['wiki_location'] ?? null) === 'collective') {
+				$wikiInCollective = true;
+			}
+		}
 		$attachmentSummary = $this->summarizeAttachmentContext($messageContext);
 		$forceInitialAudioTranscription = $this->shouldForceInitialAudioTranscription($attachmentSummary, $hasAudioAttachmentTool);
 		$forceInitialImageAnalysis = $this->shouldForceInitialImageAnalysis($attachmentSummary, $hasImageAttachmentTool, $messageContext['attachment_only']);
@@ -1059,8 +1066,17 @@ class BotService {
 			$systemPrompt .= "Only save new information when the user explicitly asks you to save, remember, document, or maintain it.\n";
 			$systemPrompt .= "If the user explicitly asks you to write, save, document, or remember information in the wiki, call `wiki_write_page` before claiming that it was written or saved.\n";
 			$systemPrompt .= 'After accepted wiki updates, check whether `index.md` needs a curated overview update: add or revise short summaries, topic/entity groupings, important pages, open questions, or synthesis notes. Leave the `Existing Files` section to ' . $this->brandingService->getDisplayName() . " automation.\n";
-			$systemPrompt .= "Append a concise event to `log.md` after accepted wiki updates.\n";
+			$systemPrompt .= "Page changes and automatic parent-page conversions are logged to `log.md` automatically. Use `wiki_log_event` only for extra decisions or context, not duplicate page-change entries.\n";
 			$systemPrompt .= "Treat the wiki tool response as authoritative for where a page was stored.\n";
+			$systemPrompt .= "A page only counts as written when `wiki_write_page` returned `success: true`. Never claim that a page was created, updated or reviewed otherwise; if a write failed, tell the user which page failed and the error code.\n";
+			$systemPrompt .= "If a write fails with `already_exists`, read the page, merge your changes and write it again with `mode` `overwrite` (or `append` to add text at the end).\n";
+			$systemPrompt .= "If a write fails with `similar_page_exists`, update the existing page named in the error instead of creating a second one.\n";
+			$systemPrompt .= $wikiInCollective
+				? "Write a subpage as `topic/subpage.md`. In this Collectives wiki a page with subpages is stored as `topic/Readme.md`; an existing `topic.md` is moved there automatically. From then on read and write that page as `topic/Readme.md` (see `resolved_path`): links inside it are relative to `topic/`, so a subpage is linked as `subpage.md`.\n"
+				: "For a subpage write `topic/subpage.md` next to the page `topic.md`.\n";
+			$systemPrompt .= "When you create pages that link to each other, write the linked pages first and the page with the links last. Link with Markdown links `[text](page.md)` (not `[[page]]`) and encode spaces in link targets as `%20`. Never link web addresses of wiki pages; the wiki tool adds the page ID (`?fileId=`) to links so they open in Nextcloud. Keep these IDs when you rewrite a page.\n";
+			$systemPrompt .= "If the write result lists `broken_links`, create the missing pages or correct the links; a `suggested_target` is the right link to an existing page.\n";
+			$systemPrompt .= "For a complete overview of the wiki, list all pages with `wiki_search` and query `*` (continue with `next_offset`); a normal search only finds literal text matches.\n";
 		}
 
 		$initialToolChoice = $this->buildInitialToolChoice(
@@ -1461,8 +1477,7 @@ class BotService {
 	 */
 	private function hasIndexedDocuments(int $botId): bool {
 		try {
-			$embeddings = $this->embeddingMapper->findByBot($botId);
-			return count($embeddings) > 0;
+			return $this->embeddingMapper->countByBot($botId) > 0;
 		} catch (Exception $e) {
 			$this->logger->warning('Failed to check indexed documents', [
 				'bot_id' => $botId,

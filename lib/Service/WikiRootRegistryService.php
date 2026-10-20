@@ -63,6 +63,7 @@ class WikiRootRegistryService {
 		$now = time();
 		$configHash = hash('sha256', json_encode($this->normalizeConfigForHash($wikiConfig)) ?: '{}');
 		$assignment = $this->rootBotMapper->findByBotId($bot->getId());
+		$oldRootId = $assignment === null ? null : $assignment->getRootId();
 		if ($assignment === null) {
 			$assignment = new WikiRootBot();
 			$assignment->setBotId($bot->getId());
@@ -78,10 +79,27 @@ class WikiRootRegistryService {
 		} else {
 			$this->rootBotMapper->update($assignment);
 		}
+		if ($oldRootId !== null && $oldRootId !== $root->getId()) {
+			$this->retireUnusedRoot($oldRootId);
+		}
 	}
 
 	public function deactivateBot(int $botId): void {
+		$assignment = $this->rootBotMapper->findByBotId($botId);
 		$this->rootBotMapper->deactivateByBotId($botId);
+		if ($assignment !== null) {
+			$this->retireUnusedRoot($assignment->getRootId());
+		}
+	}
+
+	private function retireUnusedRoot(int $rootId): void {
+		if ($this->rootMapper->hasActiveAssignments($rootId)) {
+			return;
+		}
+		$root = $this->rootMapper->findById($rootId);
+		$root->setActive(false);
+		$root->setUpdatedAt(time());
+		$this->rootMapper->update($root);
 	}
 
 	/**
@@ -89,7 +107,10 @@ class WikiRootRegistryService {
 	 * @return array<int,WikiRoot>
 	 */
 	public function findRootsForNodeAncestors(array $nodeIds): array {
-		return $this->rootMapper->findActiveByRootNodeIds($nodeIds);
+		return array_values(array_filter(
+			$this->rootMapper->findActiveByRootNodeIds($nodeIds),
+			fn (WikiRoot $root): bool => $root->getActive() && $this->rootMapper->hasActiveAssignments((int)$root->getId())
+		));
 	}
 
 	/**
@@ -98,7 +119,13 @@ class WikiRootRegistryService {
 	public function rebuildAll(): array {
 		$refreshed = 0;
 		$failed = 0;
-		foreach ($this->groupWikiAssignmentsByBot($this->botToolMapper->findByBuiltInToolNames(BuiltInToolProvider::WIKI_TOOLS)) as $botId => $config) {
+		$configs = $this->groupWikiAssignmentsByBot($this->botToolMapper->findByBuiltInToolNames(BuiltInToolProvider::WIKI_TOOLS));
+		foreach ($this->rootBotMapper->findAllActive() as $assignment) {
+			if (!isset($configs[$assignment->getBotId()])) {
+				$this->deactivateBot($assignment->getBotId());
+			}
+		}
+		foreach ($configs as $botId => $config) {
 			try {
 				$bot = $this->botMapper->findById($botId);
 				$this->refreshBot($bot, $config);
@@ -112,6 +139,10 @@ class WikiRootRegistryService {
 					'exception' => $e,
 				]);
 			}
+		}
+
+		foreach ($this->rootMapper->findAllActive() as $root) {
+			$this->retireUnusedRoot((int)$root->getId());
 		}
 
 		return [

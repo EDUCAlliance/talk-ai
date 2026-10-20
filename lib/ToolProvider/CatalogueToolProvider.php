@@ -221,6 +221,9 @@ class CatalogueToolProvider implements IToolProvider {
 
 		try {
 			$result = $this->catalogueEmbeddingService->search($query, $limit);
+			if (isset($result['error'])) {
+				return $this->searchFailure($result);
+			}
 			$courses = $result['courses'];
 			$total = $result['total'];
 
@@ -318,6 +321,9 @@ class CatalogueToolProvider implements IToolProvider {
 
 		try {
 			$result = $this->catalogueEmbeddingService->searchPast($query, $limit);
+			if (isset($result['error'])) {
+				return $this->searchFailure($result);
+			}
 			$courses = $result['courses'];
 			$total = $result['total'];
 
@@ -396,6 +402,32 @@ class CatalogueToolProvider implements IToolProvider {
 	 *
 	 * @param array<int,array<string,mixed>> $courses
 	 */
+	/**
+	 * The search did not run, which must not read like "no matching courses".
+	 *
+	 * @param array{error?:string,retry_after_seconds?:int} $result
+	 * @return array<string,mixed>
+	 */
+	private function searchFailure(array $result): array {
+		if (($result['error'] ?? '') === 'rate_limited') {
+			$seconds = (int)($result['retry_after_seconds'] ?? 60);
+			$code = 'rate_limited';
+			$message = 'The course search is temporarily rate limited by the embedding provider. Tell the user to try again in about '
+				. max(1, (int)ceil($seconds / 60)) . ' minute(s); do not say that no courses exist.';
+			$details = ['retry_after_seconds' => $seconds];
+		} else {
+			$code = 'search_failed';
+			$message = 'The course search could not run because of a technical problem. Tell the user that the catalogue cannot be searched right now; do not say that no courses exist.';
+			$details = [];
+		}
+
+		return [
+			'content' => [['type' => 'text', 'text' => $message]],
+			'isError' => true,
+			'error' => ['code' => $code, 'message' => $message, 'details' => $details],
+		];
+	}
+
 	private function buildCatalogueSearchResultText(array $courses, string $query, int $moreAvailable): string {
 		$text = 'Found ' . count($courses) . " learning opportunity(ies) for: \"$query\"";
 		if ($moreAvailable > 0) {

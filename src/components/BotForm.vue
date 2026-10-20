@@ -335,18 +335,21 @@
 									<div v-if="source.error_message" class="source-meta source-error">
 										{{ source.error_message }}
 									</div>
+									<div v-if="source.notice_message" class="source-meta">
+										{{ source.notice_message }}
+									</div>
 									<div class="source-actions">
 										<button
 											type="button"
 											class="button subtle"
-											:disabled="rag.reindexing[source.id] || source.status === 'pending'"
+											:disabled="rag.reindexing[source.id]"
 											@click="reindexSource(source)">
 											{{ rag.reindexing[source.id] ? t('educai', 'Reindexing…') : t('educai', 'Reindex') }}
 										</button>
 										<button
 											type="button"
 											class="button danger"
-											:disabled="rag.removing[source.id] || source.status === 'pending'"
+											:disabled="rag.removing[source.id]"
 											@click="removeSource(source)">
 											{{ rag.removing[source.id] ? t('educai', 'Removing…') : t('educai', 'Remove') }}
 										</button>
@@ -1091,12 +1094,12 @@ export default {
 				this.settings.modelOptions = modelSelection.normalizeModelOptions(response.data?.model_options, response.data?.models)
 				this.modelProviders = Array.isArray(response.data?.providers) ? response.data.providers : []
 				this.modelLoadError = this.modelProviders.some(provider => ['stale', 'error'].includes(provider.status))
-					? t('educai', 'Some provider catalogues could not be updated. Saved model choices are still available.')
+					? t('educai', 'Some provider model lists could not be updated. Saved model choices are still available.')
 					: ''
 				await this.refreshSavedModelBindings()
 			} catch (e) {
 				this.settings.modelOptions = this.settings.modelOptions.map(option => ({ ...option, availability: 'stale' }))
-				this.modelLoadError = t('educai', 'Could not update the model catalogue. Saved model choices are still available.')
+				this.modelLoadError = t('educai', 'Could not update the model list. Saved model choices are still available.')
 			}
 		},
 		async refreshSavedModelBindings() {
@@ -1616,6 +1619,8 @@ export default {
 				return t('educai', 'Pending')
 			case 'error':
 				return t('educai', 'Error')
+			case 'unavailable':
+				return t('educai', 'Not reachable')
 			default:
 				return t('educai', 'Unknown')
 			}
@@ -1627,6 +1632,7 @@ export default {
 				chunking: t('educai', 'Processing content…'),
 				embedding: t('educai', 'Generating embeddings…'),
 				storing: t('educai', 'Saving results…'),
+				waiting: t('educai', 'Waiting for the embedding service…'),
 				ready: t('educai', 'Complete'),
 			}
 			return stages[stage] || t('educai', 'Processing…')
@@ -2141,6 +2147,11 @@ export default {
 .status-error {
 	background: color-mix(in srgb, var(--color-element-error, var(--color-error)) 15%, transparent);
 	color: var(--color-error-text);
+}
+
+.status-unavailable {
+	background: color-mix(in srgb, var(--color-element-warning, var(--color-warning)) 15%, transparent);
+	color: var(--color-warning-text);
 }
 
 .source-meta {

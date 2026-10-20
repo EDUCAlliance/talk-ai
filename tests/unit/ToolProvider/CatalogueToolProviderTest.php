@@ -41,4 +41,24 @@ class CatalogueToolProviderTest extends TestCase {
 		$this->assertStringContainsString('Physics', $canonical['content'][0]['text']);
 		$this->assertSame($canonical, $provider->executeTool('catalogue_search_courses', ['query' => 'physics']));
 	}
+
+	public function testSearchThatCouldNotRunTellsTheModelInsteadOfReportingNoCourses(): void {
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('search')->willReturn(['courses' => [], 'total' => 0, 'error' => 'rate_limited', 'retry_after_seconds' => 150]);
+		$embeddings->method('searchPast')->willReturn(['courses' => [], 'total' => 0, 'error' => 'search_failed']);
+		$embeddings->expects($this->never())->method('getStats');
+		$provider = new CatalogueToolProvider($embeddings, new ToolExecutionPolicyService(), $this->createMock(LoggerInterface::class));
+
+		$current = $provider->executeTool('catalogue_search', ['query' => 'physics']);
+		$this->assertTrue($current['isError']);
+		$this->assertSame('rate_limited', $current['error']['code']);
+		$this->assertSame(['retry_after_seconds' => 150], $current['error']['details']);
+		$this->assertStringContainsString('3 minute(s)', $current['error']['message']);
+
+		$past = $provider->executeTool('catalogue_past_search', ['query' => 'physics']);
+		$this->assertTrue($past['isError']);
+		$this->assertSame('search_failed', $past['error']['code']);
+		$this->assertStringNotContainsString('No learning opportunities found', $past['content'][0]['text']);
+	}
 }

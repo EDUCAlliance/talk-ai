@@ -7,6 +7,7 @@ namespace OCA\EducAI\Service;
 use Exception;
 use OCA\EducAI\Db\CatalogueEmbedding;
 use OCA\EducAI\Db\CatalogueEmbeddingMapper;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
 use Throwable;
@@ -70,25 +71,48 @@ class CatalogueEmbeddingService {
 			$pastCourses = $this->fetchAllCourses(true);
 			$model = $this->embeddingClient->getActiveModel();
 			$failed = 0;
+			$pausedFor = null;
 
 			foreach ([false, true] as $isPast) {
+				// Courses whose text did not change keep their vector, so a run after a
+				// provider pause continues instead of embedding the first batches again.
+				$stored = $this->storedVectors($isPast, $model);
 				foreach (array_chunk($isPast ? $pastCourses : $currentCourses, 10) as $batch) {
 					$this->requireEnabled();
 					try {
-						$this->processBatch($batch, $isPast, $model);
+						$this->processBatch($batch, $isPast, $model, $stored);
 						if ($isPast) {
 							$processedPast += count($batch);
 						} else {
 							$processedCurrent += count($batch);
 						}
+					} catch (EmbeddingRateLimitedException $e) {
+						// The provider asked for a pause: stop instead of sending the remaining batches.
+						$pausedFor = $e->getRetryAfterSeconds();
+						$this->logger->warning('Catalogue indexing stopped: the embedding provider asked for a pause', [
+							'retry_after_seconds' => $pausedFor,
+							'is_past' => $isPast,
+						]);
+						break 2;
 					} catch (Throwable $e) {
 						$failed += count($batch);
-						$this->logger->warning('Catalogue embedding batch failed', ['exception' => $e, 'is_past' => $isPast]);
+						// Error level so the failure is visible in exports that only keep errors.
+						$this->logger->error('Catalogue embedding batch failed', [
+							'exception' => $e,
+							'batch_size' => count($batch),
+							'is_past' => $isPast,
+						]);
 					}
 				}
 			}
 
 			$this->requireEnabled();
+			if ($pausedFor !== null) {
+				$retryAt = time() + max(1, $pausedFor) + 5;
+				$error = 'The embedding provider asked for a pause of ' . $pausedFor . ' seconds. Indexed courses were kept; the rest follows after the pause.';
+				$this->saveStatus('failed', $startedAt, $error, $retryAt);
+				return $this->reindexResult($processedCurrent, $processedPast, $error) + ['retry_at' => $retryAt];
+			}
 			if ($failed > 0) {
 				$error = "$failed catalogue courses could not be indexed. Previous records were retained; retry to complete.";
 				$this->saveStatus('failed', $startedAt, $error);
@@ -118,13 +142,28 @@ class CatalogueEmbeddingService {
 		];
 	}
 
-	private function saveStatus(string $state, int $startedAt, ?string $error = null): void {
+	private function saveStatus(string $state, int $startedAt, ?string $error = null, ?int $retryAt = null): void {
 		$this->config->setAppValue('educai', self::STATUS_KEY, json_encode([
 			'state' => $state,
 			'last_error' => $error,
 			'started_at' => $startedAt,
 			'finished_at' => $state === 'running' ? null : time(),
+			'retry_at' => $retryAt,
 		], JSON_THROW_ON_ERROR));
+	}
+
+	/**
+	 * Stored vectors of the active model, keyed by course ID, with the text they were made from.
+	 *
+	 * @return array<int,array{text:string,vector:string}>
+	 */
+	private function storedVectors(bool $isPast, string $model): array {
+		$stored = [];
+		foreach ($isPast ? $this->mapper->findAllPastByModel($model) : $this->mapper->findAllCurrentByModel($model) as $embedding) {
+			$stored[(int)$embedding->getCourseId()] = ['text' => (string)$embedding->getSearchableText(), 'vector' => (string)$embedding->getEmbedding()];
+		}
+
+		return $stored;
 	}
 
 	private function requireEnabled(): void {
@@ -190,7 +229,8 @@ class CatalogueEmbeddingService {
 	 * @param int $limit Maximum results
 	 * @param float $minScore Minimum similarity score (0-1)
 	 * @param bool $isPast Whether to search past or current courses
-	 * @return array{courses: array, total: int}
+	 * @return array{courses: array, total: int, error?: string, retry_after_seconds?: int}
+	 *         error is "rate_limited" or "search_failed": the search did not run, which is not "no match"
 	 */
 	private function doSearch(string $query, int $limit, float $minScore, bool $isPast): array {
 		if (!$this->isEnabled()) {
@@ -206,11 +246,10 @@ class CatalogueEmbeddingService {
 			$embeddingModel = $this->embeddingClient->getActiveModel();
 
 			// Generate embedding for query
-			$queryVectors = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-			if (count($queryVectors) === 0) {
+			$queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'catalogue_query']);
+			if ($queryVector === []) {
 				throw new Exception('Failed to generate query embedding');
 			}
-			$queryVector = $queryVectors[0];
 
 			// Compare vectors only inside the same embedding model space.
 			$embeddings = $isPast
@@ -254,13 +293,19 @@ class CatalogueEmbeddingService {
 				'courses' => $courses,
 				'total' => $total,
 			];
+		} catch (EmbeddingRateLimitedException $e) {
+			$this->logger->warning('Catalogue search deferred by the embedding provider', [
+				'is_past' => $isPast,
+				'retry_after_seconds' => $e->getRetryAfterSeconds(),
+			]);
+			return ['courses' => [], 'total' => 0, 'error' => 'rate_limited', 'retry_after_seconds' => $e->getRetryAfterSeconds()];
 		} catch (Exception $e) {
 			$this->logger->error('Catalogue semantic search failed', [
 				'query' => $query,
 				'is_past' => $isPast,
 				'error' => $e->getMessage(),
 			]);
-			return ['courses' => [], 'total' => 0];
+			return ['courses' => [], 'total' => 0, 'error' => 'search_failed'];
 		}
 	}
 
@@ -269,7 +314,7 @@ class CatalogueEmbeddingService {
 	 *
 	 * This reads local state only, including when the integration is disabled.
 	 *
-	 * @return array{count:int,last_indexed:?int,needs_reindex:bool,state:string,last_error:?string,started_at:?int,finished_at:?int}
+	 * @return array{count:int,last_indexed:?int,needs_reindex:bool,state:string,last_error:?string,started_at:?int,finished_at:?int,retry_at:?int}
 	 */
 	public function getStats(): array {
 		$count = $this->mapper->count();
@@ -282,8 +327,13 @@ class CatalogueEmbeddingService {
 		$status = is_array($status) ? $status : [];
 		$state = $status['state'] ?? ($lastIndexed !== null ? 'completed' : 'idle');
 		$state = in_array($state, ['idle', 'running', 'completed', 'failed'], true) ? $state : 'idle';
+		$retryAt = is_int($status['retry_at'] ?? null) ? $status['retry_at'] : null;
 		$needsReindex = $lastIndexed === null || $state === 'failed'
 			|| (time() - $lastIndexed) > (max(1, $reindexHours) * 3600);
+		if ($state === 'failed' && $retryAt !== null && $retryAt > time()) {
+			// The provider asked for a pause; the resumed run is scheduled for this time.
+			$needsReindex = false;
+		}
 		if ($count > 0) {
 			$model = $this->embeddingClient->getActiveModel();
 			$forModel = $this->mapper->countCurrentByModel($model) + $this->mapper->countPastByModel($model);
@@ -298,6 +348,7 @@ class CatalogueEmbeddingService {
 			'last_error' => is_string($status['last_error'] ?? null) ? $status['last_error'] : null,
 			'started_at' => is_int($status['started_at'] ?? null) ? $status['started_at'] : null,
 			'finished_at' => is_int($status['finished_at'] ?? null) ? $status['finished_at'] : null,
+			'retry_at' => $retryAt,
 		];
 	}
 
@@ -346,23 +397,36 @@ class CatalogueEmbeddingService {
 	 *
 	 * @param array<int,array<string,mixed>> $courses
 	 * @param bool $isPast Whether these are past courses
+	 * @param array<int,array{text:string,vector:string}> $stored Vectors that can be kept when the text is unchanged
 	 */
-	private function processBatch(array $courses, bool $isPast, string $embeddingModel): void {
+	private function processBatch(array $courses, bool $isPast, string $embeddingModel, array $stored = []): void {
 		// Build searchable texts
 		$texts = [];
-		foreach ($courses as $course) {
-			$texts[] = $this->buildSearchableText($course);
+		$encoded = [];
+		$toEmbed = [];
+		foreach (array_values($courses) as $index => $course) {
+			$texts[$index] = $this->buildSearchableText($course);
+			$kept = $stored[(int)($course['id'] ?? 0)] ?? null;
+			if ($kept !== null && $kept['text'] === $texts[$index] && $kept['vector'] !== '' && $kept['vector'] !== '[]') {
+				$encoded[$index] = $kept['vector'];
+			} else {
+				$toEmbed[] = $index;
+			}
 		}
+		$courses = array_values($courses);
 
-		// Generate embeddings
-		$this->requireEnabled();
-		$embeddings = $this->embeddingClient->embedTexts($texts, $embeddingModel);
-		if (count($embeddings) !== count($courses)) {
-			throw new Exception('Catalogue embedding response was incomplete');
-		}
-		foreach ($embeddings as $vector) {
-			if (!is_array($vector) || $vector === []) {
-				throw new Exception('Catalogue embedding vector was empty');
+		// Generate embeddings for new or changed courses only
+		if ($toEmbed !== []) {
+			$this->requireEnabled();
+			$embeddings = $this->embeddingClient->embedTexts(array_map(static fn (int $index): string => $texts[$index], $toEmbed), $embeddingModel, ['purpose' => 'catalogue']);
+			if (count($embeddings) !== count($toEmbed)) {
+				throw new Exception('Catalogue embedding response was incomplete');
+			}
+			foreach (array_values($embeddings) as $position => $vector) {
+				if (!is_array($vector) || $vector === []) {
+					throw new Exception('Catalogue embedding vector was empty');
+				}
+				$encoded[$toEmbed[$position]] = json_encode($vector) ?: '[]';
 			}
 		}
 
@@ -378,7 +442,7 @@ class CatalogueEmbeddingService {
 			$entity = new CatalogueEmbedding();
 			$entity->setCourseId($courseId);
 			$entity->setSearchableText($texts[$index]);
-			$entity->setEmbedding(json_encode($embeddings[$index]) ?: '[]');
+			$entity->setEmbedding($encoded[$index]);
 			$entity->setEmbeddingModel($embeddingModel);
 			$entity->setCourseData(json_encode($course) ?: '{}');
 			$entity->setIsPast($isPast ? 1 : 0);

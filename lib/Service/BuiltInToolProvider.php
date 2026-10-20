@@ -12,6 +12,8 @@ use OCA\EducAI\Db\RoomDocumentSourceMapper;
 use OCA\EducAI\Db\RoomImageEmbedding;
 use OCA\EducAI\Db\RoomImageEmbeddingMapper;
 use OCA\EducAI\Db\RoomImageSourceMapper;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
+use OCA\EducAI\Exception\WikiException;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use Psr\Log\LoggerInterface;
 
@@ -283,18 +285,23 @@ class BuiltInToolProvider {
 
         $tools[] = $this->withPolicy([
             'name' => self::TOOL_WIKI_SEARCH,
-            'description' => 'Search the personal bot\'s persistent Markdown wiki. Use this before answering questions about durable personal or bot knowledge stored in the wiki.',
+            'description' => 'Search the bot\'s persistent Markdown wiki, or list all of its pages with query "*". Use this before answering questions about durable personal or bot knowledge stored in the wiki. Search is a literal text match; list the pages for a complete overview. If the result says truncated=true, not every file was covered.',
             'schema' => [
                 'type' => 'object',
                 'properties' => [
                     'query' => [
                         'type' => 'string',
-                        'description' => 'Search terms for wiki pages.',
+                        'description' => 'Search terms for wiki pages, or "*" to list all pages (paginated).',
                     ],
                     'limit' => [
                         'type' => 'integer',
-                        'description' => 'Number of matching pages to return (1-20).',
+                        'description' => 'Number of matching pages to return (1-20), or pages per listing page (up to 100).',
                         'default' => 5,
+                    ],
+                    'offset' => [
+                        'type' => 'integer',
+                        'description' => 'Only for query "*": continue the listing with next_offset from the previous result.',
+                        'default' => 0,
                     ],
                     'scope' => [
                         'type' => 'string',
@@ -334,7 +341,7 @@ class BuiltInToolProvider {
 
         $tools[] = $this->withPolicy([
             'name' => self::TOOL_WIKI_WRITE_PAGE,
-            'description' => 'Create, overwrite, or append to a Markdown/TXT/JSON page in a personal bot\'s persistent wiki. When adding durable wiki knowledge, also keep index.md useful as a curated content map without rewriting its automatically maintained Existing Files section.',
+            'description' => 'Create, overwrite, or append to a Markdown/TXT/JSON page in the bot\'s persistent wiki. A page only counts as written when the result says success=true. Mode create fails with already_exists for existing pages: read the page, merge your changes, then write again with mode overwrite (or append). A new page whose name only differs from an existing one in case, spaces or hyphens fails with similar_page_exists: update the existing page instead. Write a subpage as topic/subpage.md; in Collectives a page with subpages is stored as topic/Readme.md (an existing topic.md is moved there automatically), and links inside it are relative to topic/. Fix any broken_links reported in the result. When adding durable wiki knowledge, also keep index.md useful as a curated content map without rewriting its automatically maintained Existing Files section.',
             'schema' => [
                 'type' => 'object',
                 'properties' => [
@@ -363,7 +370,7 @@ class BuiltInToolProvider {
 
         $tools[] = $this->withPolicy([
             'name' => self::TOOL_WIKI_LOG_EVENT,
-            'description' => 'Append a concise maintenance event to the bot wiki log.md file.',
+            'description' => 'Append extra decisions or context to the bot wiki log.md file. Page changes are logged automatically; do not duplicate them here.',
             'schema' => [
                 'type' => 'object',
                 'properties' => [
@@ -504,12 +511,17 @@ class BuiltInToolProvider {
 
         try {
             $embeddingModel = $this->embeddingClient->getActiveModel();
-            // Compare vectors only inside the same embedding model space.
-            $embeddings = $this->embeddingMapper->findByBotAndModel($botId, $embeddingModel);
+            // Compare vectors only inside the same embedding model space; skip sources the owner cannot reach.
+            $embeddings = $this->embeddingMapper->findRetrievableByBotAndModel($botId, $embeddingModel);
 
             if (count($embeddings) === 0) {
-                $allEmbeddingsCount = $this->embeddingMapper->countByBot($botId);
-                if ($allEmbeddingsCount > 0) {
+                if ($this->embeddingMapper->countUnavailableByBotAndModel($botId, $embeddingModel) > 0) {
+                    return $this->errorResponse(
+                        'The knowledge sources of this assistant are currently not reachable for their owner and are not used for answers. Tell the user that the documents are unavailable.',
+                        'sources_unavailable'
+                    );
+                }
+                if ($this->embeddingMapper->countIndexedByBot($botId) > 0) {
                     return [
                         'content' => [
                             [
@@ -532,8 +544,8 @@ class BuiltInToolProvider {
             }
 
             // Generate embedding for the query
-            $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-            if (count($vectorList) === 0) {
+            $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'rag_query', 'bot_id' => $botId]);
+            if ($queryVector === []) {
                 return [
                     'content' => [
                         [
@@ -544,7 +556,6 @@ class BuiltInToolProvider {
                     'isError' => true,
                 ];
             }
-            $queryVector = $vectorList[0];
 
             // Calculate similarity scores for all chunks
             $scored = [];
@@ -609,21 +620,23 @@ class BuiltInToolProvider {
                 ],
                 'isError' => false,
             ];
+        } catch (EmbeddingRateLimitedException $e) {
+            $this->logger->warning('RAG search deferred by the embedding provider', [
+                'bot_id' => $botId,
+                'retry_after_seconds' => $e->getRetryAfterSeconds(),
+            ]);
+            return $this->errorResponse(
+                'The document search is temporarily rate limited by the embedding provider. Tell the user to try again in about ' . max(1, (int)ceil($e->getRetryAfterSeconds() / 60)) . ' minute(s).',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('RAG search failed', [
                 'bot_id' => $botId,
                 'query' => $query,
                 'error' => $e->getMessage(),
             ]);
-            return [
-                'content' => [
-                    [
-                        'type' => 'text',
-                        'text' => 'Error searching documents: ' . $e->getMessage(),
-                    ],
-                ],
-                'isError' => true,
-            ];
+            return $this->errorResponse('Error searching documents: ' . $e->getMessage());
         }
     }
 
@@ -663,12 +676,12 @@ class BuiltInToolProvider {
         $botId = $this->currentInvocationContext['bot_id'];
         $roomToken = $this->currentInvocationContext['room_token'];
         if ($botId === null || $roomToken === null || $roomToken === '') {
-            return $this->errorResponse('Error: No room context available for room document search.');
+            return $this->errorResponse('Error: No room context available for room document search.', 'room_context_missing');
         }
 
         $query = isset($arguments['query']) && is_string($arguments['query']) ? trim($arguments['query']) : '';
         if ($query === '') {
-            return $this->errorResponse('Error: query parameter is required for room document search.');
+            return $this->errorResponse('Error: query parameter is required for room document search.', 'invalid_arguments');
         }
 
         $limit = isset($arguments['limit']) && is_numeric($arguments['limit'])
@@ -695,12 +708,11 @@ class BuiltInToolProvider {
                 return $this->textResponse('No chat-uploaded documents have been indexed for this room yet.');
             }
 
-            $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-            if ($vectorList === []) {
-                return $this->errorResponse('Error: Failed to generate embedding for the room search query.');
+            $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'room_document_query']);
+            if ($queryVector === []) {
+                return $this->errorResponse('Error: Failed to generate embedding for the room search query.', 'embedding_failed');
             }
 
-            $queryVector = $vectorList[0];
             $scored = $this->scoreRoomEmbeddings($embeddings, $queryVector, $minScore);
 
             if ($scored === [] && $currentDocumentSourceIds !== [] && $fallbackMinScore < $minScore) {
@@ -724,6 +736,12 @@ class BuiltInToolProvider {
             return $this->textResponse(
                 $this->buildRoomSearchResultText($results, $query, count($scored) - count($results))
             );
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Room document search is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Room document search failed', [
                 'bot_id' => $botId,
@@ -731,7 +749,7 @@ class BuiltInToolProvider {
                 'query' => $query,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error searching room documents: ' . $e->getMessage());
+            return $this->errorResponse('Room document search failed. Please try again later.', 'search_failed');
         }
     }
 
@@ -809,12 +827,12 @@ class BuiltInToolProvider {
         $botId = $this->currentInvocationContext['bot_id'];
         $roomToken = $this->currentInvocationContext['room_token'];
         if ($botId === null || $roomToken === null || $roomToken === '') {
-            return $this->errorResponse('Error: No room context available for room image search.');
+            return $this->errorResponse('Error: No room context available for room image search.', 'room_context_missing');
         }
 
         $query = isset($arguments['query']) && is_string($arguments['query']) ? trim($arguments['query']) : '';
         if ($query === '') {
-            return $this->errorResponse('Error: query parameter is required for room image search.');
+            return $this->errorResponse('Error: query parameter is required for room image search.', 'invalid_arguments');
         }
 
         $limit = isset($arguments['limit']) && is_numeric($arguments['limit'])
@@ -842,12 +860,11 @@ class BuiltInToolProvider {
                 return $this->textResponse('No image attachments have been indexed for this room yet.');
             }
 
-            $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-            if ($vectorList === []) {
-                return $this->errorResponse('Error: Failed to generate embedding for the room image search query.');
+            $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'room_image_query']);
+            if ($queryVector === []) {
+                return $this->errorResponse('Error: Failed to generate embedding for the room image search query.', 'embedding_failed');
             }
 
-            $queryVector = $vectorList[0];
             $scored = $this->scoreRoomImageEmbeddings($embeddings, $queryVector, $minScore, null, $imageName);
 
             if ($scored === [] && $currentImageSourceIds !== [] && $fallbackMinScore < $minScore) {
@@ -872,6 +889,12 @@ class BuiltInToolProvider {
             return $this->textResponse(
                 $this->buildRoomImageSearchResultText($results, $query, count($scored) - count($results))
             );
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Room image search is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Room image search failed', [
                 'bot_id' => $botId,
@@ -879,7 +902,7 @@ class BuiltInToolProvider {
                 'query' => $query,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error searching room images: ' . $e->getMessage());
+            return $this->errorResponse('Room image search failed. Please try again later.', 'search_failed');
         }
     }
 
@@ -978,12 +1001,16 @@ class BuiltInToolProvider {
     private function executeAttachmentImageAnalysis(array $arguments): array {
         $attachment = $this->resolveAttachmentByKind(IncomingTalkAttachment::KIND_IMAGE, $arguments['attachment_name'] ?? null);
         if (!$attachment instanceof IncomingTalkAttachment) {
-            return $this->errorResponse('Error: No image attachment from the current message is available for analysis.');
+            return $this->errorResponse('Error: No image attachment from the current message is available for analysis.', 'attachment_not_found');
         }
 
         $question = isset($arguments['question']) && is_string($arguments['question']) && trim($arguments['question']) !== ''
             ? trim($arguments['question'])
             : 'Describe this image in detail and highlight any relevant text or visual details.';
+
+        if (!$this->visionClient->isEnabled() || MetadataFileFilter::isMetadataPath($attachment->getDisplayName())) {
+            return $this->errorResponse('Image attachment analysis is not available for this attachment.', 'attachment_unsupported');
+        }
 
         try {
             $resolved = $this->attachmentResolver->resolveToTempFile($attachment);
@@ -994,19 +1021,29 @@ class BuiltInToolProvider {
             }
 
             return $this->textResponse("Image analysis for {$attachment->getDisplayName()}:\n\n" . $analysis);
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Attachment processing is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Image attachment analysis failed', [
                 'attachment' => $attachment->getDisplayName(),
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error analyzing image attachment: ' . $e->getMessage());
+            return $this->errorResponse('The image attachment could not be analyzed. Please try uploading it again.', 'attachment_processing_failed');
         }
     }
 
     private function executeAttachmentAudioTranscription(array $arguments): array {
         $attachment = $this->resolveAttachmentByKind(IncomingTalkAttachment::KIND_AUDIO, $arguments['attachment_name'] ?? null);
         if (!$attachment instanceof IncomingTalkAttachment) {
-            return $this->errorResponse('Error: No audio attachment from the current message is available for transcription.');
+            return $this->errorResponse('Error: No audio attachment from the current message is available for transcription.', 'attachment_not_found');
+        }
+
+        if (!$this->speechToTextClient->isEnabled() || MetadataFileFilter::isMetadataPath($attachment->getDisplayName())) {
+            return $this->errorResponse('Audio attachment transcription is not available for this attachment.', 'attachment_unsupported');
         }
 
         try {
@@ -1022,12 +1059,18 @@ class BuiltInToolProvider {
             }
 
             return $this->textResponse("Transcript for {$attachment->getDisplayName()}:\n\n" . $transcript);
+        } catch (EmbeddingRateLimitedException $e) {
+            return $this->errorResponse(
+                'Attachment processing is temporarily rate limited. Wait before retrying.',
+                'rate_limited',
+                ['retry_after_seconds' => $e->getRetryAfterSeconds()]
+            );
         } catch (Exception $e) {
             $this->logger->error('Audio attachment transcription failed', [
                 'attachment' => $attachment->getDisplayName(),
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error transcribing audio attachment: ' . $e->getMessage());
+            return $this->errorResponse('The audio attachment could not be transcribed. Please try uploading it again.', 'attachment_processing_failed');
         }
     }
 
@@ -1096,14 +1139,20 @@ class BuiltInToolProvider {
             : 5;
         $scope = isset($arguments['scope']) && is_string($arguments['scope']) ? $arguments['scope'] : 'wiki';
 
+        $offset = isset($arguments['offset']) && is_numeric($arguments['offset'])
+            ? max(0, (int)$arguments['offset'])
+            : 0;
+
         try {
-            return $this->jsonResponse($this->wikiService->search($botId, $query, $limit, $scope, $config));
+            return $this->jsonResponse($this->wikiService->search($botId, $query, $limit, $scope, $config, $offset));
+        } catch (WikiException $e) {
+            return $this->wikiErrorResponse('Error searching wiki: ', $e, $botId);
         } catch (Exception $e) {
             $this->logger->warning('Wiki search failed', [
                 'bot_id' => $botId,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error searching wiki: ' . $e->getMessage());
+            return $this->errorResponse('Error searching wiki: the operation failed unexpectedly.', WikiException::OPERATION_FAILED);
         }
     }
 
@@ -1126,13 +1175,15 @@ class BuiltInToolProvider {
 
         try {
             return $this->jsonResponse($this->wikiService->readPage($botId, $path, $offset, $limit, $config));
+        } catch (WikiException $e) {
+            return $this->wikiErrorResponse('Error reading wiki page: ', $e, $botId);
         } catch (Exception $e) {
             $this->logger->warning('Wiki page read failed', [
                 'bot_id' => $botId,
                 'path' => $path,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error reading wiki page: ' . $e->getMessage());
+            return $this->errorResponse('Error reading wiki page: the operation failed unexpectedly.', WikiException::OPERATION_FAILED);
         }
     }
 
@@ -1155,13 +1206,15 @@ class BuiltInToolProvider {
 
         try {
             return $this->jsonResponse($this->wikiService->writePage($botId, $path, $content, $mode, $reason, $config));
+        } catch (WikiException $e) {
+            return $this->wikiErrorResponse('Error writing wiki page: ', $e, $botId);
         } catch (Exception $e) {
             $this->logger->warning('Wiki page write failed', [
                 'bot_id' => $botId,
                 'path' => $path,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error writing wiki page: ' . $e->getMessage());
+            return $this->errorResponse('Error writing wiki page: the page was not saved because of an unexpected error.', WikiException::OPERATION_FAILED, ['path' => $path]);
         }
     }
 
@@ -1179,14 +1232,24 @@ class BuiltInToolProvider {
 
         try {
             return $this->jsonResponse($this->wikiService->logEvent($botId, $title, $details, $config));
+        } catch (WikiException $e) {
+            return $this->wikiErrorResponse('Error writing wiki log: ', $e, $botId);
         } catch (Exception $e) {
             $this->logger->warning('Wiki log write failed', [
                 'bot_id' => $botId,
                 'title' => $title,
                 'exception' => $e,
             ]);
-            return $this->errorResponse('Error writing wiki log: ' . $e->getMessage());
+            return $this->errorResponse('Error writing wiki log: the entry was not saved because of an unexpected error.', WikiException::OPERATION_FAILED);
         }
+    }
+
+    private function wikiErrorResponse(string $prefix, WikiException $e, int $botId): array {
+        $this->logger->info('Wiki tool returned an error to the model', [
+            'bot_id' => $botId,
+            'code' => $e->getErrorCode(),
+        ]);
+        return $this->errorResponse($prefix . $e->getMessage(), $e->getErrorCode(), $e->getDetails());
     }
 
     private function textResponse(string $text): array {
@@ -1208,8 +1271,12 @@ class BuiltInToolProvider {
         return $this->textResponse(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: '{}');
     }
 
-    private function errorResponse(string $text): array {
-        return [
+    /**
+     * @param string|null $code A safe error code passed to the model together with the text (see AgentExecutor).
+     * @param array<string,mixed> $details Safe details such as the requested path.
+     */
+    private function errorResponse(string $text, ?string $code = null, array $details = []): array {
+        $response = [
             'content' => [
                 [
                     'type' => 'text',
@@ -1218,6 +1285,11 @@ class BuiltInToolProvider {
             ],
             'isError' => true,
         ];
+        if ($code !== null) {
+            $response['error'] = ['code' => $code, 'message' => $text, 'details' => $details];
+        }
+
+        return $response;
     }
 
     /**

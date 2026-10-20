@@ -32,16 +32,15 @@ class RagRetriever {
             return [];
         }
         $embeddingModel = $this->embeddingClient->getActiveModel();
-        $embeddings = $this->embeddingMapper->findByBotAndModel($botId, $embeddingModel);
+        $embeddings = $this->embeddingMapper->findRetrievableByBotAndModel($botId, $embeddingModel);
         if (count($embeddings) === 0) {
             return [];
         }
 
-        $vectorList = $this->embeddingClient->embedTexts([$query], $embeddingModel);
-        if (count($vectorList) === 0) {
+        $queryVector = $this->embeddingClient->embedQuery($query, $embeddingModel, ['purpose' => 'rag_query', 'bot_id' => $botId]);
+        if ($queryVector === []) {
             return [];
         }
-        $queryVector = $vectorList[0];
 
         $scored = [];
         foreach ($embeddings as $embedding) {

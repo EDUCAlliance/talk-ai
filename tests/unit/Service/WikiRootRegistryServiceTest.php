@@ -184,6 +184,103 @@ class WikiRootRegistryServiceTest extends TestCase {
 		$service->refreshBot($bot, []);
 	}
 
+	public function testDisablingTheLastBotRetiresItsRootAndStopsFileEvents(): void {
+		foreach ([false, true] as $anotherBotRemains) {
+			$root = new WikiRoot();
+			$root->setId(77);
+			$root->setRootNodeId(1234);
+			$assignment = new WikiRootBot();
+			$assignment->setRootId(77);
+			$assignment->setBotId(42);
+			$rootBotMapper = $this->createMock(WikiRootBotMapper::class);
+			$rootBotMapper->method('findByBotId')->with(42)->willReturn($assignment);
+			$rootBotMapper->expects($this->once())->method('deactivateByBotId')->with(42);
+			$rootMapper = $this->createMock(WikiRootMapper::class);
+			$rootMapper->method('hasActiveAssignments')->with(77)->willReturn($anotherBotRemains);
+			$rootMapper->method('findById')->with(77)->willReturn($root);
+			$rootMapper->method('findActiveByRootNodeIds')->with([1234])->willReturn([$root]);
+			$rootMapper->expects($anotherBotRemains ? $this->never() : $this->once())->method('update')->with($root);
+			$service = $this->createService($rootMapper, $rootBotMapper, $this->createMock(IRootFolder::class));
+
+			$service->deactivateBot(42);
+
+			$this->assertSame($anotherBotRemains, $root->getActive());
+			$this->assertSame($anotherBotRemains ? [$root] : [], $service->findRootsForNodeAncestors([1234]));
+		}
+	}
+
+	public function testSwitchingWikiRootRetiresOnlyTheUnassignedOldRoot(): void {
+		foreach ([false, true] as $anotherBotRemains) {
+			$old = new WikiRoot();
+			$old->setId(77);
+			$new = new WikiRoot();
+			$new->setId(88);
+			$new->setRootNodeId(1234);
+			$assignment = new WikiRootBot();
+			$assignment->setId(5);
+			$assignment->setBotId(42);
+			$assignment->setRootId(77);
+			$folder = $this->createMock(Folder::class);
+			$folder->method('getId')->willReturn(1234);
+			$folder->method('getPath')->willReturn('/alice/files/new-wiki');
+			$userFolder = $this->createMock(Folder::class);
+			$userFolder->method('get')->with(Application::WIKI_ROOT_FOLDER . '/new-wiki')->willReturn($folder);
+			$rootFolder = $this->createMock(IRootFolder::class);
+			$rootFolder->method('getUserFolder')->with('alice')->willReturn($userFolder);
+			$rootBotMapper = $this->createMock(WikiRootBotMapper::class);
+			$rootBotMapper->method('findByBotId')->with(42)->willReturn($assignment);
+			$rootBotMapper->expects($this->once())->method('update')->willReturnCallback(function (WikiRootBot $updated): WikiRootBot {
+				$this->assertSame(88, $updated->getRootId());
+				$this->assertTrue($updated->getActive());
+				return $updated;
+			});
+			$rootMapper = $this->createMock(WikiRootMapper::class);
+			$rootMapper->method('findOneByRootNodeId')->with(1234)->willReturn($new);
+			$rootMapper->method('hasActiveAssignments')->with(77)->willReturn($anotherBotRemains);
+			$rootMapper->method('findById')->with(77)->willReturn($old);
+			$rootMapper->expects($this->exactly($anotherBotRemains ? 1 : 2))->method('update')->willReturnArgument(0);
+			$service = $this->createService($rootMapper, $rootBotMapper, $rootFolder);
+
+			$service->refreshBot($this->createBot(42, 'alice'), ['wiki_root_path' => Application::WIKI_ROOT_FOLDER . '/new-wiki']);
+
+			$this->assertSame($anotherBotRemains, $old->getActive());
+			$this->assertTrue($new->getActive());
+		}
+	}
+
+	public function testFileEventLookupIgnoresOrphanRootsEvenBeforeRetirement(): void {
+		$root = new WikiRoot();
+		$root->setId(77);
+		$rootMapper = $this->createMock(WikiRootMapper::class);
+		$rootMapper->method('findActiveByRootNodeIds')->with([1234])->willReturn([$root]);
+		$rootMapper->expects($this->once())->method('hasActiveAssignments')->with(77)->willReturn(false);
+		$service = $this->createService($rootMapper, $this->createMock(WikiRootBotMapper::class), $this->createMock(IRootFolder::class));
+
+		$this->assertSame([], $service->findRootsForNodeAncestors([1234]));
+		$this->assertTrue($root->getActive(), 'The lookup must also stop maintenance for stale active flags');
+	}
+
+	public function testRegistryRebuildRetiresPreviouslyOrphanedRootsAndDisabledBots(): void {
+		$assignment = new WikiRootBot();
+		$assignment->setBotId(42);
+		$assignment->setRootId(77);
+		$root = new WikiRoot();
+		$root->setId(77);
+		$rootBotMapper = $this->createMock(WikiRootBotMapper::class);
+		$rootBotMapper->method('findAllActive')->willReturn([$assignment]);
+		$rootBotMapper->method('findByBotId')->with(42)->willReturn($assignment);
+		$rootBotMapper->expects($this->once())->method('deactivateByBotId')->with(42);
+		$rootMapper = $this->createMock(WikiRootMapper::class);
+		$rootMapper->method('hasActiveAssignments')->with(77)->willReturn(false);
+		$rootMapper->method('findById')->with(77)->willReturn($root);
+		$rootMapper->method('findAllActive')->willReturn([]);
+		$rootMapper->expects($this->once())->method('update')->with($root);
+		$service = $this->createService($rootMapper, $rootBotMapper, $this->createMock(IRootFolder::class));
+
+		$this->assertSame(['refreshed' => 0, 'failed' => 0], $service->rebuildAll());
+		$this->assertFalse($root->getActive());
+	}
+
 	private function createService(
 		WikiRootMapper $rootMapper,
 		WikiRootBotMapper $rootBotMapper,

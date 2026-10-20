@@ -78,7 +78,7 @@ export function modelOptionsWithCurrent(options, current, unlistedEndpoints = []
 		label: option.availability === 'stale'
 			? t('educai', '{model} — last known list', { model: modelLabel(option.id) })
 			: option.availability === 'missing' && option.endpoint
-				? t('educai', '{model} — not in current catalogue', { model: modelLabel(option.id) })
+				? t('educai', '{model} — not listed', { model: modelLabel(option.id) })
 				: modelLabel(option.id),
 	}))
 }

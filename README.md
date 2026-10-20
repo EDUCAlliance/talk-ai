@@ -64,7 +64,7 @@ sudo -u www-data php occ app:enable educai
 **3. Configure** under **Administration settings → Talk AI**. On a new installation, the **Overview** tab shows a short setup checklist:
 
 - **Models:** primary API endpoint + API key (any OpenAI-compatible provider), then a default model from the automatically loaded model list
-- **Models → Test a model response:** one short real request confirms access and credit
+- **Models → Test a model response:** a short real request checks the selected model, with at most one compatibility retry
 - **System:** the webhook secret is created automatically during installation; replace it here if needed
 
 See [Administrator settings](docs/ADMIN_SETTINGS.md) for all tabs.
@@ -84,7 +84,7 @@ Then create your first bot in the **Talk AI** app, mention it in any Talk conver
 <a name="model-providers"></a>
 ## Model providers
 
-Talk AI speaks the OpenAI HTTP API, so it works with OpenAI, Azure OpenAI, self-hosted vLLM/Ollama, and academic gateways alike. Configure a **primary** endpoint, an optional **secondary** endpoint, and one **fallback** model. Model IDs are provider-bound (`primary:<model>` / `secondary:<model>`). Each provider's catalogue refreshes independently; an outage retains its last known list without hiding the other provider. Legacy unprefixed names are migrated only when their provider can be determined unambiguously, never silently reassigned to primary.
+Talk AI speaks the OpenAI HTTP API, so it works with OpenAI, Azure OpenAI, self-hosted vLLM/Ollama, and academic gateways alike. Configure a **primary** endpoint, an optional **secondary** endpoint, and one **fallback** model. Model IDs are provider-bound (`primary:<model>` / `secondary:<model>`). Each provider's model list refreshes independently; an outage retains its last known list without hiding the other provider. Legacy unprefixed names are migrated only when their provider can be determined unambiguously, never silently reassigned to primary.
 
 Discovery does not automatically release models to users or change existing selections. Administrators separately choose the default, allowed per-bot models and fallback, and can send an explicit small test request to verify real inference access. See [Model discovery and selection](docs/MODEL_SELECTION.md) for setup, migration and failure behaviour.
 

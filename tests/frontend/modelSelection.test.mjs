@@ -110,7 +110,7 @@ test('refresh keeps admin default, fallback, allowed models and overrides unchan
 	assert.equal(state.modelProviders[1].status, 'stale')
 	const missing = modelSelection.modelOptionsWithCurrent(state.availableModelOptions, state.settings.defaultModel).find(option => option.id === 'secondary:missing')
 	assert.equal(missing.availability, 'missing')
-	assert.match(missing.label, /not in current catalogue/)
+	assert.match(missing.label, /not listed/)
 })
 
 test('full HTTP failure retains prior model choices and exposes a useful status', async () => {
@@ -171,6 +171,25 @@ test('tests require saved provider settings and are never invoked by catalogue l
 	assert.equal(calls[0].url, '/apps/educai/api/v1/models/test')
 	assert.deepEqual(Object.keys(calls[0].payload), ['model'], 'No credential fields in test request')
 	assert.equal(state.modelTestResult.success, true)
+	assert.equal(state.modelTesting, false)
+})
+
+test('admin tests unapproved models and displays the safe parameter error from the server', async () => {
+	const message = 'The provider rejected the test request. Check model parameter compatibility and the saved endpoint.'
+	const calls = []
+	const state = readyAdmin({ post: async (_url, payload) => {
+		calls.push(payload)
+		throw { response: { data: { errorCode: 'model_test_request_rejected', error: message } } }
+	} })
+	state.settings.allowMultipleModels = true
+	state.settings.allowedModels = ['primary:shared']
+	state.modelTestSelection = 'secondary:microsoft/gpt-6-luna'
+	assert.equal(state.canTestModel, true)
+	await state.testModelResponse()
+	assert.equal(calls.length, 1)
+	assert.equal(calls[0].model, 'secondary:microsoft/gpt-6-luna')
+	assert.equal(state.modelTestResult.success, false)
+	assert.equal(state.modelTestResult.error, message)
 	assert.equal(state.modelTesting, false)
 })
 
@@ -325,7 +344,7 @@ test('stored models of a provider without a model list are manual entries, not m
 	assert.equal(byId['primary:microsoft/gpt-5.4'].availability, 'manual')
 	assert.equal(byId['primary:microsoft/gpt-5.4'].label, 'Primary · microsoft/gpt-5.4')
 	assert.equal(byId['secondary:gone'].availability, 'missing')
-	assert.match(byId['secondary:gone'].label, /not in current catalogue/)
+	assert.match(byId['secondary:gone'].label, /not listed/)
 })
 
 test('a bot with an unqualified model can pin it to a provider without a release', () => {

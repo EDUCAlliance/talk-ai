@@ -20,6 +20,7 @@ class SyncWikiRootIndexJobTest extends TestCase {
 		$folder = $this->createMock(Folder::class);
 
 		$rootMapper = $this->createMock(WikiRootMapper::class);
+		$rootMapper->method('hasActiveAssignments')->with(7)->willReturn(true);
 		$rootMapper->expects($this->once())
 			->method('findById')
 			->with(7)
@@ -59,6 +60,7 @@ class SyncWikiRootIndexJobTest extends TestCase {
 		$root = $this->createRoot();
 
 		$rootMapper = $this->createMock(WikiRootMapper::class);
+		$rootMapper->method('hasActiveAssignments')->with(7)->willReturn(true);
 		$rootMapper->method('findById')->willReturn($root);
 		$rootMapper->expects($this->once())
 			->method('update')
@@ -84,6 +86,26 @@ class SyncWikiRootIndexJobTest extends TestCase {
 		);
 
 		$job->run(['root_id' => 7]);
+	}
+
+	public function testQueuedJobsStopAfterRootRetirementOrAssignmentRemoval(): void {
+		foreach ([false, true] as $active) {
+			$root = $this->createRoot();
+			$root->setActive($active);
+			$rootMapper = $this->createMock(WikiRootMapper::class);
+			$rootMapper->method('findById')->with(7)->willReturn($root);
+			$rootMapper->method('hasActiveAssignments')->willReturn(false);
+			$rootMapper->expects($this->never())->method('update');
+			$rootFolder = $this->createMock(IRootFolder::class);
+			$rootFolder->expects($this->never())->method('getById');
+			$wikiService = $this->createMock(WikiService::class);
+			$wikiService->expects($this->never())->method('syncIndexForRoot');
+			$job = new SyncWikiRootIndexJob(
+				$this->createMock(ITimeFactory::class), $rootMapper, $rootFolder,
+				$wikiService, $this->createMock(LoggerInterface::class)
+			);
+			$job->run(['root_id' => 7]);
+		}
 	}
 
 	private function createRoot(): WikiRoot {

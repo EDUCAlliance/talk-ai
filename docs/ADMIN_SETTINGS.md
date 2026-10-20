@@ -35,4 +35,4 @@ Enter the server address and, if the server requires it, a key. **Detect and tes
 
 ## Released models
 
-With **Bots may choose a released model themselves** switched on, models are released per provider in a checklist with a filter. Released models are listed first. The list marks the default and fallback model, models that are new in the catalogue (first listed within the last 14 days) and released models that are not in the current catalogue. New catalogue models are never released automatically. Models without a catalogue entry can be added with their provider and model ID.
+With **Bots may choose a released model themselves** switched on, models are released per provider in a checklist with a filter. Released models are listed first. The list marks the default and fallback model, newly listed models (first listed within the last 14 days) and released models that the provider's current model list does not contain (**Not listed**). Newly listed models are never released automatically. Models the provider does not list can be added with their provider and model ID.

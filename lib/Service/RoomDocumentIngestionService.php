@@ -9,6 +9,8 @@ use OCA\EducAI\Db\RoomDocumentEmbedding;
 use OCA\EducAI\Db\RoomDocumentEmbeddingMapper;
 use OCA\EducAI\Db\RoomDocumentSource;
 use OCA\EducAI\Db\RoomDocumentSourceMapper;
+use OCA\EducAI\Exception\DoclingEmptyResultException;
+use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\Files\File;
 use Psr\Log\LoggerInterface;
@@ -94,71 +96,100 @@ class RoomDocumentIngestionService {
 			$source = $this->sourceMapper->update($source);
 		}
 
-		$content = $this->extractText($file);
-		if ($content === '') {
-			throw new Exception('Unable to extract text from uploaded document');
-		}
+		try {
+			if (MetadataFileFilter::isMetadataPath($attachment->getDisplayName()) || MetadataFileFilter::isMetadataFile($file)) {
+				$this->embeddingMapper->deleteBySource($source->getId());
+				$source->setStatus('skipped');
+				$source->setLastIndexedAt($now);
+				return $this->sourceMapper->update($source);
+			}
 
-		$ragConfig = $this->settingsService->getRagConfig();
-		$chunkSize = $ragConfig['rag_chunk_size'] ?? 750;
-		if (!is_int($chunkSize) || $chunkSize <= 0) {
-			$chunkSize = 750;
-		}
-		$chunkOverlap = $ragConfig['rag_chunk_overlap'] ?? 50;
-		if (!is_int($chunkOverlap) || $chunkOverlap < 0) {
-			$chunkOverlap = 50;
-		}
+			$content = $this->extractText($file);
+			if (trim($content) === '') {
+				throw new DoclingEmptyResultException('The document contains no readable text');
+			}
 
-		$chunks = $this->chunkText($content, $chunkSize, $chunkOverlap);
-		if ($chunks === []) {
-			throw new Exception('Unable to create document chunks for room ingestion');
-		}
+			$ragConfig = $this->settingsService->getRagConfig();
+			$chunkSize = $ragConfig['rag_chunk_size'] ?? 750;
+			if (!is_int($chunkSize) || $chunkSize <= 0) {
+				$chunkSize = 750;
+			}
+			$chunkOverlap = $ragConfig['rag_chunk_overlap'] ?? 50;
+			if (!is_int($chunkOverlap) || $chunkOverlap < 0) {
+				$chunkOverlap = 50;
+			}
 
-		$checksum = sha1($content);
-		if ($source->getChecksum() !== null && $source->getChecksum() === $checksum) {
+			$chunks = $this->chunkText($content, $chunkSize, $chunkOverlap);
+			if ($chunks === []) {
+				throw new Exception('Unable to create document chunks for room ingestion');
+			}
+
+			$checksum = sha1($content);
+			$embeddingModel = $this->embeddingClient->getActiveModel();
+			if ($source->getChecksum() === $checksum && $this->hasCurrentEmbeddings($source->getId(), $embeddingModel, $chunks)) {
+				$source->setStatus('ready');
+				$source->setLastIndexedAt($now);
+				$source->setUpdatedAt($now);
+				return $this->sourceMapper->update($source);
+			}
+
+			$vectors = $this->embeddingClient->embedTexts(array_values($chunks), $embeddingModel);
+
+			if (count($vectors) !== count($chunks) || array_filter($vectors, static fn ($vector): bool => !is_array($vector) || $vector === []) !== []) {
+				throw new Exception('Failed to generate all document embeddings');
+			}
+
+			$this->embeddingMapper->deleteBySource($source->getId());
+			foreach ($vectors as $index => $vector) {
+				$chunkText = $chunks[$index] ?? null;
+				if (!is_string($chunkText) || $chunkText === '') {
+					continue;
+				}
+
+				$embedding = new RoomDocumentEmbedding();
+				$embedding->setBotId($botId);
+				$embedding->setRoomToken($roomToken);
+				$embedding->setSourceId($source->getId());
+				$embedding->setChunkId($source->getId() . ':' . $index);
+				$embedding->setChunkText($chunkText);
+				$embedding->setEmbedding(json_encode($vector) ?: '[]');
+				$embedding->setEmbeddingModel($embeddingModel);
+				$embedding->setTokenCount(strlen($chunkText));
+				$embedding->setMetadata(json_encode([
+					'display_name' => $source->getDisplayName(),
+					'mime_type' => $source->getMimeType(),
+					'node_id' => $source->getNodeId(),
+					'chunk_index' => $index,
+				]) ?: '{}');
+				$embedding->setScore(null);
+				$embedding->setCreatedAt($now);
+				$embedding->setUpdatedAt($now);
+				$this->embeddingMapper->insert($embedding);
+			}
+
+			$source->setChecksum($checksum);
 			$source->setStatus('ready');
 			$source->setLastIndexedAt($now);
 			$source->setUpdatedAt($now);
+
 			return $this->sourceMapper->update($source);
+		} catch (DoclingEmptyResultException $e) {
+			$this->embeddingMapper->deleteBySource($source->getId());
+			$source->setChecksum(null);
+			$source->setStatus('empty');
+			$source->setLastIndexedAt($now);
+			$source->setUpdatedAt($now);
+			return $this->sourceMapper->update($source);
+		} catch (Exception $e) {
+			$this->embeddingMapper->deleteBySource($source->getId());
+			$source->setStatus($e instanceof EmbeddingRateLimitedException ? 'deferred' : 'error');
+			$source->setErrorMessage($e instanceof EmbeddingRateLimitedException ? 'Embedding provider rate limited' : 'Document indexing failed');
+			$this->logger->error('Room document indexing failed', ['source_id' => $source->getId(), 'exception' => $e]);
+			$source->setLastIndexedAt($now);
+			$source->setUpdatedAt($now);
+			$this->sourceMapper->update($source);
+			throw $e;
 		}
-
-		$embeddingModel = $this->embeddingClient->getActiveModel();
-		$vectors = $this->embeddingClient->embedTexts(array_values($chunks), $embeddingModel);
-
-		$this->embeddingMapper->deleteBySource($source->getId());
-		foreach ($vectors as $index => $vector) {
-			$chunkText = $chunks[$index] ?? null;
-			if (!is_string($chunkText) || $chunkText === '') {
-				continue;
-			}
-
-			$embedding = new RoomDocumentEmbedding();
-			$embedding->setBotId($botId);
-			$embedding->setRoomToken($roomToken);
-			$embedding->setSourceId($source->getId());
-			$embedding->setChunkId($source->getId() . ':' . $index);
-			$embedding->setChunkText($chunkText);
-			$embedding->setEmbedding(json_encode($vector) ?: '[]');
-			$embedding->setEmbeddingModel($embeddingModel);
-			$embedding->setTokenCount(strlen($chunkText));
-			$embedding->setMetadata(json_encode([
-				'display_name' => $source->getDisplayName(),
-				'mime_type' => $source->getMimeType(),
-				'node_id' => $source->getNodeId(),
-				'chunk_index' => $index,
-			]) ?: '{}');
-			$embedding->setScore(null);
-			$embedding->setCreatedAt($now);
-			$embedding->setUpdatedAt($now);
-			$this->embeddingMapper->insert($embedding);
-		}
-
-		$source->setChecksum($checksum);
-		$source->setStatus('ready');
-		$source->setLastIndexedAt($now);
-		$source->setUpdatedAt($now);
-
-		return $this->sourceMapper->update($source);
 	}
 
 	public function deleteRoomDocuments(int $botId, string $roomToken): void {
@@ -216,12 +247,40 @@ class RoomDocumentIngestionService {
 		return null;
 	}
 
+	/**
+	 * @param array<int,string> $chunks
+	 */
+	private function hasCurrentEmbeddings(int $sourceId, string $model, array $chunks): bool {
+		$embeddings = $this->embeddingMapper->findBySource($sourceId);
+		if (count($embeddings) !== count($chunks)) {
+			return false;
+		}
+		$indexed = [];
+		foreach ($embeddings as $embedding) {
+			if ($embedding->getEmbeddingModel() !== $model || !is_array($vector = json_decode($embedding->getEmbedding(), true)) || $vector === []) {
+				return false;
+			}
+			$indexed[$embedding->getChunkId()] = $embedding->getChunkText();
+		}
+		foreach ($chunks as $index => $text) {
+			if (($indexed[$sourceId . ':' . $index] ?? null) !== $text) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private function extractText(File $file): string {
 		$mime = $file->getMimeType();
 		if ($this->doclingClient->isEnabled() && $this->doclingClient->isSupported($file)) {
 			try {
 				return mb_convert_encoding($this->doclingClient->convertToMarkdown($file), 'UTF-8', 'UTF-8');
+			} catch (DoclingEmptyResultException $e) {
+				throw $e;
 			} catch (Exception $e) {
+				if (!str_starts_with($mime, 'text/') && !in_array($mime, ['application/json', 'application/xml'], true)) {
+					throw $e;
+				}
 				$this->logger->warning('Room document Docling conversion failed, falling back to plain text', [
 					'file' => $file->getName(),
 					'exception' => $e,
@@ -233,13 +292,15 @@ class RoomDocumentIngestionService {
 			return mb_convert_encoding((string)$file->getContent(), 'UTF-8', 'UTF-8');
 		}
 
-		return '';
+		throw new Exception('The uploaded document type is not supported');
 	}
 
 	/**
 	 * @return array<int,string>
 	 */
 	private function chunkText(string $text, int $chunkSize, int $overlap): array {
+		$chunkSize = max(1, $chunkSize);
+		$overlap = max(0, min($overlap, $chunkSize - 1));
 		$chunks = [];
 		$length = mb_strlen($text, 'UTF-8');
 		$offset = 0;

@@ -81,8 +81,9 @@ class WikiFileEventSyncServiceTest extends TestCase {
 
 	public function testManagedRootFilesCreateNoJob(): void {
 		$registry = $this->createMock(WikiRootRegistryService::class);
-		$registry->expects($this->never())
-			->method('findRootsForNodeAncestors');
+		$registry->expects($this->once())
+			->method('findRootsForNodeAncestors')
+			->willReturn([$this->createRoot(7, 100)]);
 
 		$jobList = $this->createMock(IJobList::class);
 		$jobList->expects($this->never())
@@ -90,9 +91,9 @@ class WikiFileEventSyncServiceTest extends TestCase {
 
 		$service = new WikiFileEventSyncService($registry, $jobList, $this->createMock(LoggerInterface::class));
 		$service->scheduleForChangedNodes([
-			$this->createNode(101, 'index.md', '/alice/files/' . Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/index.md'),
-			$this->createNode(102, 'log.md', '/alice/files/' . Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/log.md'),
-			$this->createNode(103, 'schema.md', '/alice/files/' . Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/schema.md'),
+			$this->createNode(101, 'index.md', '/alice/files/' . Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/index.md', $this->createNode(100, 'studybot', '/alice/files/wiki')),
+			$this->createNode(102, 'log.md', '/alice/files/' . Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/log.md', $this->createNode(100, 'studybot', '/alice/files/wiki')),
+			$this->createNode(103, 'schema.md', '/alice/files/' . Application::WIKI_ROOT_FOLDER . '/Personal Wikis/studybot/schema.md', $this->createNode(100, 'studybot', '/alice/files/wiki')),
 		]);
 	}
 
@@ -113,8 +114,40 @@ class WikiFileEventSyncServiceTest extends TestCase {
 
 		$service = new WikiFileEventSyncService($registry, $jobList, $this->createMock(LoggerInterface::class));
 		$service->scheduleForChangedNodes([
-			$this->createNode(101, 'a.md', '/alice/files/wiki/a.md'),
-			$this->createNode(102, 'b.md', '/alice/files/wiki/b.md'),
+			$this->createNode(101, 'a.md', '/alice/files/wiki/a.md', $this->createNode(100, 'wiki', '/alice/files/wiki')),
+			$this->createNode(102, 'b.md', '/alice/files/wiki/b.md', $this->createNode(100, 'wiki', '/alice/files/wiki')),
+		]);
+	}
+
+	public function testNestedManagedBasenamesAndCaseVariantsStillTriggerSync(): void {
+		foreach (['index.md', 'log.md', 'schema.md', 'INDEX.md'] as $name) {
+			foreach ([true, false] as $nested) {
+				if (!$nested && $name !== 'INDEX.md') {
+					continue;
+				}
+				$registry = $this->createMock(WikiRootRegistryService::class);
+				$registry->method('findRootsForNodeAncestors')->willReturn([$this->createRoot(7, 100)]);
+				$jobList = $this->createMock(IJobList::class);
+				$jobList->expects($this->once())->method('scheduleAfter')->with(SyncWikiRootIndexJob::class, $this->anything(), ['root_id' => 7]);
+				$root = $this->createNode(100, 'wiki', '/alice/files/wiki');
+				$parent = $nested ? $this->createNode(101, 'topic', '/alice/files/wiki/topic', $root) : $root;
+				$node = $this->createNode(102, $name, ($nested ? '/alice/files/wiki/topic/' : '/alice/files/wiki/') . $name, $parent);
+				$service = new WikiFileEventSyncService($registry, $jobList, $this->createMock(LoggerInterface::class));
+				$service->scheduleForChangedNodes([$node]);
+			}
+		}
+	}
+
+	public function testManagedRootEventDoesNotHideAContentEventInTheSameBatch(): void {
+		$registry = $this->createMock(WikiRootRegistryService::class);
+		$registry->method('findRootsForNodeAncestors')->willReturn([$this->createRoot(7, 100)]);
+		$jobList = $this->createMock(IJobList::class);
+		$jobList->expects($this->once())->method('scheduleAfter');
+		$parent = $this->createNode(100, 'wiki', '/alice/files/wiki');
+		$service = new WikiFileEventSyncService($registry, $jobList, $this->createMock(LoggerInterface::class));
+		$service->scheduleForChangedNodes([
+			$this->createNode(101, 'index.md', '/alice/files/wiki/index.md', $parent),
+			$this->createNode(102, 'page.md', '/alice/files/wiki/page.md', $parent),
 		]);
 	}
 

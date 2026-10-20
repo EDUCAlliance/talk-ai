@@ -16,11 +16,11 @@
 						stroke-width="2.4"
 						stroke-linecap="round"
 						aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" /></svg>
-					{{ admin.loadingModels ? t('educai', 'Updating catalogues…') : t('educai', 'Refresh model lists') }}
+					{{ admin.loadingModels ? t('educai', 'Updating model lists…') : t('educai', 'Refresh model lists') }}
 				</button>
 			</template>
 			<p v-if="admin.hasUnsavedProviderSettings" class="ta-note ta-note--warn" role="status">
-				{{ t('educai', 'Save provider settings first. The catalogue and test use saved endpoints and credentials.') }}
+				{{ t('educai', 'Save provider settings first. The model list and the test use saved endpoints and credentials.') }}
 			</p>
 			<p v-if="admin.modelLoadError" class="ta-note ta-note--warn" role="alert">
 				{{ admin.modelLoadError }}
@@ -236,7 +236,7 @@
 
 		<AdminSection anchor="educai-admin-model-test"
 			:title="t('educai', 'Test a model response')"
-			:description="t('educai', 'Sends one short real request with the saved credentials. This may incur a small provider charge. Nothing is sent automatically.')">
+			:description="t('educai', 'Sends a short real request with the saved credentials, with at most one retry for model compatibility. This may incur a small provider charge. Nothing is sent automatically.')">
 			<div class="ta-field">
 				<label for="test-model" class="ta-label">{{ t('educai', 'Model to test') }}</label>
 				<ModelSelector id="test-model"
@@ -303,9 +303,9 @@ export default {
 				} else if (state === 'stale') {
 					chip = n('educai', '{count} model · {state}', '{count} models · {state}', count, { count: this.formatNumber(count), state: providerState(status) })
 					chipClass = 'ta-chip--warn'
-					meta = t('educai', 'Catalogue unreachable since {time}. Known models stay selectable; the other provider is unaffected.', { time: formatWhen(status.checked_at || status.last_success_at) })
+					meta = t('educai', 'Model list unreachable since {time}. Known models stay selectable; the other provider is unaffected.', { time: formatWhen(status.checked_at || status.last_success_at) })
 				} else if (state === 'error') {
-					chip = t('educai', 'Catalogue unavailable')
+					chip = t('educai', 'Model list unavailable')
 					chipClass = 'ta-chip--error'
 					meta = status.error || t('educai', 'The model list could not be loaded.')
 				} else if (state === 'unconfigured') {

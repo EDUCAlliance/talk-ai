@@ -169,7 +169,7 @@
 						min="1"
 						step="1">
 					<p class="ta-hint">
-						{{ t('educai', 'Loading the model catalogues.') }}
+						{{ t('educai', 'Loading the model lists.') }}
 					</p>
 				</div>
 			</div>

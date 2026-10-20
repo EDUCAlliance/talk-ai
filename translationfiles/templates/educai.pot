@@ -3700,3 +3700,112 @@ msgid ""
 "⏳ Your request has been queued. Position: {position}, estimated wait: "
 "~{wait} seconds."
 msgstr ""
+
+#: lib/Controller/RagController.php
+#, php-format
+msgid "Skipped files: %1$s not supported, %2$s without text."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The embedding service asked for a pause. Indexing continues automatically."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The folder contains no files."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "Only system files were found (for example ._* or .DS_Store). There is nothing to index."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "No supported files found."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "Document conversion (Docling) is turned off; ask your administrator to enable it."
+msgstr ""
+
+#: lib/Controller/RagController.php
+#, php-format
+msgid "No readable text found: %1$s files without text, %2$s not supported."
+msgstr ""
+
+#: lib/Controller/RagController.php
+#, php-format
+msgid "%1$s of %2$s files could not be read. The previous index is kept; check the files and reindex."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The file or folder is no longer reachable for its owner (deleted, moved or no longer shared). The bot does not use this source until it is reachable again. Check it, select it again or remove the source."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The owner no longer has access to this file or folder. The bot does not use this source until access is restored."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The source could not be read temporarily. The previous index is kept and indexing is retried automatically."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The source could not be read temporarily. The previous index is kept; reindex later."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The embedding service kept asking for a pause. The previous index is kept; reindex later."
+msgstr ""
+
+#: lib/Controller/RagController.php
+#, php-format
+msgid "The embedding service rejected the request (HTTP %s). The previous index is kept; administrators find details in the Nextcloud log."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The embedding service could not be reached. The previous index is kept; administrators find details in the Nextcloud log."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The web page could not be loaded. Check the address and reindex."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "Knowledge sources are turned off by the administrator."
+msgstr ""
+
+#: lib/Controller/RagController.php
+#, php-format
+msgid "Unsupported file types: %s"
+msgstr ""
+
+#: src/components/BotForm.vue
+msgid "Not reachable"
+msgstr ""
+
+#: src/components/BotForm.vue
+msgid "Waiting for the embedding service…"
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "The source is reachable again and is indexed after a pause of the embedding service. Until then the bot does not use it."
+msgstr ""
+
+#: lib/Controller/RagController.php
+msgid "Indexing was interrupted, for example by a server restart. The previous index is kept; start it again with Reindex."
+msgstr ""
+
+#: lib/Controller/SettingsController.php
+msgid "The chunk overlap must be smaller than the chunk size."
+
+#: lib/Webhook/TalkHandler.php
+#, php-format
+msgid "Attachment indexing is temporarily rate limited. Please try again in %s seconds."
+msgstr ""
+
+#: lib/Webhook/TalkHandler.php
+msgid "The uploaded image could not be indexed. Please try uploading it again later."
+msgstr ""
+
+#: lib/Webhook/TalkHandler.php
+msgid "The uploaded document could not be indexed. Please try uploading it again later."
+msgstr ""

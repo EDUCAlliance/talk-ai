@@ -1112,12 +1112,20 @@ class BotServiceTest extends TestCase {
 			->with(
 				$this->callback(function (string $systemPrompt): bool {
 					$this->assertStringContainsString('## Wiki Instructions', $systemPrompt);
+					$this->assertStringContainsString('conversions are logged to `log.md` automatically', $systemPrompt);
+					$this->assertStringContainsString('Use `wiki_log_event` only for extra decisions or context', $systemPrompt);
+					$this->assertStringNotContainsString('Append a concise event to `log.md` after accepted wiki updates', $systemPrompt);
 					$this->assertStringContainsString('When `wiki_read_page` returns `has_more=true`', $systemPrompt);
 					$this->assertStringContainsString('offset=next_offset', $systemPrompt);
 					$this->assertStringContainsString('explicitly mention the page path and `next_offset`', $systemPrompt);
 					$this->assertStringContainsString('call `wiki_write_page` before claiming that it was written or saved', $systemPrompt);
 					$this->assertStringContainsString('check whether `index.md` needs a curated overview update', $systemPrompt);
 					$this->assertStringContainsString('Leave the `Existing Files` section to ' . Application::APP_DISPLAY_NAME . ' automation', $systemPrompt);
+					$this->assertStringContainsString('A page only counts as written when `wiki_write_page` returned `success: true`', $systemPrompt);
+					$this->assertStringContainsString('fails with `already_exists`, read the page', $systemPrompt);
+					// Personal-files wiki: the Collectives folder-page layout does not apply.
+					$this->assertStringContainsString('next to the page `topic.md`', $systemPrompt);
+					$this->assertStringNotContainsString('topic/Readme.md', $systemPrompt);
 
 					return true;
 				}),
@@ -1627,7 +1635,7 @@ class BotServiceTest extends TestCase {
 		$rateLimitService->method('isEnabled')->willReturn(false);
 		$settingsService->method('getSettings')->willReturn($settings);
 		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
-		$embeddingMapper->expects($this->once())->method('findByBot')->with(7)->willReturn([new \stdClass()]);
+		$embeddingMapper->expects($this->once())->method('countByBot')->with(7)->willReturn(1);
 		$conversationMapper->expects($this->exactly(2))
 			->method('insert')
 			->willReturnCallback(static fn (Conversation $conversation): Conversation => $conversation);
