@@ -180,7 +180,7 @@ class BuiltInToolProvider {
                         ],
                         'min_score' => [
                             'type' => 'number',
-                            'description' => 'Minimum relevance score 0.0-1.0. Use 0.3 for broad searches, 0.5 for normal queries, 0.7 for precise matches only.',
+                            'description' => 'Preferred minimum similarity score, 0.0-1.0. Usually omit this: scores depend on the embedding model and are not probabilities. If no chunks meet it, lower-scoring candidates down to 0.2 may be returned with a warning. Check their text before answering.',
                             'default' => 0.3,
                         ],
                     ],
@@ -557,7 +557,8 @@ class BuiltInToolProvider {
                 ];
             }
 
-            // Calculate similarity scores for all chunks
+            // Keep lower-scoring candidates for an explicitly labelled empty-result fallback.
+            $fallbackMinScore = min($minScore, 0.2);
             $scored = [];
             foreach ($embeddings as $embedding) {
                 $vector = $this->decodeVector($embedding->getEmbedding());
@@ -567,7 +568,7 @@ class BuiltInToolProvider {
                 $score = $this->cosineSimilarity($queryVector, $vector);
 
                 // Apply minimum score filter
-                if ($score < $minScore) {
+                if ($score < $fallbackMinScore) {
                     continue;
                 }
 
@@ -584,11 +585,17 @@ class BuiltInToolProvider {
                 return $b['score'] <=> $a['score'];
             });
 
+            $preferred = array_values(array_filter($scored, static fn (array $result): bool => $result['score'] >= $minScore));
+            $usedFallback = $preferred === [] && $scored !== [];
+            if (!$usedFallback) {
+                $scored = $preferred;
+            }
+
             // Take top results
             $results = array_slice($scored, 0, $limit);
 
             if (count($results) === 0) {
-                $scoreInfo = $minScore > 0 ? " above the minimum score threshold of $minScore" : "";
+                $scoreInfo = $fallbackMinScore > 0 ? " above the minimum score threshold of $fallbackMinScore" : "";
                 return [
                     'content' => [
                         [
@@ -601,7 +608,10 @@ class BuiltInToolProvider {
             }
 
             // Format results for LLM
-            $text = $this->buildRagResultText($results, $query, count($scored) - count($results));
+            $text = $this->buildRagResultText($results, $query, count($scored) - count($results), $usedFallback);
+            if ($usedFallback) {
+                $text = "No chunks met the requested minimum score of $minScore. The following candidates are below the requested minimum score; similarity scores depend on the embedding model and do not prove relevance. Verify that the text answers the question; otherwise say that the documents do not provide the answer.\n\n" . $text;
+            }
 
             $this->logger->info('RAG search completed', [
                 'bot_id' => $botId,
@@ -645,8 +655,9 @@ class BuiltInToolProvider {
      *
      * @param array<int,array{chunk:\OCA\EducAI\Db\Embedding,score:float,metadata:array}> $results
      */
-    private function buildRagResultText(array $results, string $query, int $moreAvailable): string {
-        $text = "Found " . count($results) . " relevant document chunk(s) for: \"$query\"";
+    private function buildRagResultText(array $results, string $query, int $moreAvailable, bool $candidatesOnly = false): string {
+        $label = $candidatesOnly ? 'candidate' : 'relevant';
+        $text = "Found " . count($results) . " $label document chunk(s) for: \"$query\"";
         if ($moreAvailable > 0) {
             $text .= " ($moreAvailable more available, increase limit to see more)";
         }

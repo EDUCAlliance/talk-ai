@@ -393,6 +393,70 @@ class BuiltInToolProviderTest extends TestCase {
 		$this->assertFalse($result['isError']);
 	}
 
+	public function testDocumentSearchRecoversCandidatesBelowRequestedThreshold(): void {
+		$result = $this->searchDocumentScores([0.19, 0.385, 0.42], ['min_score' => 0.5, 'limit' => 1]);
+		$this->assertFalse($result['isError']);
+		$text = $result['content'][0]['text'];
+		$this->assertStringContainsString('candidate-0.42', $text);
+		$this->assertStringNotContainsString('candidate-0.385', $text);
+		$this->assertStringNotContainsString('candidate-0.19', $text);
+		$this->assertStringContainsString('1 more available', $text);
+		$this->assertStringContainsString('below the requested minimum score', $text);
+		$this->assertStringContainsString('Verify that the text answers the question', $text);
+		$this->assertStringNotContainsString('relevant document chunk', $text);
+	}
+
+	public function testDocumentSearchDoesNotMixWeakCandidatesWithNormalMatches(): void {
+		$result = $this->searchDocumentScores([0.42, 0.9, 0.7], ['min_score' => 0.5]);
+		$text = $result['content'][0]['text'];
+		$this->assertStringContainsString('candidate-0.9', $text);
+		$this->assertStringContainsString('candidate-0.7', $text);
+		$this->assertStringNotContainsString('candidate-0.42', $text);
+		$this->assertStringNotContainsString('below the requested', $text);
+		$this->assertLessThan(strpos($text, 'candidate-0.7'), strpos($text, 'candidate-0.9'));
+	}
+
+	public function testDocumentSearchFallbackStillRejectsUnrelatedVectors(): void {
+		$result = $this->searchDocumentScores([-0.5, 0.0, 0.19], ['min_score' => 0.5]);
+		$this->assertFalse($result['isError']);
+		$this->assertStringContainsString('No matching document chunks', $result['content'][0]['text']);
+		$this->assertStringNotContainsString('candidate-', $result['content'][0]['text']);
+	}
+
+	public function testDocumentSearchFallbackAlsoWorksWithDefaultThreshold(): void {
+		$result = $this->searchDocumentScores([0.25], []);
+		$this->assertStringContainsString('candidate-0.25', $result['content'][0]['text']);
+		$this->assertStringContainsString('below the requested', $result['content'][0]['text']);
+	}
+
+	public function testDocumentSearchPreservesExplicitLowerThreshold(): void {
+		$result = $this->searchDocumentScores([0.15, 0.05], ['min_score' => 0.1]);
+		$this->assertStringContainsString('candidate-0.15', $result['content'][0]['text']);
+		$this->assertStringNotContainsString('candidate-0.05', $result['content'][0]['text']);
+		$this->assertStringNotContainsString('below the requested', $result['content'][0]['text']);
+	}
+
+	/** Exercise the public tool with controlled cosine scores and one query embedding. */
+	private function searchDocumentScores(array $scores, array $arguments): array {
+		$embeddings = [];
+		foreach ($scores as $score) {
+			$embedding = new \OCA\EducAI\Db\Embedding();
+			$embedding->setEmbedding(json_encode([$score, sqrt(1 - $score * $score)], JSON_THROW_ON_ERROR));
+			$embedding->setChunkText('candidate-' . $score);
+			$embedding->setMetadata('{"path":"manual.md","chunk_index":0}');
+			$embeddings[] = $embedding;
+		}
+		$mapper = $this->createMock(EmbeddingMapper::class);
+		$mapper->expects($this->once())->method('findRetrievableByBotAndModel')->with(7, 'embed-model')->willReturn($embeddings);
+		$mapper->expects($this->never())->method('findByBotAndModel');
+		$client = $this->createMock(EmbeddingClient::class);
+		$client->method('getActiveModel')->willReturn('embed-model');
+		$client->expects($this->once())->method('embedQuery')->with('Polaris', 'embed-model', ['purpose' => 'rag_query', 'bot_id' => 7])->willReturn([1.0, 0.0]);
+		$provider = $this->createProvider(embeddingClient: $client, embeddingMapper: $mapper);
+		$provider->setInvocationContext(['bot_id' => 7]);
+		return $provider->executeTool(BuiltInToolProvider::TOOL_RAG_SEARCH, ['query' => 'Polaris'] + $arguments);
+	}
+
 	private function createProvider(
 		?EmbeddingClient $embeddingClient = null,
 		?RoomDocumentEmbeddingMapper $roomDocumentEmbeddingMapper = null,

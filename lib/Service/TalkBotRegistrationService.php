@@ -711,7 +711,12 @@ class TalkBotRegistrationService {
 
 	private function getForwardedCookies(): \GuzzleHttp\Cookie\CookieJar {
 		$jar = new \GuzzleHttp\Cookie\CookieJar();
-		$host = $this->request->getServerHost();
+		// Use the same generated URL as the OCS request (including proxy overrides).
+		// Cookie domains contain the hostname, never its port or installation path.
+		$host = parse_url($this->urlGenerator->getAbsoluteURL(''), PHP_URL_HOST);
+		if (!is_string($host) || $host === '') {
+			return $jar;
+		}
 
 		foreach ($_COOKIE as $name => $value) {
 			$jar->setCookie(new \GuzzleHttp\Cookie\SetCookie([

@@ -678,8 +678,12 @@ class TalkBotController extends Controller {
 		// Get cookies from $_COOKIE superglobal
 		$cookies = $_COOKIE;
 
-		// Parse the host for the cookie domain
-		$host = $this->ncRequest->getServerHost();
+		// Use the same generated URL as the OCS request (including proxy overrides).
+		// Cookie domains contain the hostname, never its port or installation path.
+		$host = parse_url($this->urlGenerator->getAbsoluteURL(''), PHP_URL_HOST);
+		if (!is_string($host) || $host === '') {
+			return $jar;
+		}
 
 		foreach ($cookies as $name => $value) {
 			$jar->setCookie(new \GuzzleHttp\Cookie\SetCookie([

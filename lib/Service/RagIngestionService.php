@@ -13,6 +13,7 @@ use OCA\EducAI\Exception\DoclingEmptyResultException;
 use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCA\EducAI\Exception\KnowledgeSourceException;
 use OCA\EducAI\Jobs\ReindexBotSourceJob;
+use OCA\EducAI\Jobs\SyncRagSourceJob;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\BackgroundJob\IJob;
 use OCP\BackgroundJob\IJobList;
@@ -22,6 +23,8 @@ use OCP\Files\ForbiddenException;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use OCP\Files\NotPermittedException;
+use OCP\Lock\ILockingProvider;
+use OCP\Lock\LockedException;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
@@ -60,7 +63,8 @@ class RagIngestionService {
         IRootFolder $rootFolder,
         IJobList $jobList,
         LoggerInterface $logger,
-        ?RagSourceLocator $sourceLocator = null
+        ?RagSourceLocator $sourceLocator = null,
+        private ?ILockingProvider $locking = null
     ) {
         $this->botSourceMapper = $botSourceMapper;
         $this->embeddingMapper = $embeddingMapper;
@@ -148,13 +152,34 @@ class RagIngestionService {
     }
 
     public function ingestSourceById(int $sourceId, bool $force = false, int $attempt = 0): void {
-        $source = $this->botSourceMapper->findById($sourceId);
-        if ($attempt > 0 && $source->getStatus() === KnowledgeSourceStatus::READY) {
-            // Another run indexed the source after this retry was scheduled.
-            $this->logger->debug('Skipping obsolete RAG source retry', ['sourceId' => $sourceId, 'attempt' => $attempt]);
+        $lock = 'educai:rag-source:' . $sourceId;
+        try {
+            $this->locking?->acquireLock($lock, ILockingProvider::LOCK_EXCLUSIVE);
+        } catch (LockedException) {
+            // A file change can arrive after the sync job's busy check. Keep one
+            // follow-up instead of allowing concurrent generations to publish.
+            $source = $this->botSourceMapper->findById($sourceId);
+            if ($source->getNodeType() !== 'url') {
+                SyncRagSourceJob::schedule($this->jobList, $this->locking, $sourceId, 30);
+            } else {
+                $args = ['sourceId' => $sourceId, 'force' => $force, 'attempt' => $attempt];
+                if (!$this->jobList->has(ReindexBotSourceJob::class, $args)) {
+                    $this->jobList->scheduleAfter(ReindexBotSourceJob::class, time() + 30, $args);
+                }
+            }
             return;
         }
-        $this->ingestSource($source, $force, $attempt);
+        try {
+            // Read after acquiring the lock: the previous run may have completed meanwhile.
+            $source = $this->botSourceMapper->findById($sourceId);
+            if ($attempt > 0 && $source->getStatus() === KnowledgeSourceStatus::READY) {
+                $this->logger->debug('Skipping obsolete RAG source retry', ['sourceId' => $sourceId, 'attempt' => $attempt]);
+                return;
+            }
+            $this->ingestSource($source, $force, $attempt);
+        } finally {
+            $this->locking?->releaseLock($lock, ILockingProvider::LOCK_EXCLUSIVE);
+        }
     }
 
     /**
@@ -421,9 +446,13 @@ class RagIngestionService {
             // A folder the owner may no longer list must not stay answerable through the old index.
             throw new KnowledgeSourceException(KnowledgeSourceStatus::SOURCE_ACCESS_DENIED, ['folders_denied' => true], 'Listing a folder was denied', $e);
         }
+        usort($files, static fn (array $a, array $b): int => strcmp($a[1], $b[1]));
         $totalFiles = count($files);
 
         if ($totalFiles === 0) {
+            if (!$this->clearEmptyFileIndex($source, $force, $attempt)) {
+                return;
+            }
             throw $stats['metadata'] > 0
                 ? new KnowledgeSourceException(KnowledgeSourceStatus::METADATA_ONLY, ['metadata' => $stats['metadata']], 'Only operating-system metadata files were found')
                 : new KnowledgeSourceException(KnowledgeSourceStatus::NO_FILES, [], 'No readable files found for source');
@@ -475,7 +504,7 @@ class RagIngestionService {
                 default:
                     $stats['indexed']++;
                     $content = $extraction['text'];
-                    $checksumSeed .= sha1($content);
+                    $checksumSeed .= sha1($relativePath) . sha1($content);
                     $segments = $this->chunkText($content, $chunkSize, $chunkOverlap);
                     foreach ($segments as $idx => $segment) {
                         $chunks[] = [
@@ -515,6 +544,11 @@ class RagIngestionService {
                     'converter_disabled' => $stats['needs_converter'] > 0,
                 ], 'No supported files found for source');
             }
+            if ($unsupported === 0) {
+                if (!$this->clearEmptyFileIndex($source, $force, $attempt)) {
+                    return;
+                }
+            }
             throw new KnowledgeSourceException(KnowledgeSourceStatus::NO_TEXT, [
                 'empty' => $stats['empty'],
                 'unsupported' => $unsupported,
@@ -550,6 +584,22 @@ class RagIngestionService {
 
         // Generate and store embeddings
         $this->generateAndStoreEmbeddings($source, $chunks, $newChecksum, $notice, $force, $attempt);
+    }
+
+    /** Confirmed absence of indexable text must not leave the previous document answerable. */
+    private function clearEmptyFileIndex(BotSource $source, bool $force, int $attempt): bool {
+        $location = $this->sourceLocator->locate($source);
+        if ($location['state'] !== RagSourceLocator::FOUND) {
+            $this->handleUnresolvedSource($source, $location['state'], $location['exception'], $force, $attempt);
+            return false;
+        }
+        if (!$this->sourceExists($source->getId())) {
+            return false;
+        }
+        $this->embeddingMapper->publishStaged($source->getId(), $this->embeddingClient->getActiveModel(), sha1('empty'), 0);
+        $source->setChecksum(null);
+        $source->setLastIndexedAt(time());
+        return true;
     }
 
     /**

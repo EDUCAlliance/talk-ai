@@ -4150,3 +4150,15 @@ msgstr "Das hochgeladene Bild konnte nicht indexiert werden. Bitte lade es spät
 #: lib/Webhook/TalkHandler.php
 msgid "The uploaded document could not be indexed. Please try uploading it again later."
 msgstr "Das hochgeladene Dokument konnte nicht indexiert werden. Bitte lade es später erneut hoch."
+
+#: src/components/BotForm.vue
+msgid "Saved collective #{id}"
+msgstr "Gespeichertes Kollektiv #{id}"
+
+#: src/components/BotForm.vue
+msgid "Could not load collectives. The saved selection has been preserved."
+msgstr "Die Kollektive konnten nicht geladen werden. Die gespeicherte Auswahl bleibt erhalten."
+
+#: src/components/BotForm.vue
+msgid "Retry"
+msgstr "Erneut versuchen"

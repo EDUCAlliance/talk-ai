@@ -51,6 +51,27 @@ class BotSourceMapper extends QBMapper {
         return $this->findEntities($qb);
     }
 
+    /** @return list<BotSource> */
+    public function findByNodeIds(array $nodeIds): array {
+        $nodeIds = array_values(array_unique(array_filter(array_map('intval', $nodeIds), static fn (int $id): bool => $id > 0)));
+        if ($nodeIds === []) {
+            return [];
+        }
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')->from($this->getTableName())
+            ->where($qb->expr()->in('node_id', $qb->createNamedParameter($nodeIds, IQueryBuilder::PARAM_INT_ARRAY)))
+            ->andWhere($qb->expr()->in('node_type', $qb->createNamedParameter(['file', 'folder'], IQueryBuilder::PARAM_STR_ARRAY)));
+        return $this->findEntities($qb);
+    }
+
+    /** @return list<BotSource> */
+    public function findFileSources(): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')->from($this->getTableName())
+            ->where($qb->expr()->in('node_type', $qb->createNamedParameter(['file', 'folder'], IQueryBuilder::PARAM_STR_ARRAY)));
+        return $this->findEntities($qb);
+    }
+
     public function findOneByBotAndNode(int $botId, int $nodeId): ?BotSource {
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')

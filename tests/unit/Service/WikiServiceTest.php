@@ -1252,6 +1252,8 @@ class InMemoryRootFolder {
 }
 
 class InMemoryFolder implements Folder {
+	public function getOwner() { return null; }
+
 	private string $name;
 	private ?InMemoryFolder $parent;
 	/** @var array<string,File|Folder> */
@@ -1347,6 +1349,8 @@ class InMemoryFolder implements Folder {
 }
 
 class InMemoryFile implements File {
+	public function getOwner() { return null; }
+
 	private string $name;
 	private int $id;
 	private ?InMemoryFolder $parent;

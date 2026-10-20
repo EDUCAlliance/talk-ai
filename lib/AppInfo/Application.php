@@ -28,8 +28,10 @@ use OCA\EducAI\Jobs\CleanupRoomDocumentsJob;
 use OCA\EducAI\Jobs\ProcessQueuedRequestsJob;
 use OCA\EducAI\Jobs\RebuildWikiRootRegistryJob;
 use OCA\EducAI\Jobs\ReindexBotSourceJob;
+use OCA\EducAI\Jobs\SyncRagSourceJob;
 use OCA\EducAI\Jobs\SyncWikiRootIndexJob;
 use OCA\EducAI\Listener\BotPickerListener;
+use OCA\EducAI\Listener\RagFileEventListener;
 use OCA\EducAI\Listener\TalkEnabledListener;
 use OCA\EducAI\Listener\WikiFileEventListener;
 use OCA\EducAI\Listener\WikiRegistryRebuildListener;
@@ -51,6 +53,7 @@ use OCA\EducAI\Service\ModelReferenceMigrationService;
 use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RagIngestionService;
+use OCA\EducAI\Service\RagFileEventSyncService;
 use OCA\EducAI\Service\RagRetriever;
 use OCA\EducAI\Service\RateLimitService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
@@ -83,6 +86,8 @@ use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCP\AppFramework\Services\IInitialState;
 use OCP\BackgroundJob\IJobList;
 use OCP\Collaboration\Reference\RenderReferenceEvent;
+use OCP\Files\Events\Node\BeforeNodeDeletedEvent;
+use OCP\Files\Events\Node\BeforeNodeRenamedEvent;
 use OCP\Files\Events\Node\NodeCopiedEvent;
 use OCP\Files\Events\Node\NodeCreatedEvent;
 use OCP\Files\Events\Node\NodeDeletedEvent;
@@ -305,7 +310,31 @@ class Application extends App implements IBootstrap {
 				$c->get(SettingsService::class),
 				$c->get(\OCP\Files\IRootFolder::class),
 				$c->get(\OCP\BackgroundJob\IJobList::class),
-				$c->get(\Psr\Log\LoggerInterface::class)
+				$c->get(\Psr\Log\LoggerInterface::class),
+				null,
+				$c->get(\OCP\Lock\ILockingProvider::class)
+			);
+		});
+
+		$context->registerService(RagFileEventSyncService::class, function (IContainer $c) {
+			return new RagFileEventSyncService(
+				$c->get(BotSourceMapper::class),
+				$c->get(\OCP\Files\IRootFolder::class),
+				$c->get(IJobList::class),
+				$c->get(\Psr\Log\LoggerInterface::class),
+				$c->get(\OCP\Lock\ILockingProvider::class)
+			);
+		});
+		$context->registerService(RagFileEventListener::class, function (IContainer $c) {
+			return new RagFileEventListener($c->get(RagFileEventSyncService::class));
+		});
+		$context->registerService(SyncRagSourceJob::class, function (IContainer $c) {
+			return new SyncRagSourceJob(
+				$c->get(\OCP\AppFramework\Utility\ITimeFactory::class),
+				$c->get(BotSourceMapper::class),
+				$c->get(RagIngestionService::class),
+				$c->get(IJobList::class),
+				$c->get(\OCP\Lock\ILockingProvider::class)
 			);
 		});
 
@@ -667,6 +696,11 @@ class Application extends App implements IBootstrap {
 			AppEnableEvent::class,
 			WikiRegistryRebuildListener::class
 		);
+
+		foreach ([BeforeNodeDeletedEvent::class, BeforeNodeRenamedEvent::class, NodeCreatedEvent::class,
+			NodeWrittenEvent::class, NodeDeletedEvent::class, NodeRenamedEvent::class, NodeCopiedEvent::class] as $event) {
+			$context->registerEventListener($event, RagFileEventListener::class);
+		}
 
 		$context->registerEventListener(
 			NodeCreatedEvent::class,
