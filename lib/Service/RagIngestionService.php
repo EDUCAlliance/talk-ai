@@ -151,34 +151,57 @@ class RagIngestionService {
         return $jobs;
     }
 
-    public function ingestSourceById(int $sourceId, bool $force = false, int $attempt = 0): void {
+    public function ingestSourceById(int $sourceId, bool $force = false, int $attempt = 0, bool $fileSync = false): void {
         $lock = 'educai:rag-source:' . $sourceId;
         try {
             $this->locking?->acquireLock($lock, ILockingProvider::LOCK_EXCLUSIVE);
         } catch (LockedException) {
-            // A file change can arrive after the sync job's busy check. Keep one
-            // follow-up instead of allowing concurrent generations to publish.
+            // Lock contention is not a provider failure. Retain the entire request
+            // without spending its retry budget or turning an explicit rebuild into a sync.
             $source = $this->botSourceMapper->findById($sourceId);
-            if ($source->getNodeType() !== 'url') {
-                SyncRagSourceJob::schedule($this->jobList, $this->locking, $sourceId, 30);
-            } else {
-                $args = ['sourceId' => $sourceId, 'force' => $force, 'attempt' => $attempt];
-                if (!$this->jobList->has(ReindexBotSourceJob::class, $args)) {
-                    $this->jobList->scheduleAfter(ReindexBotSourceJob::class, time() + 30, $args);
-                }
-            }
+            $this->deferIngestion($source, $force, $attempt, $fileSync, time() + 30);
             return;
         }
         try {
             // Read after acquiring the lock: the previous run may have completed meanwhile.
             $source = $this->botSourceMapper->findById($sourceId);
-            if ($attempt > 0 && $source->getStatus() === KnowledgeSourceStatus::READY) {
+            // An ordinary checksum-only run can mark the source ready without
+            // fulfilling an outstanding forced rebuild.
+            if ($attempt > 0 && !$force && $source->getStatus() === KnowledgeSourceStatus::READY) {
                 $this->logger->debug('Skipping obsolete RAG source retry', ['sourceId' => $sourceId, 'attempt' => $attempt]);
+                return;
+            }
+            if ($this->providerRetryAt($source) > time()) {
+                // The competing run may have received Retry-After after this job
+                // was deferred. Recheck before ingestion clears the waiting state.
+                $this->deferIngestion($source, $force, $attempt, $fileSync, time());
                 return;
             }
             $this->ingestSource($source, $force, $attempt);
         } finally {
             $this->locking?->releaseLock($lock, ILockingProvider::LOCK_EXCLUSIVE);
+        }
+    }
+
+    private function providerRetryAt(BotSource $source): int {
+        $error = KnowledgeSourceStatus::decode($source->getErrorMessage());
+        if ($source->getProgressStage() !== KnowledgeSourceStatus::STAGE_WAITING
+            || ($error['code'] ?? null) !== KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED) {
+            return 0;
+        }
+        return (int)($error['params']['retry_at'] ?? 0);
+    }
+
+    private function deferIngestion(BotSource $source, bool $force, int $attempt, bool $fileSync, int $notBefore): void {
+        $retryAt = max($notBefore, $this->providerRetryAt($source));
+        if ($fileSync) {
+            // File events still coalesce separately from explicit/provider retry jobs.
+            SyncRagSourceJob::schedule($this->jobList, $this->locking, $source->getId(), max(0, $retryAt - time()));
+            return;
+        }
+        $args = ['sourceId' => $source->getId(), 'force' => $force, 'attempt' => $attempt];
+        if (!$this->jobList->has(ReindexBotSourceJob::class, $args)) {
+            $this->jobList->scheduleAfter(ReindexBotSourceJob::class, $retryAt, $args);
         }
     }
 
@@ -310,13 +333,14 @@ class RagIngestionService {
     }
 
     /**
-     * Schedule the next attempt unless another job for the source is already queued
-     * (an explicit reindex started meanwhile): one retry chain per source.
+     * A queued job replaces this retry only if it also retains the forced intent.
      */
     private function scheduleRetry(int $sourceId, int $retryAt, bool $force, int $attempt): void {
-        if ($this->isQueued($sourceId)) {
-            $this->logger->debug('RAG source already has a queued job; no extra retry scheduled', ['sourceId' => $sourceId]);
-            return;
+        foreach ($this->queuedJobs($sourceId) as $job) {
+            if (!$force || (bool)($job->getArgument()['force'] ?? false)) {
+                $this->logger->debug('RAG source already has a queued job; no extra retry scheduled', ['sourceId' => $sourceId]);
+                return;
+            }
         }
         $this->jobList->scheduleAfter(ReindexBotSourceJob::class, $retryAt, [
             'sourceId' => $sourceId,

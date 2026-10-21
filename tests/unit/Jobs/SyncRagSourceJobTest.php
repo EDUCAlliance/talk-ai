@@ -47,7 +47,7 @@ class SyncRagSourceJobTest extends TestCase {
 		$sources->method('findById')->with(1)->willReturn($source);
 		$ingestion = $this->createMock(RagIngestionService::class);
 		$ingestion->method('isBusy')->willReturnOnConsecutiveCalls(true, true, false);
-		$ingestion->expects($this->once())->method('ingestSourceById')->with(1);
+		$ingestion->expects($this->once())->method('ingestSourceById')->with(1, false, 0, true);
 		$jobs = $this->createMock(IJobList::class);
 		$jobs->method('has')->willReturnOnConsecutiveCalls(false, true);
 		$jobs->expects($this->once())->method('scheduleAfter')->with(SyncRagSourceJob::class, $this->callback(static fn (int $at): bool => $at >= time() + 29), ['sourceId' => 1]);

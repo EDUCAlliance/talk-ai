@@ -73,7 +73,7 @@ class SyncRagSourceJob extends QueuedJob {
 				self::schedule($this->jobs, $this->locking, $sourceId, 30);
 				return;
 			}
-			$this->ingestion->ingestSourceById($sourceId);
+			$this->ingestion->ingestSourceById($sourceId, false, 0, true);
 		} catch (DoesNotExistException) {
 			// The user removed the knowledge source before its follow-up ran.
 		}

@@ -283,6 +283,137 @@ test('switching edited bots resets local drafts and rejects the previous bot too
 	assert.equal(state.rag.sources.length, 0)
 })
 
+const pollingForm = (ctx, axios) => {
+	ctx.mock.timers.enable({ apis: ['setInterval'] })
+	return component(ctx, 'components/BotForm', axios,
+		{ bot: bot(), userPermissions: { isAdmin: true } }, { setInterval, clearInterval })
+}
+
+for (const responseDelay of [3000, 5000]) {
+	test(`source polling accepts a ${responseDelay}ms response and stops after indexing completes`, async ctx => {
+		const pending = deferred()
+		let requests = 0
+		const { state } = pollingForm(ctx, { get: () => { requests++; return pending.promise } })
+		state.rag.sources = [{ id: 101, status: 'pending' }]
+		state.startPolling()
+		ctx.mock.timers.tick(2000)
+		assert.equal(requests, 1)
+		assert.equal(state.rag.loading, true)
+		ctx.mock.timers.tick(responseDelay)
+		assert.equal(requests, 1, 'automatic ticks must not supersede the slow request')
+		pending.resolve({ data: { sources: [{ id: 101, status: 'ready' }] } })
+		await settle()
+		assert.equal(state.rag.sources[0].status, 'ready')
+		assert.equal(state.rag.loading, false)
+		ctx.mock.timers.tick(2000)
+		assert.equal(state.rag.pollingInterval, null)
+		ctx.mock.timers.tick(10000)
+		assert.equal(requests, 1)
+	})
+}
+
+test('source polling recovers after a slow request fails without losing pending status', async ctx => {
+	const requests = []
+	const { state, errors } = pollingForm(ctx, { get: () => {
+		const request = deferred()
+		requests.push(request)
+		return request.promise
+	} })
+	state.rag.sources = [{ id: 101, status: 'pending' }]
+	state.startPolling()
+	ctx.mock.timers.tick(2000)
+	ctx.mock.timers.tick(5000)
+	assert.equal(requests.length, 1)
+	requests[0].reject(new Error('Temporary network failure'))
+	await settle()
+	assert.equal(state.rag.loading, false)
+	assert.equal(state.rag.sources[0].status, 'pending')
+	assert.equal(errors.length, 1)
+	ctx.mock.timers.tick(1000)
+	assert.equal(requests.length, 2)
+	ctx.mock.timers.tick(5000)
+	assert.equal(requests.length, 2)
+	requests[1].resolve({ data: { sources: [{ id: 101, status: 'ready' }] } })
+	await settle()
+	ctx.mock.timers.tick(2000)
+	assert.equal(state.rag.sources[0].status, 'ready')
+	assert.equal(state.rag.loading, false)
+	assert.equal(state.rag.pollingInterval, null)
+	assert.equal(errors.length, 1)
+})
+
+test('explicit source refresh after reindex supersedes an in-flight poll', async ctx => {
+	const requests = [], posts = []
+	const { state, errors } = pollingForm(ctx, {
+		get: () => {
+			const request = deferred()
+			requests.push(request)
+			return request.promise
+		},
+		post: async url => { posts.push(url) },
+	})
+	state.rag.sources = [{ id: 101, status: 'pending' }]
+	state.startPolling()
+	ctx.mock.timers.tick(2000)
+	const reindex = state.reindexSource({ id: 101 })
+	await settle()
+	assert.deepEqual(posts, ['/apps/educai/api/v1/bots/1/sources/101/reindex'])
+	assert.equal(requests.length, 2, 'source mutations must still request fresh status immediately')
+	requests[0].resolve({ data: { sources: [{ id: 101, status: 'pending' }] } })
+	await settle()
+	assert.equal(state.rag.loading, true, 'old request must not unlock the newer request')
+	ctx.mock.timers.tick(5000)
+	assert.equal(requests.length, 2)
+	requests[1].resolve({ data: { sources: [{ id: 101, status: 'ready' }] } })
+	await reindex
+	assert.equal(state.rag.sources[0].status, 'ready')
+	assert.equal(state.rag.loading, false)
+	assert.equal(state.rag.reindexing[101], undefined)
+	ctx.mock.timers.tick(2000)
+	assert.equal(state.rag.pollingInterval, null)
+	assert.equal(errors.length, 0)
+})
+
+for (const transition of ['switch', 'close']) {
+	for (const rejectOld of [false, true]) {
+		test(`source poll ${rejectOld ? 'failure' : 'success'} is ignored after form ${transition}`, async ctx => {
+			const old = deferred(), current = deferred()
+			let requests = 0
+			const { state, errors } = pollingForm(ctx, { get: url => {
+				if (url.endsWith('/tools')) return Promise.resolve({ data: { tools: [] } })
+				requests++
+				return url.includes('/1/') ? old.promise : current.promise
+			} })
+			state.rag.sources = [{ id: 101, status: 'pending' }]
+			state.startPolling()
+			ctx.mock.timers.tick(2000)
+			if (transition === 'switch') state.bot = bot(2)
+			else state.$destroy()
+			await settle()
+			assert.equal(state.rag.pollingInterval, null)
+			const previousSources = plain(state.rag.sources)
+			const previousLoading = state.rag.loading
+			if (rejectOld) old.reject(new Error('Stale source failure'))
+			else old.resolve({ data: { sources: [{ id: 101, status: 'pending' }] } })
+			await settle()
+			assert.deepEqual(plain(state.rag.sources), previousSources)
+			assert.equal(state.rag.loading, previousLoading)
+			assert.equal(state.rag.pollingInterval, null)
+			assert.equal(errors.length, 0)
+			if (transition === 'switch') {
+				assert.equal(requests, 2)
+				assert.equal(state.rag.loading, true)
+				current.resolve({ data: { sources: [{ id: 202, status: 'ready' }] } })
+				await settle()
+				assert.equal(state.rag.sources[0].id, 202)
+				assert.equal(state.rag.loading, false)
+			}
+			ctx.mock.timers.tick(10000)
+			assert.equal(requests, transition === 'switch' ? 2 : 1)
+		})
+	}
+}
+
 const activity = (ctx, axios) => component(ctx, 'views/PersonalActivity', axios)
 const detail = (id, status = 'success') => ({ data: { trace: { id, status }, events: [{ id: `${id}-${status}`, status }] } })
 const traceList = ids => ({ data: { traces: ids.map(id => ({ id, status: 'success' })), total: ids.length, offset: 0 } })

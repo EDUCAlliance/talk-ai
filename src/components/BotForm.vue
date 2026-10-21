@@ -1073,7 +1073,8 @@ export default {
 			// Poll every 2 seconds for progress updates
 			this.rag.pollingInterval = setInterval(() => {
 				if (this.hasPendingSources) {
-					this.loadRagSources()
+					// Slow responses must not be superseded by the next automatic tick.
+					if (!this.rag.loading) this.loadRagSources()
 				} else {
 					// No more pending sources, stop polling
 					this.stopPolling()

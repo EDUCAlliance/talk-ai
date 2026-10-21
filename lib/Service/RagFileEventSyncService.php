@@ -47,9 +47,8 @@ class RagFileEventSyncService {
 				if ($includeContained && $node instanceof Folder && $nodeId > 0) {
 					$folderIds[$nodeId] = true;
 				}
-				if (MetadataFileFilter::isMetadataPath($node->getPath())) {
-					continue;
-				}
+				// An event may use a metadata-looking share alias while another
+				// source owner sees an ordinary file. Collect identity first.
 				$ancestorIds += $this->withOriginalOwnerAncestors($node, $userFolders, $resolvedNodes);
 				if ($nodeId > 0) {
 					$eventNodeIds[$nodeId] = true;
@@ -63,9 +62,16 @@ class RagFileEventSyncService {
 		}
 
 		$ids = [];
+		$visibleAncestorsByOwner = [];
 		try {
 			foreach ($this->sources->findByNodeIds(array_keys($ancestorIds)) as $source) {
-				$ids[$source->getId()] = $source->getId();
+				$ownerUid = (string)$source->getOwnerUid();
+				$visibleAncestorsByOwner[$ownerUid] ??= $this->visibleEventAncestorsForOwner(
+					$nodes, $ownerUid, $userFolders, $resolvedNodes,
+				);
+				if (isset($visibleAncestorsByOwner[$ownerUid][(int)$source->getNodeId()])) {
+					$ids[$source->getId()] = $source->getId();
+				}
 			}
 		} catch (Throwable $e) {
 			$this->logger->warning('Failed to match RAG file event to knowledge sources', ['exception_class' => $e::class]);
@@ -150,6 +156,36 @@ class RagFileEventSyncService {
 			}
 		}
 		return array_values($ids);
+	}
+
+	/** @param list<Node> $nodes
+	 * @return array<int,true>
+	 */
+	private function visibleEventAncestorsForOwner(array $nodes, string $ownerUid, array &$userFolders, array &$resolvedNodes): array {
+		$ids = [];
+		foreach ($nodes as $node) {
+			try {
+				// Keep same-owner pre/post paths even when a renamed node no
+				// longer has an ID. Never use another user's alias for filtering.
+				$path = $node->getPath();
+				if (str_starts_with($path, '/' . $ownerUid . '/files/') && !MetadataFileFilter::isMetadataPath($path)) {
+					$ids += $this->ancestorIds($node);
+				}
+				$nodeId = (int)$node->getId();
+			} catch (Throwable) {
+				continue;
+			}
+			foreach ($this->nodesForOwner($ownerUid, $nodeId, $userFolders, $resolvedNodes) as $visible) {
+				try {
+					if (!MetadataFileFilter::isMetadataPath($visible->getPath())) {
+						$ids += $this->ancestorIds($visible);
+					}
+				} catch (Throwable $e) {
+					$this->logger->debug('Could not collect visible RAG file ancestors', ['exception_class' => $e::class]);
+				}
+			}
+		}
+		return $ids;
 	}
 
 	private function containsAffectedMount(Folder $sourceFolder, string $ownerUid, array $folderIds, array &$userFolders, array &$resolvedNodes, array &$mountsByPath): bool {

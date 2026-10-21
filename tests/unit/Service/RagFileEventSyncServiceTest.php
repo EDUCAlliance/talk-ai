@@ -33,7 +33,9 @@ class RagFileEventSyncServiceTest extends TestCase {
 
 	public function testMetadataAndUnrelatedChangesDoNotQueueSources(): void {
 		$sources = $this->createMock(BotSourceMapper::class);
-		$sources->expects($this->once())->method('findByNodeIds')->with([20])->willReturn([]);
+		$sources->expects($this->exactly(2))->method('findByNodeIds')->willReturnCallback(function (array $ids): array {
+			return array_map(fn (int $id): BotSource => $this->source($id, $id), array_diff($ids, [20]));
+		});
 		$service = $this->service($sources);
 		$this->assertSame([], $service->affectedSourceIds([
 			$this->node(11, '/alice/files/docs/._a.pdf'),
@@ -41,6 +43,95 @@ class RagFileEventSyncServiceTest extends TestCase {
 			$this->node(13, '/alice/files/docs/__MACOSX/data.txt'),
 		]));
 		$this->assertSame([], $service->affectedSourceIds([$this->node(20, '/alice/files/unrelated.txt')]));
+	}
+
+	/** @dataProvider sharedMetadataViews */
+	public function testMetadataFilteringUsesEachSourceOwnersView(string $sourceType, string $aliceName, string $bobName, array $expected): void {
+		$aliceFolder = $this->folder(10, '/alice/files/knowledge');
+		$bobFolder = $this->folder(100, '/bob/files/knowledge');
+		$original = $this->node(11, '/alice/files/knowledge/' . $aliceName, $aliceFolder);
+		$shared = $this->node(11, '/bob/files/knowledge/' . $bobName, $bobFolder);
+		$shared->method('getOwner')->willReturn(new class { public function getUID(): string { return 'alice'; } });
+		$aliceSource = $this->source(1, $sourceType === 'file' ? 11 : 10);
+		$bobSource = $this->source(2, $sourceType === 'file' ? 11 : 100);
+		$bobSource->setOwnerUid('bob');
+		foreach ([$aliceSource, $bobSource] as $source) {
+			$source->setNodeType($sourceType);
+		}
+		$allSources = [$aliceSource, $bobSource];
+		$sources = $this->createMock(BotSourceMapper::class);
+		$sources->method('findByNodeIds')->willReturnCallback(static fn (array $ids): array => array_values(array_filter($allSources, static fn (BotSource $source): bool => in_array($source->getNodeId(), $ids, true))));
+		$sources->method('findFileSources')->willReturn($allSources);
+		$alice = $this->createMock(Folder::class);
+		$alice->method('getById')->willReturnMap([[10, [$aliceFolder]], [11, [$original]]]);
+		$bob = $this->createMock(Folder::class);
+		$bob->method('getById')->willReturnMap([[100, [$bobFolder]], [11, [$shared]]]);
+		$root = $this->createMock(IRootFolder::class);
+		$root->method('getUserFolder')->willReturnMap([['alice', $alice], ['bob', $bob]]);
+		$this->assertSame($expected, $this->service($sources, $root)->affectedSourceIds([$shared]));
+	}
+
+	public static function sharedMetadataViews(): array {
+		$cases = [];
+		foreach (['file', 'folder'] as $type) {
+			$cases[$type . ': both normal'] = [$type, 'original.txt', 'shared.txt', [1, 2]];
+			foreach (['._shared.txt', '__MACOSX/shared.txt'] as $metadata) {
+				$cases[$type . ': recipient metadata ' . $metadata] = [$type, 'original.txt', $metadata, [1]];
+				$cases[$type . ': original metadata ' . $metadata] = [$type, $metadata, 'shared.txt', [2]];
+				$cases[$type . ': both metadata ' . $metadata] = [$type, $metadata, $metadata, []];
+			}
+		}
+		return $cases;
+	}
+
+	/** @dataProvider sharedMetadataRenames */
+	public function testSharedAliasRenamesPreserveNormalOwnerAndChangedRecipientSources(string $sourceType, string $oldName, string $newName): void {
+		$aliceFolder = $this->folder(10, '/alice/files/knowledge');
+		$bobFolder = $this->folder(100, '/bob/files/knowledge');
+		$original = $this->node(11, '/alice/files/knowledge/original.txt', $aliceFolder);
+		$old = $this->node(11, '/bob/files/knowledge/' . $oldName, $bobFolder);
+		$old->method('getOwner')->willReturn(new class { public function getUID(): string { return 'alice'; } });
+		$target = $this->node(0, '/bob/files/knowledge/' . $newName, $bobFolder);
+		$renamed = $this->node(11, $target->getPath(), $bobFolder);
+		$renamed->method('getOwner')->willReturn(new class { public function getUID(): string { return 'alice'; } });
+		$recipientView = $old;
+		$aliceSource = $this->source(1, $sourceType === 'file' ? 11 : 10);
+		$bobSource = $this->source(2, $sourceType === 'file' ? 11 : 100);
+		$bobSource->setOwnerUid('bob');
+		foreach ([$aliceSource, $bobSource] as $source) {
+			$source->setNodeType($sourceType);
+		}
+		$allSources = [$aliceSource, $bobSource];
+		$sources = $this->createMock(BotSourceMapper::class);
+		$sources->method('findByNodeIds')->willReturnCallback(static fn (array $ids): array => array_values(array_filter($allSources, static fn (BotSource $source): bool => in_array($source->getNodeId(), $ids, true))));
+		$sources->method('findFileSources')->willReturn($allSources);
+		$alice = $this->createMock(Folder::class);
+		$alice->method('getById')->willReturnMap([[10, [$aliceFolder]], [11, [$original]]]);
+		$bob = $this->createMock(Folder::class);
+		$bob->method('getById')->willReturnCallback(static function (int $id) use (&$recipientView, $bobFolder): array { return $id === 11 ? [$recipientView] : ($id === 100 ? [$bobFolder] : []); });
+		$root = $this->createMock(IRootFolder::class);
+		$root->method('getUserFolder')->willReturnMap([['alice', $alice], ['bob', $bob]]);
+		$queued = [];
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('scheduleAfter')->willReturnCallback(static function ($class, $when, $args) use (&$queued): void { $queued[] = $args['sourceId']; });
+		$listener = new RagFileEventListener($this->service($sources, $root, $jobs));
+		$listener->handle(new BeforeNodeRenamedEvent($old, $target));
+		$this->assertSame([], $queued, 'A failed rename must not queue any work');
+		$recipientView = $renamed;
+		$listener->handle(new NodeRenamedEvent($this->node(0, $old->getPath(), $bobFolder), $renamed));
+		sort($queued);
+		$this->assertSame([1, 2], $queued, 'Capture the old normal view and refresh the new normal view without losing the original owner');
+	}
+
+	public static function sharedMetadataRenames(): array {
+		$cases = [];
+		foreach (['file', 'folder'] as $type) {
+			foreach (['._shared.txt', '__MACOSX/shared.txt'] as $metadata) {
+				$cases[$type . ': metadata to normal ' . $metadata] = [$type, $metadata, 'shared.txt'];
+				$cases[$type . ': normal to metadata ' . $metadata] = [$type, 'shared.txt', $metadata];
+			}
+		}
+		return $cases;
 	}
 
 	public function testNonExistingOldRenameNodeStillMatchesItsParent(): void {
@@ -336,6 +427,7 @@ class RagFileEventSyncServiceTest extends TestCase {
 		$source = new BotSource();
 		$source->setId($id);
 		$source->setNodeId($nodeId);
+		$source->setOwnerUid('alice');
 		return $source;
 	}
 
