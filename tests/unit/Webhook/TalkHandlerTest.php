@@ -1079,6 +1079,35 @@ class TalkHandlerTest extends TestCase {
 		$this->assertSame('@docs-other /docs_extra', $this->invokePrivateMethod($handler, 'removeBotMention', ['@docs-other /docs_extra', '@docs']));
 	}
 
+	#[DataProvider('caseSensitiveMentionMessages')]
+	public function testMentionCleanupPreservesDifferentlyCasedBotNames(string $message, string $selectedName, string $expected): void {
+		$bots = [];
+		foreach (['@docs', '@Docs'] as $name) {
+			$bot = new \OCA\EducAI\Db\Bot();
+			$bot->setMentionName($name);
+			$bot->setIsActive(true);
+			$bots[$name] = $bot;
+		}
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('findByMentionName')->with($selectedName)->willReturn($bots[$selectedName]);
+		$handler = $this->createTalkHandler(botService: $botService);
+		$selected = $this->invokePrivateMethod($handler, 'detectBot', [$message]);
+
+		$this->assertSame($bots[$selectedName], $selected);
+		$this->assertSame($expected, $this->invokePrivateMethod($handler, 'removeBotMention', [$message, $selected->getMentionName()]));
+	}
+
+	public static function caseSensitiveMentionMessages(): array {
+		return [
+			'lowercase at' => ['@docs Please compare @Docs output.', '@docs', 'Please compare @Docs output.'],
+			'uppercase at' => ['@Docs Please compare @docs output.', '@Docs', 'Please compare @docs output.'],
+			'lowercase slash' => ['/docs Please compare /Docs output.', '@docs', 'Please compare /Docs output.'],
+			'uppercase slash' => ['/Docs Please compare /docs output.', '@Docs', 'Please compare /docs output.'],
+			'mixed repeated' => ['@docs Grüße 🦝 (@Docs), /docs /Docs @docs', '@docs', 'Grüße 🦝 (@Docs),  /Docs'],
+			'mixed repeated reverse' => ['/Docs Grüße 🦝 (@docs), @Docs /docs /Docs', '@Docs', 'Grüße 🦝 (@docs),  /docs'],
+		];
+	}
+
 	public function testUnknownAndInactiveMentionsDoNotHideNextActiveBot(): void {
 		$inactive = new \OCA\EducAI\Db\Bot();
 		$inactive->setIsActive(false);

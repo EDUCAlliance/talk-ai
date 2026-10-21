@@ -917,7 +917,7 @@ class TalkHandler {
 		$name = ltrim($mentionName, '@');
 		// Work backwards so byte offsets remain valid, including in UTF-8 messages.
 		foreach (array_reverse($this->findBotMentions($message)) as [$mention, $offset]) {
-			if (strcasecmp(substr($mention, 1), $name) === 0) {
+			if (substr($mention, 1) === $name) {
 				$message = substr_replace($message, '', $offset, strlen($mention));
 			}
 		}

@@ -144,7 +144,9 @@ class RagIngestionService {
         foreach ($this->jobList->getJobsIterator(ReindexBotSourceJob::class, null, 0) as $job) {
             $argument = $job->getArgument();
             if (is_array($argument) && (int)($argument['sourceId'] ?? 0) === $sourceId) {
-                $jobs[] = $job;
+                // Nextcloud may reuse one mutable job instance for subsequent rows.
+                // Keep this row's arguments and ID stable for retry/removal decisions.
+                $jobs[] = clone $job;
             }
         }
 
@@ -568,7 +570,9 @@ class RagIngestionService {
                     'converter_disabled' => $stats['needs_converter'] > 0,
                 ], 'No supported files found for source');
             }
-            if ($unsupported === 0) {
+            // Unsupported companions do not negate confirmed empty text. A disabled
+            // converter, however, leaves potentially indexable documents unread.
+            if ($stats['needs_converter'] === 0) {
                 if (!$this->clearEmptyFileIndex($source, $force, $attempt)) {
                     return;
                 }
@@ -800,6 +804,12 @@ class RagIngestionService {
      */
     private function collectFiles(Node $node, string $basePath, array &$stats): array {
         $result = [];
+        // The attached root is already resolved in the source owner's view.
+        // Use the event matcher's full-path rule, including metadata ancestors.
+        if (MetadataFileFilter::isMetadataPath($node->getPath())) {
+            $stats['metadata']++;
+            return $result;
+        }
         if ($node instanceof File) {
             if ($this->isMetadataFile($node)) {
                 $stats['metadata']++;
