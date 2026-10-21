@@ -1,6 +1,9 @@
 OC.L10N.register(
     "educai",
     {
+    "Saved collective #{id}" : "Gespeichertes Kollektiv #{id}",
+    "Could not load collectives. The saved selection has been preserved." : "Die Kollektive konnten nicht geladen werden. Die gespeicherte Auswahl bleibt erhalten.",
+    "Retry" : "Erneut versuchen",
     "Attachment indexing is temporarily rate limited. Please try again in %s seconds." : "Das Anfragelimit für die Indexierung von Anhängen ist vorübergehend erreicht. Bitte versuche es in %s Sekunden erneut.",
     "The uploaded image could not be indexed. Please try uploading it again later." : "Das hochgeladene Bild konnte nicht indexiert werden. Bitte lade es später erneut hoch.",
     "The uploaded document could not be indexed. Please try uploading it again later." : "Das hochgeladene Dokument konnte nicht indexiert werden. Bitte lade es später erneut hoch.",

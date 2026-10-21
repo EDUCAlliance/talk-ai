@@ -431,6 +431,9 @@
 									<option value="">
 										{{ t('educai', 'Select a collective') }}
 									</option>
+									<option v-if="unresolvedWikiCollectiveId" :value="unresolvedWikiCollectiveId">
+										{{ t('educai', 'Saved collective #{id}', { id: unresolvedWikiCollectiveId }) }}
+									</option>
 									<option
 										v-for="collective in filteredWikiCollectives"
 										:key="collective.id"
@@ -440,6 +443,12 @@
 								</select>
 								<p v-if="wikiLocationsLoading" class="hint">
 									{{ t('educai', 'Loading collectives…') }}
+								</p>
+								<p v-else-if="wikiLocationsError" class="hint">
+									{{ t('educai', 'Could not load collectives. The saved selection has been preserved.') }}
+									<button type="button" class="button subtle small" @click="loadWikiLocations">
+										{{ t('educai', 'Retry') }}
+									</button>
 								</p>
 								<p v-else-if="availableCollectives.length === 0" class="hint">
 									{{ t('educai', 'No admin-owned collectives available for this account.') }}
@@ -659,6 +668,29 @@ const normalizeBuiltInToolName = (value) => String(value || '')
 	.replace(/[^a-z0-9]+/g, '_')
 	.replace(/^_+|_+$/g, '')
 
+const createFormData = () => ({
+	botName: '',
+	mentionName: '',
+	description: '',
+	systemPrompt: '',
+	visibility: 'personal',
+	allowedGroups: [],
+	allowedTeams: [],
+	model: '',
+	useCustomTemperature: false,
+	temperature: null,
+	ragEnabled: false,
+	personalWikiEnabled: false,
+	personalWikiLocation: 'personal_files',
+	personalWikiCollectiveId: '',
+	personalWikiPath: '',
+	selectedTools: [],
+	onboardingQuestions: {
+		start: 'q1',
+		questions: [],
+	},
+})
+
 export default {
 	name: 'BotForm',
 	components: {
@@ -685,28 +717,7 @@ export default {
 	data() {
 		return {
 			WIKI_ROOT_FOLDER,
-			formData: {
-				botName: '',
-				mentionName: '',
-				description: '',
-				systemPrompt: '',
-				visibility: 'personal',
-				allowedGroups: [],
-				allowedTeams: [],
-				model: '',
-				useCustomTemperature: false,
-				temperature: null,
-				ragEnabled: false,
-				personalWikiEnabled: false,
-				personalWikiLocation: 'personal_files',
-				personalWikiCollectiveId: '',
-				personalWikiPath: '',
-				selectedTools: [],
-				onboardingQuestions: {
-					start: 'q1',
-					questions: [],
-				},
-			},
+			formData: createFormData(),
 			settings: {
 				defaultTemperature: 0.2,
 				allowMultipleModels: false,
@@ -721,6 +732,13 @@ export default {
 			availableTeams: [],
 			availableCollectives: [],
 			wikiLocationsLoading: false,
+			wikiLocationsLoaded: false,
+			wikiLocationsError: false,
+			wikiLocationsRequestId: 0,
+			botToolsRequestId: 0,
+			botToolsLoading: false,
+			botToolsLoaded: true,
+			ragSourcesRequestId: 0,
 			availableTools: [],
 			toolLoading: false,
 			toolConfigs: {},
@@ -933,6 +951,10 @@ export default {
 				return teamId !== '' && selectedTeams.has(teamId)
 			})
 		},
+		unresolvedWikiCollectiveId() {
+			const id = this.formData.personalWikiCollectiveId
+			return !this.wikiLocationsLoaded && id && !this.filteredWikiCollectives.some((collective) => String(collective.id) === String(id)) ? id : ''
+		},
 		visibleTools() {
 			return this.availableTools.filter((tool) => !this.isWikiTool(tool))
 		},
@@ -947,6 +969,9 @@ export default {
 		},
 	},
 	watch: {
+		bot() {
+			this.initializeForm()
+		},
 		'formData.visibility'() {
 			if (!this.isWikiCapableBot) {
 				this.formData.personalWikiEnabled = false
@@ -964,64 +989,82 @@ export default {
 		},
 	},
 	mounted() {
+		this.initializeForm()
 		this.loadSettings()
 		this.loadGroups()
 		this.loadTeams()
 		this.loadWikiLocations()
 		this.loadAvailableTools()
-		if (this.bot) {
-			// Check if there are pending changes to load
-			const pending = this.bot.pending_changes
-			const hasPending = this.bot.has_pending_changes && pending
-
-			// Load onboarding questions (from pending or approved)
-			let onboardingQuestions = { start: 'q1', questions: [] }
-			if (hasPending && pending.onboarding_questions) {
-				onboardingQuestions = pending.onboarding_questions
-			} else if (this.bot.onboarding_questions) {
-				onboardingQuestions = this.bot.onboarding_questions
-			}
-
-			const hasPendingTemperature = hasPending && Object.prototype.hasOwnProperty.call(pending, 'temperature')
-			const temperature = hasPendingTemperature
-				? this.normalizeTemperatureValue(pending.temperature)
-				: this.normalizeTemperatureValue(this.bot.temperature)
-
-			this.formData = {
-				// Use pending values if available, otherwise approved values
-				botName: hasPending && pending.bot_name ? pending.bot_name : this.bot.bot_name,
-				mentionName: this.bot.mention_name.replace('@', ''),
-				description: hasPending && pending.description !== undefined ? pending.description : (this.bot.description || ''),
-				systemPrompt: hasPending && pending.system_prompt ? pending.system_prompt : this.bot.system_prompt,
-				visibility: hasPending && pending.visibility
-					? pending.visibility
-					: (this.bot.visibility ? this.bot.visibility : (this.bot.is_public ? 'global' : 'groups')),
-				allowedGroups: hasPending && pending.allowed_groups
-					? (typeof pending.allowed_groups === 'string' ? JSON.parse(pending.allowed_groups || '[]') : pending.allowed_groups)
-					: (Array.isArray(this.bot.allowed_groups) ? this.bot.allowed_groups : []),
-				allowedTeams: hasPending && pending.allowed_teams
-					? (typeof pending.allowed_teams === 'string' ? JSON.parse(pending.allowed_teams || '[]') : pending.allowed_teams)
-					: (Array.isArray(this.bot.allowed_teams) ? this.bot.allowed_teams : []),
-				model: hasPending && pending.model !== undefined ? pending.model : (this.bot.model || ''),
-				useCustomTemperature: temperature !== null,
-				temperature,
-				ragEnabled: hasPending && pending.rag_enabled !== undefined ? !!pending.rag_enabled : !!this.bot.rag_enabled,
-				personalWikiEnabled: false,
-				personalWikiLocation: 'personal_files',
-				personalWikiCollectiveId: '',
-				personalWikiPath: '',
-				selectedTools: [],
-				onboardingQuestions,
-			}
-			this.initialModel = this.formData.model
-			this.loadBotTools()
-			this.loadRagSources()
-		}
 	},
 	beforeDestroy() {
+		this.wikiLocationsRequestId++
+		this.botToolsRequestId++
+		this.ragSourcesRequestId++
 		this.stopPolling()
 	},
 	methods: {
+		initializeForm() {
+			this.stopPolling()
+			this.botToolsRequestId++
+			this.ragSourcesRequestId++
+			this.formData = createFormData()
+			this.initialModel = ''
+			this.toolConfigs = {}
+			this.botToolsLoaded = true
+			this.botToolsLoading = false
+			this.rag.sources = []
+			this.rag.loading = false
+			this.personalWikiInitiallyEnabled = false
+			this.personalWikiChanged = false
+			if (this.bot) {
+				// Check if there are pending changes to load
+				const pending = this.bot.pending_changes
+				const hasPending = this.bot.has_pending_changes && pending
+
+				// Load onboarding questions (from pending or approved)
+				let onboardingQuestions = { start: 'q1', questions: [] }
+				if (hasPending && pending.onboarding_questions) {
+					onboardingQuestions = pending.onboarding_questions
+				} else if (this.bot.onboarding_questions) {
+					onboardingQuestions = this.bot.onboarding_questions
+				}
+
+				const hasPendingTemperature = hasPending && Object.prototype.hasOwnProperty.call(pending, 'temperature')
+				const temperature = hasPendingTemperature
+					? this.normalizeTemperatureValue(pending.temperature)
+					: this.normalizeTemperatureValue(this.bot.temperature)
+
+				this.formData = {
+					// Use pending values if available, otherwise approved values
+					botName: hasPending && pending.bot_name ? pending.bot_name : this.bot.bot_name,
+					mentionName: this.bot.mention_name.replace('@', ''),
+					description: hasPending && pending.description !== undefined ? pending.description : (this.bot.description || ''),
+					systemPrompt: hasPending && pending.system_prompt ? pending.system_prompt : this.bot.system_prompt,
+					visibility: hasPending && pending.visibility
+						? pending.visibility
+						: (this.bot.visibility ? this.bot.visibility : (this.bot.is_public ? 'global' : 'groups')),
+					allowedGroups: hasPending && pending.allowed_groups
+						? (typeof pending.allowed_groups === 'string' ? JSON.parse(pending.allowed_groups || '[]') : [...pending.allowed_groups])
+						: [...(Array.isArray(this.bot.allowed_groups) ? this.bot.allowed_groups : [])],
+					allowedTeams: hasPending && pending.allowed_teams
+						? (typeof pending.allowed_teams === 'string' ? JSON.parse(pending.allowed_teams || '[]') : [...pending.allowed_teams])
+						: [...(Array.isArray(this.bot.allowed_teams) ? this.bot.allowed_teams : [])],
+					model: hasPending && pending.model !== undefined ? pending.model : (this.bot.model || ''),
+					useCustomTemperature: temperature !== null,
+					temperature,
+					ragEnabled: hasPending && pending.rag_enabled !== undefined ? !!pending.rag_enabled : !!this.bot.rag_enabled,
+					personalWikiEnabled: false,
+					personalWikiLocation: 'personal_files',
+					personalWikiCollectiveId: '',
+					personalWikiPath: '',
+					selectedTools: [],
+					onboardingQuestions: JSON.parse(JSON.stringify(onboardingQuestions)),
+				}
+				this.initialModel = this.formData.model
+				this.loadBotTools()
+				this.loadRagSources()
+			}
+		},
 		startPolling() {
 			// Only start if not already polling
 			if (this.rag.pollingInterval) {
@@ -1030,7 +1073,8 @@ export default {
 			// Poll every 2 seconds for progress updates
 			this.rag.pollingInterval = setInterval(() => {
 				if (this.hasPendingSources) {
-					this.loadRagSources()
+					// Slow responses must not be superseded by the next automatic tick.
+					if (!this.rag.loading) this.loadRagSources()
 				} else {
 					// No more pending sources, stop polling
 					this.stopPolling()
@@ -1062,17 +1106,22 @@ export default {
 			}
 		},
 		async loadWikiLocations() {
+			const requestId = ++this.wikiLocationsRequestId
 			this.wikiLocationsLoading = true
+			this.wikiLocationsLoaded = false
+			this.wikiLocationsError = false
 			try {
 				const response = await axios.get(generateUrl('/apps/educai/api/v1/wiki/locations'))
-				const data = response.data
-				this.availableCollectives = Array.isArray(data.collectives) ? data.collectives : []
+				if (requestId !== this.wikiLocationsRequestId) return
+				if (!Array.isArray(response.data?.collectives)) throw new Error('Invalid collective list')
+				this.availableCollectives = response.data.collectives
+				this.wikiLocationsLoaded = true
 				this.ensureWikiSelectionValid()
 			} catch (e) {
-				this.availableCollectives = []
-				this.ensureWikiSelectionValid()
+				if (requestId !== this.wikiLocationsRequestId) return
+				this.wikiLocationsError = true
 			} finally {
-				this.wikiLocationsLoading = false
+				if (requestId === this.wikiLocationsRequestId) this.wikiLocationsLoading = false
 			}
 		},
 		async loadSettings() {
@@ -1291,7 +1340,7 @@ export default {
 				this.formData.personalWikiPath = ''
 			}
 
-			if (this.formData.personalWikiLocation !== 'collective' || !this.formData.personalWikiCollectiveId) {
+			if (!this.wikiLocationsLoaded || this.formData.personalWikiLocation !== 'collective' || !this.formData.personalWikiCollectiveId) {
 				return
 			}
 			const selectedCollectiveId = String(this.formData.personalWikiCollectiveId)
@@ -1304,19 +1353,24 @@ export default {
 			if (!this.isEditing) {
 				return
 			}
-			const pendingTools = this.bot?.has_pending_changes && Array.isArray(this.bot?.pending_changes?.tools)
-				? this.bot.pending_changes.tools
-				: null
-			if (pendingTools) {
-				this.applyToolSelection(pendingTools)
-				return
-			}
+			const bot = this.bot
+			const requestId = ++this.botToolsRequestId
+			this.botToolsLoaded = false
+			this.botToolsLoading = true
 			try {
-				const response = await axios.get(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/tools`))
-				const entries = Array.isArray(response.data?.tools) ? response.data.tools : []
+				const pendingTools = bot.has_pending_changes && Array.isArray(bot.pending_changes?.tools)
+					? bot.pending_changes.tools
+					: null
+				const entries = pendingTools ?? (await axios.get(generateUrl(`/apps/educai/api/v1/bots/${bot.id}/tools`))).data?.tools
+				if (requestId !== this.botToolsRequestId || this.bot !== bot) return
+				if (!Array.isArray(entries)) throw new Error('Invalid bot tools')
 				this.applyToolSelection(entries)
+				this.botToolsLoaded = true
 			} catch (e) {
-				// ignore errors, selection will remain empty
+				if (requestId !== this.botToolsRequestId || this.bot !== bot) return
+				showError(t('educai', 'Failed to load tools'))
+			} finally {
+				if (requestId === this.botToolsRequestId) this.botToolsLoading = false
 			}
 		},
 		applyToolSelection(entries) {
@@ -1352,12 +1406,13 @@ export default {
 				}
 			})
 			this.personalWikiInitiallyEnabled = wikiEnabled
-			this.formData.personalWikiEnabled = this.isWikiCapableBot && wikiEnabled
-			this.formData.personalWikiLocation = wikiConfig.wiki_location === 'collective' ? 'collective' : 'personal_files'
-			this.formData.personalWikiCollectiveId = wikiConfig.wiki_collective_id !== undefined && wikiConfig.wiki_collective_id !== null ? String(wikiConfig.wiki_collective_id) : ''
-			this.formData.personalWikiPath = this.formData.personalWikiLocation === 'personal_files' && typeof wikiConfig.wiki_root_path === 'string' ? wikiConfig.wiki_root_path : ''
+			if (!this.personalWikiChanged) {
+				this.formData.personalWikiEnabled = this.isWikiCapableBot && wikiEnabled
+				this.formData.personalWikiLocation = wikiConfig.wiki_location === 'collective' ? 'collective' : 'personal_files'
+				this.formData.personalWikiCollectiveId = wikiConfig.wiki_collective_id !== undefined && wikiConfig.wiki_collective_id !== null ? String(wikiConfig.wiki_collective_id) : ''
+				this.formData.personalWikiPath = this.formData.personalWikiLocation === 'personal_files' && typeof wikiConfig.wiki_root_path === 'string' ? wikiConfig.wiki_root_path : ''
+			}
 			this.ensureWikiSelectionValid()
-			this.personalWikiChanged = false
 			this.formData.selectedTools = this.sanitizeSelectedToolsForVisibility(selected)
 			this.toolConfigs = configs
 			this.normalizeToolSelectionAliases()
@@ -1372,9 +1427,12 @@ export default {
 			if (!this.isEditing) {
 				return
 			}
+			const requestId = ++this.ragSourcesRequestId
+			const bot = this.bot
 			this.rag.loading = true
 			try {
-				const response = await axios.get(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources`))
+				const response = await axios.get(generateUrl(`/apps/educai/api/v1/bots/${bot.id}/sources`))
+				if (requestId !== this.ragSourcesRequestId || this.bot !== bot) return
 				const sources = response.data?.sources
 				this.rag.sources = Array.isArray(sources) ? sources : []
 
@@ -1383,9 +1441,10 @@ export default {
 					this.startPolling()
 				}
 			} catch (e) {
+				if (requestId !== this.ragSourcesRequestId || this.bot !== bot) return
 				showError(t('educai', 'Failed to load attached sources'))
 			} finally {
-				this.rag.loading = false
+				if (requestId === this.ragSourcesRequestId) this.rag.loading = false
 			}
 		},
 		async promptAddSources() {
@@ -1758,6 +1817,10 @@ export default {
 			return this.formData.onboardingQuestions.questions.filter((q) => q.id !== currentId)
 		},
 		submitForm() {
+			if (!this.botToolsLoaded) {
+				showError(this.botToolsLoading ? t('educai', 'Loading tools…') : t('educai', 'Failed to load tools'))
+				return
+			}
 			if (this.temperatureValidationError) {
 				showError(this.temperatureValidationError)
 				return
@@ -1771,6 +1834,10 @@ export default {
 				return
 			}
 			if (this.formData.personalWikiEnabled && this.formData.personalWikiLocation === 'collective') {
+				if (!this.wikiLocationsLoaded) {
+					showError(this.wikiLocationsLoading ? t('educai', 'Loading collectives…') : t('educai', 'Could not load collectives. The saved selection has been preserved.'))
+					return
+				}
 				const selectedCollectiveId = String(this.formData.personalWikiCollectiveId)
 				const selectedCollectiveMatchesScope = this.filteredWikiCollectives.some((collective) => String(collective.id) === selectedCollectiveId)
 				if (!selectedCollectiveMatchesScope) {

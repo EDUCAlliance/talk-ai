@@ -446,6 +446,9 @@ export default {
 		},
 		async rejectBot(botId) {
 			const reason = prompt(t('educai', 'Optional: Enter a reason for rejection'))
+			if (reason === null) {
+				return
+			}
 			try {
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${botId}/reject`), { reason })
 				showSuccess(t('educai', 'Bot rejected and returned to draft'))

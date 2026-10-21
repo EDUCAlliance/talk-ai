@@ -998,6 +998,157 @@ class TalkHandlerTest extends TestCase {
 		}
 	}
 
+	#[DataProvider('standaloneMentionMessages')]
+	public function testDetectBotAcceptsStandaloneInvocations(string $message, string $mentionName): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setIsActive(true);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('findByMentionName')->with($mentionName)->willReturn($bot);
+		$this->assertSame($bot, $this->invokePrivateMethod($this->createTalkHandler(botService: $botService), 'detectBot', [$message]));
+	}
+
+	public static function standaloneMentionMessages(): array {
+		return [
+			'at at start' => ['@docs hello', '@docs'],
+			'slash at start' => ['/docs hello', '@docs'],
+			'middle' => ['Hello @docs please help', '@docs'],
+			'end' => ['Hello @docs', '@docs'],
+			'only' => ['@docs', '@docs'],
+			'newline' => ["Hello\n/docs\tplease help", '@docs'],
+			'Unicode whitespace' => ["Hallo\u{00a0}@docs", '@docs'],
+			'parentheses' => ['Hello (@docs), please help', '@docs'],
+			'quotes' => ['“@docs”: hello', '@docs'],
+			'smart picker name' => ['/my_bot-2 hello', '@my_bot-2'],
+			'markdown strong' => ['**@docs** hello', '@docs'],
+			'punctuation' => ['Please @docs!?', '@docs'],
+			'period' => ['Ask @docs.', '@docs'],
+			'preserve registered case' => ['/Docs hello', '@Docs'],
+			'reset' => ['((RESET)) @docs', '@docs'],
+		];
+	}
+
+	#[DataProvider('nonMentionMessages')]
+	public function testLinksEmailsAndPathsNeitherActivateNorLoseText(string $message): void {
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->never())->method('findByMentionName');
+		$handler = $this->createTalkHandler(botService: $botService);
+		$this->assertNull($this->invokePrivateMethod($handler, 'detectBot', [$message]));
+		$this->assertSame($message, $this->invokePrivateMethod($handler, 'removeBotMention', [$message, '@docs']));
+	}
+
+	public static function nonMentionMessages(): array {
+		return [
+			'URL path' => ['Read https://example.invalid/docs/quickstart'],
+			'URL trailing path' => ['Read https://example.invalid/docs'],
+			'URL prefix' => ['Read https://example.invalid/docs-other'],
+			'URL userinfo' => ['https://user@docs.example/path'],
+			'URL query' => ['https://example.invalid/?q=/docs'],
+			'URL query mention' => ['https://example.invalid/?q=@docs'],
+			'URL fragment' => ['https://example.invalid/#@docs'],
+			'URL punctuation' => ['https://example.invalid/(@docs)'],
+			'protocol relative' => ['//docs.example/path'],
+			'autolink' => ['<https://example.invalid/docs>'],
+			'markdown link' => ['[manual](https://example.invalid/docs)'],
+			'markdown relative link' => ['[manual](/docs)'],
+			'bare domain and path' => ['example.invalid/docs'],
+			'email' => ['person@docs.example'],
+			'plus email' => ['first.last+tag@docs.example'],
+			'email local part' => ['@docs@example.invalid'],
+			'domain after at' => ['@docs.example'],
+			'local path' => ['/docs/manual.txt'],
+			'relative local path' => ['./docs'],
+			'home local path' => ['~/docs'],
+			'absolute double slash' => ['//docs'],
+			'identifier' => ['hello@docs'],
+			'Unicode prefix' => ['ä@docs'],
+			'Unicode suffix' => ['@docsä'],
+			'Unicode suffix after underscore' => ['@docs_ä'],
+			'escaped invocation' => ['\\@docs'],
+		];
+	}
+
+	public function testOnlyMatchingInvocationSpansAreRemoved(): void {
+		$handler = $this->createTalkHandler();
+		$message = '@docs Vergleiche https://example.invalid/docs mit https://example.invalid/docs-other und person@docs.example. @docs-other /docs_extra bleiben. /docs Ende.';
+		$this->assertSame(
+			'Vergleiche https://example.invalid/docs mit https://example.invalid/docs-other und person@docs.example. @docs-other /docs_extra bleiben.  Ende.',
+			$this->invokePrivateMethod($handler, 'removeBotMention', [$message, '@docs'])
+		);
+		$this->assertSame('Grüße 🦝 () und ** **', $this->invokePrivateMethod($handler, 'removeBotMention', ['Grüße 🦝 (@docs) und **@docs **', '@docs']));
+		$this->assertSame('Frage', $this->invokePrivateMethod($handler, 'removeBotMention', ['/Docs Frage', '@Docs']));
+		$this->assertSame('@docs-other /docs_extra', $this->invokePrivateMethod($handler, 'removeBotMention', ['@docs-other /docs_extra', '@docs']));
+	}
+
+	#[DataProvider('caseSensitiveMentionMessages')]
+	public function testMentionCleanupPreservesDifferentlyCasedBotNames(string $message, string $selectedName, string $expected): void {
+		$bots = [];
+		foreach (['@docs', '@Docs'] as $name) {
+			$bot = new \OCA\EducAI\Db\Bot();
+			$bot->setMentionName($name);
+			$bot->setIsActive(true);
+			$bots[$name] = $bot;
+		}
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('findByMentionName')->with($selectedName)->willReturn($bots[$selectedName]);
+		$handler = $this->createTalkHandler(botService: $botService);
+		$selected = $this->invokePrivateMethod($handler, 'detectBot', [$message]);
+
+		$this->assertSame($bots[$selectedName], $selected);
+		$this->assertSame($expected, $this->invokePrivateMethod($handler, 'removeBotMention', [$message, $selected->getMentionName()]));
+	}
+
+	public static function caseSensitiveMentionMessages(): array {
+		return [
+			'lowercase at' => ['@docs Please compare @Docs output.', '@docs', 'Please compare @Docs output.'],
+			'uppercase at' => ['@Docs Please compare @docs output.', '@Docs', 'Please compare @docs output.'],
+			'lowercase slash' => ['/docs Please compare /Docs output.', '@docs', 'Please compare /Docs output.'],
+			'uppercase slash' => ['/Docs Please compare /docs output.', '@Docs', 'Please compare /docs output.'],
+			'mixed repeated' => ['@docs Grüße 🦝 (@Docs), /docs /Docs @docs', '@docs', 'Grüße 🦝 (@Docs),  /Docs'],
+			'mixed repeated reverse' => ['/Docs Grüße 🦝 (@docs), @Docs /docs /Docs', '@Docs', 'Grüße 🦝 (@docs),  /docs'],
+		];
+	}
+
+	public function testUnknownAndInactiveMentionsDoNotHideNextActiveBot(): void {
+		$inactive = new \OCA\EducAI\Db\Bot();
+		$inactive->setIsActive(false);
+		$active = new \OCA\EducAI\Db\Bot();
+		$active->setIsActive(true);
+		$lookups = [];
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->exactly(3))->method('findByMentionName')->willReturnCallback(function (string $name) use ($inactive, $active, &$lookups) {
+			$lookups[] = $name;
+			if ($name === '@missing') {
+				throw new \OCP\AppFramework\Db\DoesNotExistException('No bot');
+			}
+			return $name === '@inactive' ? $inactive : $active;
+		});
+		$this->assertSame($active, $this->invokePrivateMethod($this->createTalkHandler(botService: $botService), 'detectBot', ['https://example.invalid/docs @missing /inactive @docs']));
+		$this->assertSame(['@missing', '@inactive', '@docs'], $lookups);
+	}
+
+	public function testStructuredTalkContentKeepsMentionAndOtherUserPlaceholder(): void {
+		$parser = new TalkMessageParser(new \OCA\EducAI\Webhook\TalkAttachmentNormalizer());
+		$incoming = $parser->parse([
+			'actor' => ['id' => 'alice'],
+			'target' => ['id' => 'room-a'],
+			'object' => [
+				'id' => 999,
+				'name' => 'message',
+				'content' => json_encode([
+					'message' => '@docs Ask {mention-user1} about https://example.invalid/docs',
+					'parameters' => ['mention-user1' => ['type' => 'user', 'id' => 'bob', 'name' => 'Bob']],
+				], JSON_THROW_ON_ERROR),
+			],
+		]);
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setIsActive(true);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('findByMentionName')->with('@docs')->willReturn($bot);
+		$handler = $this->createTalkHandler(botService: $botService);
+		$this->assertSame($bot, $this->invokePrivateMethod($handler, 'detectBot', [$incoming->getText()]));
+		$this->assertSame('Ask {mention-user1} about https://example.invalid/docs', $this->invokePrivateMethod($handler, 'removeBotMention', [$incoming->getText(), '@docs']));
+	}
+
 	private function createTalkHandler(
 		?BotService $botService = null,
 		?SettingsService $settingsService = null,

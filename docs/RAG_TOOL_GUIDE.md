@@ -10,9 +10,11 @@ Semantic search over the bot's indexed documents. Available automatically when R
 |---|---|---|---|
 | `query` | string | yes | Search query |
 | `limit` | integer | no | Max results (default 5, max 20) |
-| `min_score` | number | no | Minimum similarity score, 0.0–1.0 (default 0.3) |
+| `min_score` | number | no | Preferred minimum similarity score, 0.0–1.0 (default 0.3). Usually omit it; scores are embedding-model dependent, not probabilities. |
 
 Typical flow: the user asks *"What Python version is required?"* → the model calls the tool with `{"query": "Python version required installation", "limit": 3}` → the tool returns matching chunks with source paths and relevance scores → the model synthesizes an answer, searching again with a different query if the first pass was incomplete.
+
+If no chunks meet the preferred threshold, the tool returns the best candidates down to a score of 0.2 (or the explicitly requested lower threshold). These results are labelled as candidates below the requested threshold, not established relevant matches. The model must verify their contents before answering and say when the documents do not contain the answer. Normal matches are never mixed with fallback candidates. This fallback uses the same query embedding and the same reachable, model-compatible sources; it does not send an additional provider request.
 
 ## Configuration
 

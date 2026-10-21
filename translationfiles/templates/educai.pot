@@ -3809,3 +3809,15 @@ msgstr ""
 #: lib/Webhook/TalkHandler.php
 msgid "The uploaded document could not be indexed. Please try uploading it again later."
 msgstr ""
+
+#: src/components/BotForm.vue
+msgid "Saved collective #{id}"
+msgstr ""
+
+#: src/components/BotForm.vue
+msgid "Could not load collectives. The saved selection has been preserved."
+msgstr ""
+
+#: src/components/BotForm.vue
+msgid "Retry"
+msgstr ""

@@ -18,6 +18,7 @@ use OCA\EducAI\Service\KnowledgeSourceStatus;
 use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\SettingsService;
 use OCA\EducAI\Service\UrlContentFetcher;
+use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\IJob;
 use OCP\BackgroundJob\IJobList;
 use OCP\Files\File;
@@ -95,7 +96,7 @@ class RagIngestionServiceTest extends TestCase {
 		$stored = KnowledgeSourceStatus::decode($source->getErrorMessage());
 		$this->assertSame(KnowledgeSourceStatus::METADATA_ONLY, $stored['code']);
 		$this->assertSame(['metadata' => 2], $stored['params']);
-		$this->assertSame('previous-complete-index', $source->getChecksum());
+		$this->assertNull($source->getChecksum());
 	}
 
 	public function testUnsupportedAndEmptyFilesAreToldApart(): void {
@@ -417,7 +418,7 @@ class RagIngestionServiceTest extends TestCase {
 		$this->assertSame('previous-complete-index', $source->getChecksum());
 	}
 
-	public function testScheduledRetryIsSkippedWhenTheSourceWasIndexedMeanwhile(): void {
+	public function testUnforcedScheduledRetryIsSkippedWhenTheSourceWasIndexedMeanwhile(): void {
 		$source = $this->source();
 		$source->setStatus('ready');
 		$mapper = $this->createMock(BotSourceMapper::class);
@@ -437,7 +438,7 @@ class RagIngestionServiceTest extends TestCase {
 			$this->createMock(LoggerInterface::class)
 		);
 
-		$service->ingestSourceById(1, true, 2);
+		$service->ingestSourceById(1, false, 2);
 
 		$this->assertSame('ready', $source->getStatus());
 	}
@@ -634,6 +635,277 @@ class RagIngestionServiceTest extends TestCase {
 		$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
 	}
 
+	public function testDeletingLastContentFileAtomicallyClearsOldVectorsIncludingMetadataOnlyRemainder(): void {
+		foreach ([[], [$this->file('.DS_Store', 'application/octet-stream')]] as $files) {
+			$source = $this->source();
+			$embeddings = $this->createMock(EmbeddingMapper::class);
+			$embeddings->expects($this->once())->method('publishStaged')->with(1, 'model', $this->anything(), 0);
+			$client = $this->createMock(EmbeddingClient::class);
+			$client->method('getActiveModel')->willReturn('model');
+			$client->expects($this->never())->method('embedTexts');
+			$this->service($this->folder($files), null, $embeddings, $client)->ingestSource($source);
+			$this->assertNull($source->getChecksum());
+			$this->assertNotNull($source->getLastIndexedAt());
+			$this->assertSame(KnowledgeSourceStatus::ERROR, $source->getStatus());
+		}
+	}
+
+	public function testBlankingLastDocumentClearsVectorsButUnsupportedAndFailedConversionDoNot(): void {
+		$source = $this->source();
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->expects($this->once())->method('publishStaged')->with(1, $this->anything(), $this->anything(), 0);
+		$client = $this->createMock(EmbeddingClient::class);
+		$client->expects($this->never())->method('embedTexts');
+		$this->service($this->folder([$this->file('a.txt', 'text/plain', " \n")]), null, $embeddings, $client)->ingestSource($source);
+		$this->assertNull($source->getChecksum());
+
+		$source = $this->source();
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->expects($this->never())->method('publishStaged');
+		$this->service($this->folder([$this->file('a.pages', 'application/octet-stream')]), null, $embeddings, $client)->ingestSource($source);
+		$this->assertSame('previous-complete-index', $source->getChecksum());
+	}
+
+	public function testRenameUpdatesStoredCitationsWithoutReembeddingOnUnchangedFollowup(): void {
+		$source = $this->source();
+		$files = [$this->file('old.txt', 'text/plain', 'Same content.')];
+		$folder = $this->createMock(Folder::class);
+		$folder->method('getPath')->willReturn('/alice/files');
+		$folder->method('getById')->willReturn([$folder]);
+		$folder->method('getDirectoryListing')->willReturnCallback(static function () use (&$files): array { return $files; });
+		$stored = [];
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('countBySourceAndModel')->willReturn(1);
+		$embeddings->method('insertStaged')->willReturnCallback(static function (Embedding $row) use (&$stored): void {
+			$stored[] = json_decode($row->getMetadata(), true)['path'];
+		});
+		$embeddings->expects($this->exactly(2))->method('publishStaged');
+		$client = $this->createMock(EmbeddingClient::class);
+		$client->method('getActiveModel')->willReturn('model');
+		$client->expects($this->exactly(2))->method('embedTexts')->willReturn([[0.2]]);
+		$service = $this->service($folder, null, $embeddings, $client);
+		$service->ingestSource($source);
+		$oldChecksum = $source->getChecksum();
+		$files = [$this->file('new.txt', 'text/plain', 'Same content.')];
+		$service->ingestSource($source);
+		$this->assertNotSame($oldChecksum, $source->getChecksum());
+		$service->ingestSource($source);
+		$this->assertSame(['docs/old.txt', 'docs/new.txt'], $stored);
+	}
+
+	public static function fileSourceTypes(): array {
+		return [
+			'file' => ['file', false], 'folder' => ['folder', false],
+			'file with provider retry' => ['file', true], 'folder with provider retry' => ['folder', true],
+		];
+	}
+
+	#[DataProvider('fileSourceTypes')]
+	public function testContendedForcedReindexStillEmbedsUnchangedContentAfterAnUnforcedRun(string $nodeType, bool $rateLimited): void {
+		$source = $this->source();
+		$source->setNodeType($nodeType);
+		$source->setStatus(KnowledgeSourceStatus::READY);
+		$checksum = sha1(sha1('docs/a.txt') . sha1('Same text.') . "\nmodel\n750\n50");
+		$source->setChecksum($checksum);
+		$file = $this->file('a.txt', 'text/plain', 'Same text.');
+		$folder = $this->createMock(Folder::class);
+		$folder->method('getPath')->willReturn('/alice/files');
+		$folder->method('getDirectoryListing')->willReturn([$file]);
+		$folder->method('getById')->willReturn([$nodeType === 'file' ? $file : $folder]);
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willReturn($source);
+		$mapper->method('update')->willReturnArgument(0);
+		$contended = true;
+		$locking = $this->createMock(\OCP\Lock\ILockingProvider::class);
+		$locking->method('acquireLock')->willReturnCallback(static function (string $key) use (&$contended): void {
+			if ($contended && $key === 'educai:rag-source:1') { throw new \OCP\Lock\LockedException(); }
+		});
+		$queued = [];
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('getJobsIterator')->willReturn([$this->job(5, ['sourceId' => 1, 'force' => false])]);
+		$jobs->method('has')->willReturnCallback(static fn (string $class, array $args): bool => $class === ReindexBotSourceJob::class && !($args['force'] ?? false));
+		$jobs->method('scheduleAfter')->willReturnCallback(static function (string $class, int $at, array $args) use (&$queued): void {
+			$queued[] = [$class, $at, $args];
+		});
+		$jobs->expects($this->never())->method('removeById');
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('countBySourceAndModel')->willReturn(1);
+		$embeddings->expects($this->once())->method('insertStaged');
+		$embeddings->expects($this->once())->method('publishStaged')->with(1, 'model', $checksum, 1);
+		$client = $this->createMock(EmbeddingClient::class);
+		$client->method('getActiveModel')->willReturn('model');
+		$requests = [];
+		$client->method('embedTexts')->willReturnCallback(static function (array $texts) use (&$requests, $rateLimited): array {
+			$requests[] = $texts;
+			if ($rateLimited && count($requests) === 1) {
+				throw new EmbeddingRateLimitedException(60);
+			}
+			return [[0.1]];
+		});
+		$service = $this->service($folder, null, $embeddings, $client, $jobs, $mapper, ['rag_enabled' => true], $locking);
+		$job = new ReindexBotSourceJob($this->createMock(ITimeFactory::class), $service, $this->createMock(LoggerInterface::class));
+
+		$job->run(['sourceId' => 1, 'force' => true]);
+
+		$this->assertCount(1, $queued);
+		$this->assertSame(ReindexBotSourceJob::class, $queued[0][0]);
+		$this->assertGreaterThanOrEqual(time() + 29, $queued[0][1]);
+		$this->assertSame(['sourceId' => 1, 'force' => true, 'attempt' => 0], $queued[0][2]);
+		$this->assertSame([], $requests);
+		$contended = false;
+		$job->run(['sourceId' => 1, 'force' => false]);
+		$this->assertSame([], $requests, 'The ordinary pass sees an unchanged, already indexed file.');
+		$job->run($queued[0][2]);
+		if ($rateLimited) {
+			$this->assertCount(2, $queued, 'An ordinary queued job must not absorb the forced provider retry.');
+			$this->assertSame(ReindexBotSourceJob::class, $queued[1][0]);
+			$this->assertSame(['sourceId' => 1, 'force' => true, 'attempt' => 1], $queued[1][2]);
+			$this->assertGreaterThanOrEqual(time() + 64, $queued[1][1]);
+			// Advance only the stored provider deadline; no real provider call or wait.
+			$source->setErrorMessage(KnowledgeSourceStatus::encode(
+				KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED, ['retry_at' => time() - 1]
+			));
+			$job->run(['sourceId' => 1, 'force' => false]);
+			$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
+			$this->assertCount(1, $requests, 'The ordinary pass does not create replacement embeddings.');
+			$job->run($queued[1][2]);
+		}
+		$this->assertSame(array_fill(0, $rateLimited ? 2 : 1, ['Same text.']), $requests, 'The deferred explicit rebuild still creates fresh embeddings.');
+		$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
+		$this->assertSame($checksum, $source->getChecksum());
+	}
+
+	public static function contendedRequests(): array {
+		return [
+			'forced file provider retry' => ['file', true, 3],
+			'ordinary folder provider retry' => ['folder', false, 2],
+			'forced URL provider retry' => ['url', true, 4],
+		];
+	}
+
+	#[DataProvider('contendedRequests')]
+	public function testLockDeferralPreservesAttemptAndProviderPause(string $nodeType, bool $force, int $attempt): void {
+		$source = $this->source();
+		$source->setNodeType($nodeType);
+		$source->setProgressStage(KnowledgeSourceStatus::STAGE_WAITING);
+		$retryAt = time() + 300;
+		$message = KnowledgeSourceStatus::encode(KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED, ['retry_at' => $retryAt]);
+		$source->setErrorMessage($message);
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willReturn($source);
+		$mapper->expects($this->never())->method('update');
+		$locking = $this->createMock(\OCP\Lock\ILockingProvider::class);
+		$locking->method('acquireLock')->willThrowException(new \OCP\Lock\LockedException());
+		$locking->expects($this->never())->method('releaseLock');
+		$jobs = $this->createMock(IJobList::class);
+		$args = ['sourceId' => 1, 'force' => $force, 'attempt' => $attempt];
+		$jobs->method('has')->with(ReindexBotSourceJob::class, $args)->willReturnOnConsecutiveCalls(false, true);
+		$jobs->expects($this->once())->method('scheduleAfter')->with(ReindexBotSourceJob::class, $retryAt, $args);
+		$jobs->expects($this->never())->method('removeById');
+		$service = $this->service($this->folder([]), null, null, null, $jobs, $mapper, ['rag_enabled' => true], $locking);
+
+		$service->ingestSourceById(1, $force, $attempt);
+		$service->ingestSourceById(1, $force, $attempt);
+
+		$this->assertSame($message, $source->getErrorMessage());
+		$this->assertSame(KnowledgeSourceStatus::STAGE_WAITING, $source->getProgressStage());
+		$this->assertSame('previous-complete-index', $source->getChecksum());
+	}
+
+	public function testDeferredReindexObservesAProviderPauseSetAfterTheLockConflict(): void {
+		$source = $this->source();
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willReturn($source);
+		$mapper->expects($this->never())->method('update');
+		$contended = true;
+		$locking = $this->createMock(\OCP\Lock\ILockingProvider::class);
+		$locking->method('acquireLock')->willReturnCallback(static function () use (&$contended): void {
+			if ($contended) { throw new \OCP\Lock\LockedException(); }
+		});
+		$locking->expects($this->once())->method('releaseLock')->with('educai:rag-source:1', 2);
+		$scheduled = [];
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('scheduleAfter')->willReturnCallback(static function (string $class, int $at, array $args) use (&$scheduled): void {
+			$scheduled[] = [$class, $at, $args];
+		});
+		$client = $this->createMock(EmbeddingClient::class);
+		$client->expects($this->never())->method('embedTexts');
+		$service = $this->service($this->folder([]), null, null, $client, $jobs, $mapper, ['rag_enabled' => true], $locking);
+		$service->ingestSourceById(1, true);
+		$this->assertCount(1, $scheduled);
+		$retryAt = time() + 300;
+		$source->setProgressStage(KnowledgeSourceStatus::STAGE_WAITING);
+		$message = KnowledgeSourceStatus::encode(KnowledgeSourceStatus::EMBEDDING_RATE_LIMITED, ['retry_at' => $retryAt]);
+		$source->setErrorMessage($message);
+		$contended = false;
+
+		(new ReindexBotSourceJob($this->createMock(ITimeFactory::class), $service, $this->createMock(LoggerInterface::class)))->run($scheduled[0][2]);
+
+		$this->assertCount(2, $scheduled);
+		$this->assertSame([ReindexBotSourceJob::class, $retryAt, ['sourceId' => 1, 'force' => true, 'attempt' => 0]], $scheduled[1]);
+		$this->assertSame($message, $source->getErrorMessage());
+	}
+
+	public function testSourceLockContentionKeepsFileSyncFollowupWithoutTouchingIndexOrRetryChain(): void {
+		$source = $this->source();
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willReturn($source);
+		$mapper->expects($this->never())->method('update');
+		$locking = $this->createMock(\OCP\Lock\ILockingProvider::class);
+		$locking->expects($this->exactly(2))->method('acquireLock')->willReturnCallback(static function (string $key): void {
+			if ($key === 'educai:rag-source:1') { throw new \OCP\Lock\LockedException(); }
+			TestCase::assertSame('educai:rag-sync-queue:1', $key);
+		});
+		$locking->expects($this->once())->method('releaseLock')->with('educai:rag-sync-queue:1', 2);
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('has')->willReturn(false);
+		$jobs->expects($this->never())->method('removeById');
+		$jobs->expects($this->once())->method('scheduleAfter')->with(\OCA\EducAI\Jobs\SyncRagSourceJob::class, $this->anything(), ['sourceId' => 1]);
+		$this->service($this->folder([]), null, null, null, $jobs, $mapper, ['rag_enabled' => true], $locking)->ingestSourceById(1, false, 0, true);
+	}
+
+	public function testSourceLockIsReleasedWhenRemovedSourceCannotBeRead(): void {
+		$mapper = $this->createMock(BotSourceMapper::class);
+		$mapper->method('findById')->willThrowException(new \OCP\AppFramework\Db\DoesNotExistException('removed'));
+		$locking = $this->createMock(\OCP\Lock\ILockingProvider::class);
+		$locking->expects($this->once())->method('acquireLock')->with('educai:rag-source:1', 2);
+		$locking->expects($this->once())->method('releaseLock')->with('educai:rag-source:1', 2);
+		$this->expectException(\OCP\AppFramework\Db\DoesNotExistException::class);
+		$this->service($this->folder([]), null, null, null, null, $mapper, ['rag_enabled' => true], $locking)->ingestSourceById(1);
+	}
+
+	public function testWriteDuringEmbeddingRetainsChangedContentForFollowup(): void {
+		$source = $this->source();
+		$current = 'Old content.';
+		$file = $this->createMock(File::class);
+		$file->method('getPath')->willReturn('/alice/files/docs/a.txt');
+		$file->method('getName')->willReturn('a.txt');
+		$file->method('getMimeType')->willReturn('text/plain');
+		$file->method('getContent')->willReturnCallback(static function () use (&$current): string { return $current; });
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->method('has')->willReturn(false);
+		$jobs->expects($this->once())->method('scheduleAfter')->with(\OCA\EducAI\Jobs\SyncRagSourceJob::class, $this->anything(), ['sourceId' => 1]);
+		$sync = new \OCA\EducAI\Service\RagFileEventSyncService($this->createMock(BotSourceMapper::class), $this->createMock(IRootFolder::class), $jobs, $this->createMock(LoggerInterface::class));
+		$client = $this->createMock(EmbeddingClient::class);
+		$client->method('getActiveModel')->willReturn('model');
+		$requests = [];
+		$client->expects($this->exactly(2))->method('embedTexts')->willReturnCallback(static function (array $texts) use (&$requests, &$current, $sync): array {
+			$requests[] = $texts;
+			if ($current === 'Old content.') {
+				$current = 'New content.';
+				$sync->schedule([1]);
+			}
+			return [[0.1]];
+		});
+		$embeddings = $this->createMock(EmbeddingMapper::class);
+		$embeddings->method('countBySourceAndModel')->willReturn(1);
+		$service = $this->service($this->folder([$file]), null, $embeddings, $client, $jobs);
+		$service->ingestSource($source);
+		$service->ingestSource($source);
+		$this->assertSame([['Old content.'], ['New content.']], $requests);
+		$this->assertSame(KnowledgeSourceStatus::READY, $source->getStatus());
+	}
+
 	private function source(): BotSource {
 		$source = new BotSource();
 		$source->setId(1);
@@ -684,6 +956,7 @@ class RagIngestionServiceTest extends TestCase {
 		?IJobList $jobs = null,
 		?BotSourceMapper $mapper = null,
 		array $ragConfig = ['rag_enabled' => true],
+		?\OCP\Lock\ILockingProvider $locking = null,
 	): RagIngestionService {
 		$root = $this->createMock(IRootFolder::class);
 		$root->method('getUserFolder')->with('alice')->willReturn($userFolder);
@@ -708,7 +981,9 @@ class RagIngestionServiceTest extends TestCase {
 			$settings,
 			$root,
 			$jobs ?? $this->createMock(IJobList::class),
-			$this->createMock(LoggerInterface::class)
+			$this->createMock(LoggerInterface::class),
+			null,
+			$locking
 		);
 	}
 

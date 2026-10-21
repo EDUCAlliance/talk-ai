@@ -222,6 +222,58 @@ PHP);
 			return;
 	}
 
+    if ($class === 'OCP\\EventDispatcher\\Event') {
+        eval('namespace OCP\\EventDispatcher; class Event {}');
+        return;
+    }
+    if ($class === 'OCP\\Files\\Events\\Node\\AbstractNodeEvent') {
+        eval(<<<'PHP'
+namespace OCP\Files\Events\Node;
+abstract class AbstractNodeEvent extends \OCP\EventDispatcher\Event {
+    public function __construct(private \OCP\Files\Node $node) {}
+    public function getNode(): \OCP\Files\Node { return $this->node; }
+}
+PHP);
+        return;
+    }
+    if ($class === 'OCP\\Files\\Events\\Node\\AbstractNodesEvent') {
+        eval(<<<'PHP'
+namespace OCP\Files\Events\Node;
+abstract class AbstractNodesEvent extends \OCP\EventDispatcher\Event {
+    public function __construct(private \OCP\Files\Node $source, private \OCP\Files\Node $target) {}
+    public function getSource(): \OCP\Files\Node { return $this->source; }
+    public function getTarget(): \OCP\Files\Node { return $this->target; }
+}
+PHP);
+        return;
+    }
+    if (str_starts_with($class, 'OCP\\Files\\Events\\Node\\')) {
+        $event = substr($class, strrpos($class, '\\') + 1);
+        if (in_array($event, ['BeforeNodeDeletedEvent', 'NodeDeletedEvent', 'NodeCreatedEvent', 'NodeWrittenEvent'], true)) {
+            eval('namespace OCP\\Files\\Events\\Node; class ' . $event . ' extends AbstractNodeEvent {}');
+            return;
+        }
+        if (in_array($event, ['BeforeNodeRenamedEvent', 'NodeRenamedEvent', 'NodeCopiedEvent'], true)) {
+            eval('namespace OCP\\Files\\Events\\Node; class ' . $event . ' extends AbstractNodesEvent {}');
+            return;
+        }
+    }
+    if ($class === 'OCP\\Lock\\ILockingProvider') {
+        eval(<<<'PHP'
+namespace OCP\Lock;
+interface ILockingProvider {
+    public const LOCK_SHARED = 1;
+    public const LOCK_EXCLUSIVE = 2;
+    public function isLocked(string $path, int $type): bool;
+    public function acquireLock(string $path, int $type, ?string $readablePath = null): void;
+    public function releaseLock(string $path, int $type): void;
+    public function changeLock(string $path, int $targetType): void;
+    public function releaseAll(): void;
+}
+PHP);
+        return;
+    }
+
 	if ($class === 'OCP\\Files\\Node') {
 		eval(<<<'PHP'
 namespace OCP\Files;
@@ -231,6 +283,7 @@ interface Node {
 	public function getName();
 	public function getPath();
 	public function getParent();
+	public function getOwner();
 }
 PHP);
 			return;
@@ -246,6 +299,7 @@ if (!interface_exists(Node::class)) {
 		public function getName();
 		public function getPath();
 		public function getParent();
+		public function getOwner();
 	}
 }
 
@@ -269,6 +323,7 @@ if (!interface_exists(Node::class)) {
 		public function getName();
 		public function getPath();
 		public function getParent();
+		public function getOwner();
 	}
 }
 
@@ -310,6 +365,17 @@ PHP);
 			return;
 	}
 
+	if ($class === 'OCP\\Files\\Mount\\IMountPoint') {
+		eval(<<<'PHP'
+namespace OCP\Files\Mount;
+
+interface IMountPoint {
+	public function getStorageRootId();
+}
+PHP);
+		return;
+	}
+
 	if ($class === 'OCP\\Files\\IRootFolder') {
 		eval(<<<'PHP'
 namespace OCP\Files;
@@ -317,6 +383,7 @@ namespace OCP\Files;
 interface IRootFolder {
 	public function getById(int $id): array;
 	public function getUserFolder(string $userId): Folder;
+	public function getMountsIn(string $mountPoint): array;
 }
 PHP);
 			return;

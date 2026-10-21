@@ -250,6 +250,8 @@ export default {
 			limit: 25,
 			offset: 0,
 			loading: false,
+			tracesRequestId: 0,
+			detailRequestId: 0,
 			clearing: false,
 			error: '',
 			selectedTraceId: null,
@@ -283,8 +285,14 @@ export default {
 		this.loadTraces()
 	},
 
+	beforeDestroy() {
+		this.tracesRequestId++
+		this.detailRequestId++
+	},
+
 	methods: {
 		async loadTraces() {
+			const requestId = ++this.tracesRequestId
 			this.loading = true
 			this.error = ''
 			try {
@@ -315,20 +323,24 @@ export default {
 				}
 
 				const response = await axios.get(generateUrl('/apps/educai/api/v1/traces'), { params })
+				if (requestId !== this.tracesRequestId) return
 				this.traces = response.data.traces || []
 				this.total = response.data.total || 0
 				this.limit = response.data.limit || this.limit
-				this.offset = response.data.offset || this.offset
+				this.offset = response.data.offset ?? this.offset
 				if (this.traces.length > 0 && !this.selectedTraceId) {
 					await this.selectTrace(this.traces[0].id)
 				} else if (this.selectedTraceId && !this.traces.some((trace) => trace.id === this.selectedTraceId)) {
 					this.clearSelection()
+				} else if (this.selectedTraceId) {
+					await this.selectTrace(this.selectedTraceId)
 				}
 			} catch (error) {
+				if (requestId !== this.tracesRequestId) return
 				this.error = getApiErrorMessage(error, t('educai', 'Failed to load activity'))
 				showError(this.error)
 			} finally {
-				this.loading = false
+				if (requestId === this.tracesRequestId) this.loading = false
 			}
 		},
 
@@ -339,18 +351,23 @@ export default {
 		},
 
 		async selectTrace(id) {
+			const requestId = ++this.detailRequestId
 			this.selectedTraceId = id
+			this.selectedTrace = null
+			this.events = []
 			this.detailLoading = true
 			this.detailError = ''
 			try {
 				const response = await axios.get(generateUrl(`/apps/educai/api/v1/traces/${id}`))
+				if (requestId !== this.detailRequestId || this.selectedTraceId !== id) return
 				this.selectedTrace = response.data.trace
 				this.events = response.data.events || []
 			} catch (error) {
+				if (requestId !== this.detailRequestId || this.selectedTraceId !== id) return
 				this.detailError = getApiErrorMessage(error, t('educai', 'Activity details unavailable'))
 				showError(this.detailError)
 			} finally {
-				this.detailLoading = false
+				if (requestId === this.detailRequestId) this.detailLoading = false
 			}
 		},
 
@@ -415,6 +432,8 @@ export default {
 		},
 
 		clearSelection() {
+			this.detailRequestId++
+			this.detailLoading = false
 			this.selectedTraceId = null
 			this.selectedTrace = null
 			this.events = []

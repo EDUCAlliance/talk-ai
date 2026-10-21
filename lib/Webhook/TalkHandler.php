@@ -888,22 +888,8 @@ class TalkHandler {
 	 * @return Bot|null
 	 */
 	private function detectBot(string $message): ?Bot {
-		// Extract all @mentions and /mentions from the message
-		// @mentions: traditional format
-		// /mentions: Smart Picker format (used when user selects bot from picker)
-		preg_match_all('/[@\/]([a-z0-9_-]+)/i', $message, $matches);
-		
-		if (empty($matches[0])) {
-			return null;
-		}
-
-		// Try to find a bot with one of the mentioned names
-		foreach ($matches[0] as $mention) {
-			// Normalize /mention to @mention for database lookup
-			$normalizedMention = $mention;
-			if (str_starts_with($mention, '/')) {
-				$normalizedMention = '@' . substr($mention, 1);
-			}
+		foreach ($this->findBotMentions($message) as [$mention]) {
+			$normalizedMention = '@' . substr($mention, 1);
 			
 			try {
 				$bot = $this->botService->findByMentionName($normalizedMention);
@@ -928,17 +914,30 @@ class TalkHandler {
 	 * @return string
 	 */
 	private function removeBotMention(string $message, string $mentionName): string {
-		// Remove the @mention format
-		$cleaned = str_replace($mentionName, '', $message);
-		
-		// Also remove /mention format (Smart Picker format)
-		// Convert @name to /name for matching
-		if (str_starts_with($mentionName, '@')) {
-			$slashMention = '/' . substr($mentionName, 1);
-			$cleaned = str_replace($slashMention, '', $cleaned);
+		$name = ltrim($mentionName, '@');
+		// Work backwards so byte offsets remain valid, including in UTF-8 messages.
+		foreach (array_reverse($this->findBotMentions($message)) as [$mention, $offset]) {
+			if (substr($mention, 1) === $name) {
+				$message = substr_replace($message, '', $offset, strlen($mention));
+			}
 		}
-		
-		return trim($cleaned);
+
+		return trim($message);
+	}
+
+	/**
+	 * Match standalone invocation tokens, optionally wrapped in punctuation.
+	 * URLs, email addresses and paths must not supply embedded invocations.
+	 *
+	 * @return array<int,array{string,int}> Matched text and byte offset.
+	 */
+	private function findBotMentions(string $message): array {
+		$pattern = <<<'REGEX'
+~(?<!\S)[(\[{"'«“„‘*]*\K[@/]([a-z0-9_-]+)(?=[)\]}"'»”’*.,;:!?]*(?:\s|$))~iu
+REGEX;
+		preg_match_all($pattern, $message, $matches, PREG_OFFSET_CAPTURE);
+
+		return $matches[0] ?? [];
 	}
 
 	/**
