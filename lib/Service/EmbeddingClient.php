@@ -14,6 +14,8 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 class EmbeddingClient {
+    /** One HTTP request; ingestion checkpoints must not span several provider requests. */
+    public const BATCH_SIZE = 4;
     private const RATE_LIMIT_POLL_SECONDS = 2;
     private const DEFAULT_RETRY_DELAY_SECONDS = 1;
     /** Assumed pause when a provider keeps answering 429 without Retry-After. */
@@ -124,12 +126,11 @@ class EmbeddingClient {
         $client = $this->clientService->newClient();
         // Reduced batch size for large embedding models (e5-mistral-7b-instruct has 4096 dimensions)
         // to avoid timeout issues with slow embedding APIs
-        $batchSize = 4;
         $result = [];
         $cursor = 0;
 
         while ($cursor < count($texts)) {
-            $batchTexts = array_slice($texts, $cursor, $batchSize);
+            $batchTexts = array_slice($texts, $cursor, self::BATCH_SIZE);
             $cursor += count($batchTexts);
 
             $response = $this->requestEmbeddingBatch(

@@ -517,7 +517,7 @@ class BuiltInToolProvider {
             if (count($embeddings) === 0) {
                 if ($this->embeddingMapper->countUnavailableByBotAndModel($botId, $embeddingModel) > 0) {
                     return $this->errorResponse(
-                        'The knowledge sources of this assistant are currently not reachable for their owner and are not used for answers. Tell the user that the documents are unavailable.',
+                        'The indexed documents of this assistant cannot currently be verified as readable for their owner and are not used for answers. Files may be not reachable, or their older index may be awaiting automatic refresh. Tell the user that the documents are temporarily unavailable.',
                         'sources_unavailable'
                     );
                 }

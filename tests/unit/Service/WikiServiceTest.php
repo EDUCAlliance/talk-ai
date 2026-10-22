@@ -19,6 +19,7 @@ use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 use OCP\Files\NotPermittedException;
 use OCP\IConfig;
+use OCP\IURLGenerator;
 use OCP\Lock\LockedException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -830,7 +831,7 @@ class WikiServiceTest extends TestCase {
 		$wikiRoot->get('educ-portal')->newFile('Readme.md')->putContent('# EDUC Portal');
 		$service = $this->createCollectiveService($wikiRoot);
 
-		$result = $service->writePage(42, 'index-of-topics.md', "[Access](https://nc.example/apps/collectives/Wiki-for-Portal-4/educ-portal/access-and-initial-setup)\n[Gone](https://nc.example/index.php/apps/collectives/Wiki-for-Portal-4/educ-portal/missing-page)", 'create', null, self::COLLECTIVE);
+		$result = $service->writePage(42, 'index-of-topics.md', "[Access](https://nc.example/apps/collectives/Team-Notes-99/educ-portal/access-and-initial-setup)\n[Gone](https://nc.example/index.php/apps/collectives/Team-Notes-99/educ-portal/missing-page)", 'create', null, self::COLLECTIVE);
 
 		$content = $wikiRoot->get('index-of-topics.md')->getContent();
 		$this->assertStringContainsString('[Access](educ-portal/access-and-initial-setup.md?fileId=' . $page->getId() . ')', $content);
@@ -878,13 +879,137 @@ class WikiServiceTest extends TestCase {
 		$this->assertSame('missing.md?fileId=999999', $result['broken_links'][0]['target']);
 	}
 
-	private function createCollectiveService(InMemoryFolder $collectiveRoot): WikiService {
+	/** @return array<string,array{string}> */
+	public static function nonlocalCollectiveUrls(): array {
+		return [
+			'other origin' => ['https://other.example/apps/collectives/Team-Notes-99/Budget'],
+			'other collective' => ['/apps/collectives/Other-Team-700/Budget'],
+			'other scheme' => ['http://nc.example/apps/collectives/Team-Notes-99/Budget'],
+			'other port' => ['https://nc.example:8443/apps/collectives/Team-Notes-99/Budget'],
+			'other origin with file ID' => ['https://other.example/apps/collectives/Team-Notes-99/Budget?fileId={id}#heading'],
+			'other collective with file ID' => ['https://nc.example/apps/collectives/Other-Team-700/Budget?fileId={id}#heading'],
+			'lookalike collective ID' => ['/apps/collectives/Other-Team-99/Budget'],
+			'protocol-relative foreign origin' => ['//other.example/apps/collectives/Team-Notes-99/Budget'],
+			'escaped collective boundary' => ['/apps/collectives/Team-Notes-99/../Other-Team-700/Budget?fileId={id}'],
+			'encoded escaped collective boundary' => ['/apps/collectives/Team-Notes-99/%2e%2e/Other-Team-700/Budget?fileId={id}'],
+			'userinfo' => ['https://user@nc.example/apps/collectives/Team-Notes-99/Budget'],
+			'other install' => ['https://nc.example/other/apps/collectives/Team-Notes-99/Budget'],
+		];
+	}
+
+	#[DataProvider('nonlocalCollectiveUrls')]
+	public function testNonlocalCollectiveLinksArePreservedWithoutLocalSuggestions(string $url): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$page = $wikiRoot->newFile('Budget.md');
+		$page->putContent('# Local budget');
+		$service = $this->createCollectiveService($wikiRoot);
+		$url = str_replace('{id}', (string)$page->getId(), $url);
+		$content = '[Their budget](' . $url . ')';
+
+		$result = $service->writePage(42, 'Overview.md', $content, 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertSame($content, $wikiRoot->get('Overview.md')->getContent());
+		$this->assertSame(0, $result['links_checked']);
+		$this->assertArrayNotHasKey('broken_links', $result);
+	}
+
+	/** @return array<string,array{string,string}> */
+	public static function localCollectiveUrls(): array {
+		return [
+			'absolute' => ['https://nc.example/apps/collectives/Team-Notes-99/Budget', 'https://nc.example/'],
+			'root-relative index.php' => ['/index.php/apps/collectives/Team-Notes-99/Budget', 'https://nc.example/'],
+			'encoded collective' => ['/apps/collectives/%54eam-Notes-99/Budget', 'https://nc.example/'],
+			'case-insensitive origin and default port' => ['https://NC.EXAMPLE:443/apps/collectives/Team-Notes-99/Budget', 'https://nc.example/'],
+			'protocol-relative own origin' => ['//nc.example/apps/collectives/Team-Notes-99/Budget', 'https://nc.example/'],
+			'own subdirectory' => ['https://nc.example/cloud/index.php/apps/collectives/Team-Notes-99/Budget', 'https://nc.example/cloud/'],
+			'own root-relative subdirectory' => ['/cloud/apps/collectives/Team-Notes-99/Budget', 'https://nc.example/cloud/'],
+			'own nonstandard port' => ['https://nc.example:8443/apps/collectives/Team-Notes-99/Budget', 'https://nc.example:8443/'],
+		];
+	}
+
+	#[DataProvider('localCollectiveUrls')]
+	public function testLocalCollectiveLinksKeepQueryAndFragment(string $url, string $baseUrl): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$page = $wikiRoot->newFile('Budget.md');
+		$page->putContent('# Budget');
+		$service = $this->createCollectiveService($wikiRoot, $baseUrl);
+
+		$result = $service->writePage(42, 'Overview.md', '[Budget](' . $url . '?view=preview&name=A%2BB#costs)', 'create', null, self::COLLECTIVE);
+
+		$this->assertTrue($result['success']);
+		$this->assertSame('[Budget](Budget.md?view=preview&name=A%2BB&fileId=' . $page->getId() . '#costs)', $wikiRoot->get('Overview.md')->getContent());
+		$this->assertSame(1, $result['links_with_page_id']);
+		$this->assertArrayNotHasKey('broken_links', $result);
+	}
+
+	public function testCollectiveForwardRepairDoesNotRewriteForeignLinks(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $this->createCollectiveService($wikiRoot);
+		$foreign = '[Foreign](https://other.example/apps/collectives/Team-Notes-99/Budget)';
+		$local = '[Local](/apps/collectives/Team-Notes-99/Budget?view=preview#costs)';
+		$result = $service->writePage(42, 'Overview.md', $foreign . "\n" . $local, 'create', null, self::COLLECTIVE);
+		$this->assertSame(1, $result['links_checked']);
+		$this->assertCount(1, $result['broken_links']);
+		$created = $service->writePage(42, 'Budget.md', '# Budget', 'create', null, self::COLLECTIVE);
+		$this->assertSame(['Overview.md'], $created['pages_linked_to_this_page']);
+		$this->assertSame($foreign . "\n[Local](Budget.md?view=preview&fileId=" . $wikiRoot->get('Budget.md')->getId() . '#costs)', $wikiRoot->get('Overview.md')->getContent());
+	}
+
+	public function testFilesWikiDoesNotClaimCollectiveWebAddresses(): void {
+		$root = new InMemoryRootFolder();
+		$service = $this->createService($root, $this->createBot('alice', '@studybot', 'personal'));
+		$service->writePage(42, 'Budget.md', '# Local budget', 'create');
+		$content = '[Collective](/apps/collectives/Team-Notes-99/Budget)';
+		$result = $service->writePage(42, 'Overview.md', $content, 'create');
+		$this->assertSame($content, $service->readPage(42, 'Overview.md')['content']);
+		$this->assertSame(0, $result['links_checked']);
+		$this->assertArrayNotHasKey('broken_links', $result);
+	}
+
+	/** @return array<string,array{bool,string,string}> */
+	public static function outsideRootLinks(): array {
+		return [
+			'collective root' => [true, 'Overview.md', '../outside.md'],
+			'collective nested' => [true, 'notes/Overview.md', '../../outside.md'],
+			'collective percent-encoded traversal' => [true, 'Overview.md', '%2e%2e/outside.md'],
+			'files root' => [false, 'Overview.md', '../outside.md'],
+			'files nested' => [false, 'notes/Overview.md', '../../outside.md'],
+		];
+	}
+
+	#[DataProvider('outsideRootLinks')]
+	public function testOutsideRootLinkDoesNotAbortPageWrite(bool $collective, string $path, string $target): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$service = $collective ? $this->createCollectiveService($wikiRoot) : $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'));
+		$config = $collective ? self::COLLECTIVE : [];
+		$content = '[Outside](' . $target . ')';
+		$result = $service->writePage(42, $path, $content, 'create', null, $config);
+		$this->assertTrue($result['success']);
+		$this->assertSame($content, $service->readPage(42, $path, $config)['content']);
+		$this->assertSame([['text' => 'Outside', 'target' => $target]], $result['broken_links']);
+	}
+
+	public function testMovedParentPreservesForeignAndOutsideLinksWhileResolvingOwnCollective(): void {
+		$wikiRoot = new InMemoryFolder('collective');
+		$page = $wikiRoot->newFile('Budget.md');
+		$page->putContent('# Budget');
+		$foreign = '[Foreign](https://other.example/apps/collectives/Team-Notes-99/Budget)';
+		$wikiRoot->newFile('Parent.md')->putContent($foreign . "\n[Local](/apps/collectives/Team-Notes-99/Budget?view=preview#costs)\n[Outside](../outside.md)");
+		$service = $this->createCollectiveService($wikiRoot);
+		$result = $service->writePage(42, 'Parent/Child.md', '# Child', 'create', null, self::COLLECTIVE);
+		$this->assertTrue($result['success']);
+		$this->assertSame($foreign . "\n[Local](Budget.md?view=preview&fileId=" . $page->getId() . "#costs)\n[Outside](../../outside.md)", $wikiRoot->get('Parent/Readme.md')->getContent());
+		$this->assertSame([['text' => 'Outside', 'target' => '../../outside.md']], $result['converted_to_parent_pages'][0]['broken_links']);
+	}
+
+	private function createCollectiveService(InMemoryFolder $collectiveRoot, string $baseUrl = 'https://nc.example/'): WikiService {
 		$locationService = $this->createMock(WikiLocationService::class);
 		$locationService->method('resolveCollectiveWikiRoot')
 			->with(99, 'alice')
 			->willReturn(['folder' => $collectiveRoot, 'label' => 'Collective: Team Notes', 'url_path' => 'Team-Notes-99']);
 
-		return $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'), $locationService);
+		return $this->createService(new InMemoryRootFolder(), $this->createBot('alice', '@studybot', 'personal'), $locationService, null, null, $baseUrl);
 	}
 
 	private function wikiError(callable $operation): WikiException {
@@ -1206,7 +1331,8 @@ MD;
 		Bot $bot,
 		?WikiLocationService $wikiLocationService = null,
 		?TextSessionResetService $textSessionResetService = null,
-		?BrandingService $brandingService = null
+		?BrandingService $brandingService = null,
+		string $baseUrl = 'https://nc.example/'
 	): WikiService {
 		$botMapper = $this->createMock(BotMapper::class);
 		$botMapper->method('findById')->with(42)->willReturn($bot);
@@ -1214,13 +1340,18 @@ MD;
 		$rootFolder->method('getUserFolder')
 			->willReturnCallback([$root, 'getUserFolder']);
 
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->method('getAbsoluteURL')->with('')->willReturn($baseUrl);
+
 		return new WikiService(
 			$rootFolder,
 			$botMapper,
 			$this->createMock(LoggerInterface::class),
 			$wikiLocationService,
 			$textSessionResetService,
-			$brandingService
+			$brandingService,
+			null,
+			$urlGenerator
 		);
 	}
 
@@ -1252,6 +1383,7 @@ class InMemoryRootFolder {
 }
 
 class InMemoryFolder implements Folder {
+	public function isReadable() { return true; }
 	public function getOwner() { return null; }
 
 	private string $name;
@@ -1349,6 +1481,7 @@ class InMemoryFolder implements Folder {
 }
 
 class InMemoryFile implements File {
+	public function isReadable() { return true; }
 	public function getOwner() { return null; }
 
 	private string $name;

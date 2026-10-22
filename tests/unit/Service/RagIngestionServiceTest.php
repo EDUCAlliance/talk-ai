@@ -468,11 +468,11 @@ class RagIngestionServiceTest extends TestCase {
 
 	public function testPauseAfterProgressKeepsRetryingWithAFreshBudget(): void {
 		$source = $this->source();
-		// 51 chunks: the first batch of 50 is embedded, the second one is paused.
+		// The first HTTP batch is embedded, the second one is paused.
 		$folder = $this->folder([$this->file('big.txt', 'text/plain', str_repeat('b', 50 * 700 + 750))]);
 		$embeddings = $this->createMock(EmbeddingMapper::class);
 		$embeddings->method('stagedChunkIndexes')->willReturn([]);
-		$embeddings->expects($this->exactly(50))->method('insertStaged');
+		$embeddings->expects($this->exactly(EmbeddingClient::BATCH_SIZE))->method('insertStaged');
 		$embeddings->expects($this->never())->method('publishStaged');
 		$embeddingClient = $this->createMock(EmbeddingClient::class);
 		$embeddingClient->method('getActiveModel')->willReturn('model');
@@ -705,7 +705,7 @@ class RagIngestionServiceTest extends TestCase {
 		$source = $this->source();
 		$source->setNodeType($nodeType);
 		$source->setStatus(KnowledgeSourceStatus::READY);
-		$checksum = sha1(sha1('docs/a.txt') . sha1('Same text.') . "\nmodel\n750\n50");
+		$checksum = sha1(sha1('') . sha1('docs/a.txt') . sha1('Same text.') . "\nmodel\n750\n50");
 		$source->setChecksum($checksum);
 		$file = $this->file('a.txt', 'text/plain', 'Same text.');
 		$folder = $this->createMock(Folder::class);

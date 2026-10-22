@@ -9,6 +9,10 @@ use OCP\AppFramework\Db\QBMapper;
 use OCP\DB\Exception as DbException;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCA\EducAI\Service\KnowledgeSourceStatus;
+use OCA\EducAI\Service\RagSourceLocator;
+use OCA\EducAI\Jobs\SyncRagSourceJob;
+use OCP\BackgroundJob\IJobList;
+use OCP\Lock\ILockingProvider;
 use OCP\IDBConnection;
 
 /**
@@ -18,7 +22,13 @@ class EmbeddingMapper extends QBMapper {
     /** Model marker of staged rows: batches of an index that is not complete yet. */
     public const STAGED_PREFIX = 'staged:';
 
-    public function __construct(IDBConnection $db) {
+    public function __construct(
+        IDBConnection $db,
+        private BotSourceMapper $sources,
+        private RagSourceLocator $sourceLocator,
+        private IJobList $jobs,
+        private ?ILockingProvider $locking = null,
+    ) {
         parent::__construct($db, 'educai_embeddings', Embedding::class);
     }
 
@@ -65,11 +75,37 @@ class EmbeddingMapper extends QBMapper {
             ->andWhere($qb->expr()->eq('e.embedding_model', $qb->createNamedParameter($embeddingModel, IQueryBuilder::PARAM_STR)))
             ->andWhere($qb->expr()->neq('s.status', $qb->createNamedParameter(KnowledgeSourceStatus::UNAVAILABLE, IQueryBuilder::PARAM_STR)));
 
-        return $this->findEntities($qb);
+        $bySource = [];
+        foreach ($this->findEntities($qb) as $embedding) {
+            $bySource[$embedding->getSourceId()][] = $embedding;
+        }
+        $readable = [];
+        foreach ($bySource as $sourceId => $embeddings) {
+            try {
+                $source = $this->sources->findById($sourceId);
+            } catch (DoesNotExistException) {
+                continue;
+            }
+            if ($source->getBotId() !== $botId || $source->getStatus() === KnowledgeSourceStatus::UNAVAILABLE) {
+                continue;
+            }
+            if ($source->getNodeType() === 'url') {
+                array_push($readable, ...$embeddings);
+                continue;
+            }
+            $filtered = $this->sourceLocator->filterReadableEmbeddings($source, $embeddings);
+            array_push($readable, ...$filtered['embeddings']);
+            if ($filtered['needs_reindex']) {
+                // Old folder indexes contain paths, not file identities. Rebuild them;
+                // a replacement at the same path must not authorize the previous file.
+                SyncRagSourceJob::schedule($this->jobs, $this->locking, $sourceId);
+            }
+        }
+        return $readable;
     }
 
     /**
-     * Vectors in the given model space that belong to sources their owner cannot reach.
+     * Vectors in the given model space that belong to sources or files their owner cannot reach.
      */
     public function countUnavailableByBotAndModel(int $botId, string $embeddingModel): int {
         $qb = $this->db->getQueryBuilder();
@@ -77,10 +113,10 @@ class EmbeddingMapper extends QBMapper {
             ->from($this->getTableName(), 'e')
             ->innerJoin('e', 'educai_bot_sources', 's', $qb->expr()->eq('s.id', 'e.source_id'))
             ->where($qb->expr()->eq('e.bot_id', $qb->createNamedParameter($botId, IQueryBuilder::PARAM_INT)))
-            ->andWhere($qb->expr()->eq('e.embedding_model', $qb->createNamedParameter($embeddingModel, IQueryBuilder::PARAM_STR)))
-            ->andWhere($qb->expr()->eq('s.status', $qb->createNamedParameter(KnowledgeSourceStatus::UNAVAILABLE, IQueryBuilder::PARAM_STR)));
+            ->andWhere($qb->expr()->eq('s.bot_id', $qb->createNamedParameter($botId, IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('e.embedding_model', $qb->createNamedParameter($embeddingModel, IQueryBuilder::PARAM_STR)));
 
-        return $this->fetchCount($qb);
+        return max(0, $this->fetchCount($qb) - count($this->findRetrievableByBotAndModel($botId, $embeddingModel)));
     }
 
     /**
