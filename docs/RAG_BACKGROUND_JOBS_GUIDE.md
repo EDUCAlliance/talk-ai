@@ -12,6 +12,8 @@ When you attach a file or folder to a bot:
 
 A `CleanupOrphanedSourcesJob` also checks source reachability every 6 hours. Missing or inaccessible sources are excluded from answers; a temporary storage error does not delete their previous index.
 
+Each successful embedding HTTP batch is checkpointed before the next request. A provider quota pause resumes the unfinished generation after `Retry-After`, without repeating its completed batches. Only a complete generation replaces the published index; repeated pauses without progress eventually produce an error.
+
 **Cron is required.** With `backgroundjobs_mode = cron` (the recommended Nextcloud setup), jobs only run when `cron.php` executes — typically every 5 minutes via system crontab or a systemd timer. See the [Nextcloud background jobs documentation](https://docs.nextcloud.com/server/latest/admin_manual/configuration_server/background_jobs_configuration.html) for setup. Without cron, sources stay `pending` forever.
 
 ```bash
@@ -33,6 +35,12 @@ Changes made through Nextcloud's file APIs queue a `SyncRagSourceJob`: editing a
 - The listener does not write wiki or source files, so indexing does not trigger a file-write loop. File events do not poll URL sources. Changes made directly on storage without Nextcloud file events still need manual reindexing after Nextcloud has detected the changed files.
 
 Scheduling and indexing use Nextcloud's locking provider. Keep `filelocking.enabled` enabled (the default) so simultaneous background workers cannot publish competing generations. Under prolonged scheduling-lock contention an extra checksum-checked follow-up is preferred over losing a file change.
+
+## File Access and Existing Indexes
+
+Both retrieval paths check each indexed file's current identity, readability and membership in the source owner's folder view. Revoking a shared child therefore excludes its cached text even if the enclosing source folder remains reachable and no file-change job was queued. A different file created at the old path does not authorize the previous file's text. These checks do not erase stored chat history or replace background content synchronization.
+
+Older folder indexes have paths but no per-file identities. On retrieval, their unverifiable chunks are withheld and a background refresh is queued; searches may temporarily report unavailable documents until cron completes the refresh. Keep background jobs running, or use the source's **Reindex** action. Existing direct-file sources already carry a file identity, and URL sources do not require this filesystem migration. This refresh may incur normal embedding-provider usage; no database-schema migration is needed.
 
 ## Document Conversion (Docling)
 

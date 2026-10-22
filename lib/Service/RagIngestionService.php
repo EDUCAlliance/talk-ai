@@ -34,8 +34,6 @@ class RagIngestionService {
     /** Retries after the embedding provider asked for a pause without any progress in between. */
     private const MAX_RATE_LIMIT_RETRIES = 5;
     private const MAX_REPORTED_EXTENSIONS = 5;
-    /** Chunks embedded per provider call; each batch is kept, so a retry continues where it stopped. */
-    private const EMBEDDING_BATCH_SIZE = 50;
     /** A running index updates its progress far more often; older "running" rows were interrupted. */
     public const RUNNING_LEASE_SECONDS = 1800;
     private const RUNNING_STAGES = ['collecting', 'extracting', 'chunking', 'embedding', 'storing'];
@@ -530,12 +528,13 @@ class RagIngestionService {
                 default:
                     $stats['indexed']++;
                     $content = $extraction['text'];
-                    $checksumSeed .= sha1($relativePath) . sha1($content);
+                    $checksumSeed .= sha1((string)$file->getId()) . sha1($relativePath) . sha1($content);
                     $segments = $this->chunkText($content, $chunkSize, $chunkOverlap);
                     foreach ($segments as $idx => $segment) {
                         $chunks[] = [
                             'text' => $segment,
                             'metadata' => [
+                                'node_id' => $file->getId(),
                                 'path' => $relativePath,
                                 'offset' => $idx,
                                 'size' => strlen($segment),
@@ -700,7 +699,8 @@ class RagIngestionService {
         $missing = array_values(array_diff(array_keys($chunks), array_keys($staged)));
         $this->updateProgress($source, 'embedding', $this->embeddingProgress(count($staged), $totalChunks), count($staged), $totalChunks);
 
-        foreach (array_chunk($missing, self::EMBEDDING_BATCH_SIZE) as $batch) {
+        // Stage each successful HTTP batch before another request can pause on quota.
+        foreach (array_chunk($missing, EmbeddingClient::BATCH_SIZE) as $batch) {
             $texts = array_map(static fn (int $index): string => $chunks[$index]['text'], $batch);
             try {
                 $vectors = $this->embeddingClient->embedTexts($texts, $embeddingModel, [

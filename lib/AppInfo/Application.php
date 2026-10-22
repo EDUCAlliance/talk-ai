@@ -141,7 +141,13 @@ class Application extends App implements IBootstrap {
 		});
 
 		$context->registerService(EmbeddingMapper::class, function (IContainer $c) {
-			return new EmbeddingMapper($c->get(\OCP\IDBConnection::class));
+			return new EmbeddingMapper(
+				$c->get(\OCP\IDBConnection::class),
+				$c->get(BotSourceMapper::class),
+				new \OCA\EducAI\Service\RagSourceLocator($c->get(\OCP\Files\IRootFolder::class)),
+				$c->get(\OCP\BackgroundJob\IJobList::class),
+				$c->get(\OCP\Lock\ILockingProvider::class),
+			);
 		});
 
 		$context->registerService(RoomDocumentSourceMapper::class, function (IContainer $c) {
@@ -393,7 +399,8 @@ class Application extends App implements IBootstrap {
 				$c->get(WikiLocationService::class),
 				$c->get(TextSessionResetService::class),
 				$c->get(BrandingService::class),
-				$c->get(WikiPathService::class)
+				$c->get(WikiPathService::class),
+				$c->get(IURLGenerator::class),
 			);
 		});
 
