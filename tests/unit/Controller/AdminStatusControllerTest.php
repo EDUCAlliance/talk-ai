@@ -124,17 +124,12 @@ class AdminStatusControllerTest extends TestCase {
 		$this->assertSame(['error' => 'translated:Failed to load the status', 'errorCode' => 'admin_status_failed'], $response->getData());
 	}
 
-	public function testTalkFactsComeFromTheManagedRegistrationWithoutRevealingTheSecret(): void {
+	public function testTalkUrlAndSecretPresenceDoNotRevealTheSecret(): void {
 		$settings = new Settings();
 		$mapper = $this->createMock(SettingsMapper::class);
 		$mapper->method('getSettings')->willReturn($settings);
-		$urlGeneratorBuilder = $this->getMockBuilder(IURLGenerator::class)->onlyMethods(get_class_methods(IURLGenerator::class));
-		if (!method_exists(IURLGenerator::class, 'linkToRouteAbsolute')) {
-			// The unit-test stub of IURLGenerator predates linkToRouteAbsolute().
-			$urlGeneratorBuilder->addMethods(['linkToRouteAbsolute']);
-		}
-		$urlGenerator = $urlGeneratorBuilder->getMock();
-		$urlGenerator->expects($this->once())->method('linkToRouteAbsolute')->with('educai.webhook.talk')->willReturn(self::WEBHOOK_URL);
+		$urlGenerator = $this->createMock(IURLGenerator::class);
+		$urlGenerator->expects($this->once())->method('getAbsoluteURL')->with('index.php/apps/educai/webhook/talk')->willReturn(self::WEBHOOK_URL);
 		$credentials = $this->createMock(CredentialService::class);
 		$credentials->expects($this->never())->method('decrypt');
 		$config = $this->createMock(IConfig::class);

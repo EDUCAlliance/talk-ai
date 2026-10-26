@@ -469,6 +469,7 @@ PHP);
 namespace OCP;
 
 interface IConfig {
+	public function getSystemValueBool(string $key, bool $default = false): bool;
 	public function getAppValue(string $appName, string $key, string $default = ''): string;
 	public function setAppValue(string $appName, string $key, string $value): void;
 	public function deleteAppValue(string $appName, string $key): void;
