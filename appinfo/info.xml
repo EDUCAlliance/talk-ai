@@ -71,5 +71,8 @@ Funded by the European Union. Views and opinions expressed are however those of 
 		<install>
 			<step>OCA\EducAI\Migration\RegisterTalkBotRepairStep</step>
 		</install>
+		<post-migration>
+			<step>OCA\EducAI\Migration\RepairTalkWebhookUrl</step>
+		</post-migration>
 	</repair-steps>
 </info>

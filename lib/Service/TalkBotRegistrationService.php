@@ -24,6 +24,7 @@ class TalkBotRegistrationService {
 	private const BOT_FEATURES = 3;
 	private const CONFIG_BOT_ID = 'talk_bot_id';
 	private const CONFIG_BOT_URL = 'talk_bot_url';
+	private const WEBHOOK_PATH = 'apps/educai/webhook/talk';
 
 	private SettingsMapper $settingsMapper;
 	private CredentialService $credentialService;
@@ -45,7 +46,7 @@ class TalkBotRegistrationService {
 		IURLGenerator $urlGenerator,
 		IClientService $clientService,
 		LoggerInterface $logger,
-		?BrandingService $brandingService = null
+		?BrandingService $brandingService = null,
 	) {
 		$this->settingsMapper = $settingsMapper;
 		$this->credentialService = $credentialService;
@@ -95,6 +96,8 @@ class TalkBotRegistrationService {
 	 */
 	public function syncRegistration(?string $secret = null, bool $forceRefresh = false, bool $generateSecretIfMissing = false): array {
 		try {
+			// Resolve and validate before even generating/storing a missing secret.
+			$webhookUrl = $this->getWebhookUrl();
 			$resolvedSecret = $this->resolveWebhookSecret($secret);
 			if ($resolvedSecret === '' && $generateSecretIfMissing) {
 				$resolvedSecret = $this->generateAndStoreWebhookSecret();
@@ -113,8 +116,6 @@ class TalkBotRegistrationService {
 					'message' => 'Webhook secret is not configured yet. Managed Talk bot registration is deferred.',
 				];
 			}
-
-			$webhookUrl = $this->getWebhookUrl();
 
 			if (\OC::$CLI) {
 				return $this->syncViaOcc($resolvedSecret, $webhookUrl, $forceRefresh);
@@ -206,7 +207,80 @@ class TalkBotRegistrationService {
 	}
 
 	public function getWebhookUrl(): string {
-		return $this->urlGenerator->linkToRouteAbsolute('educai.webhook.talk');
+		// During web installation the router can already be fully loaded without
+		// this app. A missing named route then resolves to the instance root.
+		// Match Nextcloud's front-controller choice without consulting that router.
+		$prettyUrls = $this->config->getSystemValueBool('htaccess.IgnoreFrontController', false)
+			|| getenv('front_controller_active') === 'true';
+		$path = ($prettyUrls ? '' : 'index.php/') . self::WEBHOOK_PATH;
+		// No leading slash: getAbsoluteURL handles the configured instance webroot
+		// and CLI base, including installations whose webroot itself is /apps.
+		$url = $this->urlGenerator->getAbsoluteURL($path);
+		if (!$this->isWebhookUrl($url)) {
+			throw new \UnexpectedValueException('Cannot determine a valid Talk webhook URL. Registration was not changed.');
+		}
+		return $url;
+	}
+
+	/**
+	 * Repair only the known site-root target defect on an existing managed bot.
+	 * Unlike registration sync, an upgrade must not create/enable bots or change
+	 * their name, secret, features or room memberships.
+	 *
+	 * @return array{status:string,message:string}
+	 */
+	public function repairInvalidWebhookUrl(): array {
+		try {
+			if (!$this->isTalkAvailable()) {
+				return ['status' => 'skipped', 'message' => 'Talk is not installed; no webhook URL to repair.'];
+			}
+			$rawId = $this->config->getAppValue(Application::APP_ID, self::CONFIG_BOT_ID, '');
+			if (!ctype_digit($rawId) || (int)$rawId <= 0) {
+				return ['status' => 'skipped', 'message' => 'No managed Talk bot ID; no registration was changed.'];
+			}
+			$url = $this->getWebhookUrl();
+			$base = rtrim($this->urlGenerator->getAbsoluteURL(''), '/');
+			$knownUrls = [$base, $base . '/', $base . '/' . self::WEBHOOK_PATH, $base . '/index.php/' . self::WEBHOOK_PATH];
+			if (!in_array($this->getStoredBotUrl(), $knownUrls, true)) {
+				return ['status' => 'skipped', 'message' => 'Managed Talk URL metadata is not recognized; no registration was changed.'];
+			}
+			$mapper = $this->getTalkBotServerMapper();
+			if ($mapper === null) {
+				throw new \RuntimeException('Talk bot mapper unavailable.');
+			}
+			$bot = $mapper->findById((int)$rawId);
+			if (!in_array($bot->getUrl(), [$base, $base . '/'], true)) {
+				return ['status' => 'unchanged', 'message' => 'Managed Talk bot does not use the incorrect site-root URL; left unchanged.'];
+			}
+			$secret = $this->resolveWebhookSecret(null);
+			if ($secret === '' || !hash_equals($secret, (string)$bot->getSecret())) {
+				return ['status' => 'skipped', 'message' => 'Managed Talk bot identity could not be verified; no registration was changed.'];
+			}
+			$bot->setUrl($url);
+			$bot->setUrlHash(sha1($url));
+			$mapper->update($bot);
+			$updated = $mapper->findById((int)$rawId);
+			if ($updated->getUrl() !== $url || $updated->getUrlHash() !== sha1($url)) {
+				throw new \RuntimeException('Talk webhook URL readback failed.');
+			}
+			$this->config->setAppValue(Application::APP_ID, self::CONFIG_BOT_URL, $url);
+			return ['status' => 'repaired', 'message' => 'Repaired the managed Talk webhook URL in place; bot identity and room activations are unchanged.'];
+		} catch (\Throwable $e) {
+			$this->logger->warning('EducAI: Failed to repair managed Talk webhook URL', ['exception' => $e]);
+			return ['status' => 'error', 'message' => 'Could not repair the managed Talk webhook URL. Check the Nextcloud log.'];
+		}
+	}
+
+	private function isWebhookUrl(string $url): bool {
+		$parts = parse_url($url);
+		return strlen($url) <= 4000
+			&& preg_match('/[\x00-\x20\x7f]/', $url) === 0
+			&& is_array($parts)
+			&& in_array($parts['scheme'] ?? '', ['http', 'https'], true)
+			&& ($parts['host'] ?? '') !== ''
+			&& !isset($parts['user']) && !isset($parts['pass'])
+			&& !isset($parts['query']) && !isset($parts['fragment'])
+			&& str_ends_with($parts['path'] ?? '', '/' . self::WEBHOOK_PATH);
 	}
 
 	public function hasWebhookSecret(): bool {
@@ -582,8 +656,7 @@ class TalkBotRegistrationService {
 			&& strlen($this->brandingService->getDisplayName()) <= 64
 			&& $secretLength >= 40
 			&& $secretLength <= 128
-			&& strlen($webhookUrl) <= 4000
-			&& (str_starts_with($webhookUrl, 'http://') || str_starts_with($webhookUrl, 'https://'))
+			&& $this->isWebhookUrl($webhookUrl)
 			&& strlen(self::BOT_DESCRIPTION) <= 4000;
 	}
 
