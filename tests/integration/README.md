@@ -1,5 +1,38 @@
 # Disposable Nextcloud integration smoke
 
+## HTTP content decoding boundary
+
+`identity-http-smoke.php` exercises the app's HTTP boundary through the real
+Nextcloud client and its bundled Guzzle/cURL. It starts and cleans up a loopback
+fixture, including a tiny **valid** Brotli response; it runs no exploit. No
+Nextcloud installation, DB, settings changes or credentials are needed.
+Install the repository's PHPUnit dependencies first, then run in an isolated
+Nextcloud image (verify on 30, 34 and 35):
+
+```sh
+composer install --no-scripts --no-interaction
+composer bin phpunit install --no-interaction
+docker run --rm --network none \
+  --mount "type=bind,src=$PWD,dst=/app,readonly" --workdir /app \
+  --entrypoint php nextcloud:35-apache tests/integration/identity-http-smoke.php
+```
+
+The fixture is only reachable inside that container; no host ports are exposed.
+`EDUCAI_TEST_NEXTCLOUD_ROOT` can select another unpacked Nextcloud source tree
+(default `/usr/src/nextcloud`). The runner loads the actual core, not the unit
+tests' OCP stubs. PHPUnit mocks only unrelated configuration, certificate and
+address-validation dependencies; all network requests use a real cURL handler.
+
+Checks reproduce automatic decoding in the unguarded transport, then exercise
+identity negotiation; rejection of compressed success, redirect and error
+responses before consumer callbacks (buffered and stream mode); conflicting
+cURL options; and unchanged JSON, multipart, DELETE, binary, ordinary error,
+redirect and chunked-SSE behavior. SSE checks preserve stream resources and
+payloads; they do not claim the underlying Nextcloud handler delivers network
+chunks incrementally. Output contains only runtime versions and check results.
+
+## Application integration
+
 `nextcloud-smoke.php` exercises real Nextcloud DI, app services, SQL mappers,
 native Files, job queue registration, and Catalogue/RAG workers. The accompanying
 loopback fixture replaces every embedding/Catalogue request; no real provider or

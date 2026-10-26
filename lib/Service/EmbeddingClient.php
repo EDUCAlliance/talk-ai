@@ -7,7 +7,6 @@ namespace OCA\EducAI\Service;
 use Closure;
 use Exception;
 use OCA\EducAI\Exception\EmbeddingRateLimitedException;
-use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
 use Psr\Log\LoggerInterface;
@@ -123,7 +122,7 @@ class EmbeddingClient {
 
         $model = $this->getActiveModel($modelOverride);
 
-        $client = $this->clientService->newClient();
+        $client = IdentityHttpClient::fromService($this->clientService);
         // Reduced batch size for large embedding models (e5-mistral-7b-instruct has 4096 dimensions)
         // to avoid timeout issues with slow embedding APIs
         $result = [];
@@ -172,7 +171,7 @@ class EmbeddingClient {
      * @throws Exception
      */
     private function requestEmbeddingBatch(
-        IClient $client,
+        IdentityHttpClient $client,
         string $endpoint,
         string $apiKey,
         string $model,

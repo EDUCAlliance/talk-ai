@@ -9,6 +9,7 @@ use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Exception\TalkApiException;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BrandingService;
+use OCA\EducAI\Service\IdentityHttpClient;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Http\DataResponse;
@@ -456,7 +457,7 @@ class TalkBotController extends Controller {
 		$baseUrl = $this->urlGenerator->getAbsoluteURL('');
 		$endpoint = $baseUrl . 'ocs/v2.php/apps/spreed/api/' . ltrim($path, '/');
 
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$options = [
 			'headers' => $this->getRequestHeaders(),
 			'cookies' => $this->getForwardedCookies(),

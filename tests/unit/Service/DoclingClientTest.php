@@ -33,6 +33,7 @@ class DoclingClientTest extends TestCase {
 					if ($auth !== 'none') {
 						$headers[$auth === 'bearer' ? 'Authorization' : 'X-Api-Key'] = ($auth === 'bearer' ? 'Bearer ' : '') . 'docling-key';
 					}
+					$headers['Accept-Encoding'] = 'identity';
 					$this->assertSame($headers, $options['headers']);
 					$this->assertFalse($options['allow_redirects']);
 					$this->assertFalse($options['http_errors']);
@@ -75,7 +76,7 @@ class DoclingClientTest extends TestCase {
 	public function testEnabledUnauthenticatedConversionNeedsNoDummyKey(): void {
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->once())->method('post')->with($this->anything(), $this->callback(
-			static fn (array $options): bool => $options['headers'] === ['Accept' => 'application/json']
+			static fn (array $options): bool => $options['headers'] === ['Accept' => 'application/json', 'Accept-Encoding' => 'identity']
 		))->willReturn($this->response(['status' => 'success', 'document' => ['md_content' => 'Converted']]));
 		$docling = $this->createDoclingClient($client, ['api_key' => null, 'docling_auth_mode' => 'none',
 			'docling_api_profile' => 'docling_serve', 'docling_api_endpoint' => 'http://docling:5001']);
@@ -91,7 +92,7 @@ class DoclingClientTest extends TestCase {
 		]);
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->once())->method('post')->with('http://new-server:5001/v1/convert/file', $this->callback(
-			static fn (array $options): bool => $options['headers'] === ['Accept' => 'application/json']
+			static fn (array $options): bool => $options['headers'] === ['Accept' => 'application/json', 'Accept-Encoding' => 'identity']
 		))->willReturn($this->response(['status' => 'success', 'document' => ['md_content' => 'Test document']]));
 		$docling = $this->createDoclingClient($client, settings: $settings);
 		$this->assertSame(['success' => true], $docling->testConnection('http://new-server:5001', 'ignored-explicit-key', 'docling_serve', 'none'));
@@ -692,7 +693,14 @@ class DoclingClientTest extends TestCase {
 		$this->httpScripts[] = &$script;
 		$client = $this->createMock(IClient::class);
 		$answer = function (string $method, string $url, array $options) use (&$script, &$calls): IResponse {
-			$calls[] = [$method, $url, $options['headers'] ?? []];
+			$headers = $options['headers'] ?? [];
+			if (($headers['Accept-Encoding'] ?? '') !== 'identity' || ($options['decode_content'] ?? true) !== false) {
+				$this->httpViolations[] = 'Response decoding must be disabled';
+			}
+			// Assert the transport policy above; retain the exact authentication
+			// header assertions in each discovery test without that common header.
+			unset($headers['Accept-Encoding']);
+			$calls[] = [$method, $url, $headers];
 			$key = $method . ' ' . $url;
 			if (($options['allow_redirects'] ?? true) !== false || ($options['http_errors'] ?? true) !== false
 				|| ($options['timeout'] ?? PHP_INT_MAX) > ($method === 'GET' ? 10 : 60)) {

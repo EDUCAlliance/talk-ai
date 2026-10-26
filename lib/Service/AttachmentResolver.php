@@ -65,7 +65,7 @@ class AttachmentResolver {
 
 		$url = $this->resolveRemoteUrl($attachment->getFileRef());
 		if ($url !== null) {
-			$client = $this->clientService->newClient();
+			$client = IdentityHttpClient::fromService($this->clientService);
 			$response = $client->get($url, [
 				'timeout' => 60,
 			]);

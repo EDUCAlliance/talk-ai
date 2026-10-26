@@ -691,7 +691,7 @@ class TalkBotRegistrationService {
 			return [];
 		}
 
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$response = $client->get($this->getTalkAdminEndpoint(), [
 			'headers' => $this->getOcsHeaders(),
 			'cookies' => $this->getForwardedCookies(),
@@ -712,7 +712,7 @@ class TalkBotRegistrationService {
 			return [];
 		}
 
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$response = $client->post($this->getTalkAdminEndpoint(), [
 			'headers' => $this->getOcsHeaders(true),
 			'cookies' => $this->getForwardedCookies(),
@@ -737,7 +737,7 @@ class TalkBotRegistrationService {
 			return;
 		}
 
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$response = $client->delete($this->getTalkAdminEndpoint() . '/' . $botId, [
 			'headers' => $this->getOcsHeaders(),
 			'cookies' => $this->getForwardedCookies(),

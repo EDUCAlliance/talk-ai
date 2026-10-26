@@ -105,7 +105,7 @@ class UrlContentFetcher {
         $this->logger->info('Fetching URL content', ['url' => $url]);
 
         try {
-            $client = $this->clientService->newClient();
+            $client = IdentityHttpClient::fromService($this->clientService);
             
             $response = $client->get($url, [
                 'timeout' => self::REQUEST_TIMEOUT,

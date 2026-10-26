@@ -102,7 +102,7 @@ class McpClient {
         }
 
         $timeout = $runControl !== null ? $runControl->clampTimeout(60) : 60;
-        $client = $this->clientService->newClient();
+        $client = IdentityHttpClient::fromService($this->clientService);
         $options = [
             'headers' => array_merge([
                 'Content-Type' => 'application/json',

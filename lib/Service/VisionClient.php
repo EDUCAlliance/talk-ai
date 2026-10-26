@@ -48,7 +48,7 @@ class VisionClient {
 		}
 
 		$dataUri = $this->buildDataUri($tempPath);
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 
 		$response = $client->post($endpoint, [
 			'headers' => [
@@ -137,7 +137,7 @@ class VisionClient {
 	 * @throws Exception
 	 */
 	private function analyzeInlinePixel(string $endpoint, string $apiKey, string $model): void {
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$response = $client->post($endpoint, [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $apiKey,

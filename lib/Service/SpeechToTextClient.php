@@ -47,7 +47,7 @@ class SpeechToTextClient {
 			throw new Exception('Speech endpoint not configured');
 		}
 
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$boundary = 'educai_boundary_' . bin2hex(random_bytes(8));
 		$mimeType = mime_content_type($tempPath) ?: 'audio/wav';
 		$content = file_get_contents($tempPath);
@@ -131,7 +131,7 @@ class SpeechToTextClient {
 	 * @throws Exception
 	 */
 	private function transcribeWithResolvedConfig(string $endpoint, string $apiKey, string $model, string $tempPath): void {
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$boundary = 'educai_boundary_' . bin2hex(random_bytes(8));
 		$content = file_get_contents($tempPath);
 		if (!is_string($content)) {
