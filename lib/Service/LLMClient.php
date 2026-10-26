@@ -11,6 +11,7 @@ use OCA\EducAI\Exception\IncompleteProviderStreamException;
 use OCA\EducAI\Exception\ModelTestException;
 use OCA\EducAI\Exception\ProviderAttemptBudgetExceededException;
 use OCA\EducAI\Exception\ProviderContractException;
+use OCA\EducAI\Exception\UnexpectedContentEncodingException;
 use OCP\Http\Client\IClientService;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
@@ -419,7 +420,8 @@ class LLMClient {
 			|| $exception instanceof ContextLengthExceededException
 			|| $exception instanceof AgentRunInterruptedException
 			|| $exception instanceof IncompleteProviderStreamException
-			|| $exception instanceof ProviderContractException;
+			|| $exception instanceof ProviderContractException
+			|| $exception instanceof UnexpectedContentEncodingException;
 	}
 
 	/**
@@ -964,7 +966,7 @@ class LLMClient {
 		string $route,
 		string $reason,
 	): array {
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, false, $modelConfig['id']);
 
 		$this->logger->debug('Sending chat completion request', [
@@ -1017,7 +1019,7 @@ class LLMClient {
 		string $route,
 		string $reason,
 	): array {
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		$payload = $this->buildPayload($modelConfig['model'], $fullMessages, $options, true, $modelConfig['id']);
 
 		$this->logger->debug('Starting streaming chat completion', [
@@ -2246,7 +2248,7 @@ class LLMClient {
 			throw new \Exception($labelPrefix . ' API key not configured');
 		}
 
-		$client = $this->clientService->newClient();
+		$client = IdentityHttpClient::fromService($this->clientService);
 		try {
 			$response = $this->executeProviderRequest(fn (int|float $effectiveTimeout) => $client->get($modelsEndpoint, [
 				'headers' => [

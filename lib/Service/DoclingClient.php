@@ -386,7 +386,7 @@ class DoclingClient {
         }
         foreach ($authentication as $headers) {
             try {
-                $response = $this->clientService->newClient()->get($url, [
+                $response = IdentityHttpClient::fromService($this->clientService)->get($url, [
                     'headers' => ['Accept' => 'application/json'] + $headers,
                     'timeout' => self::DISCOVERY_TIMEOUT,
                     'allow_redirects' => false,
@@ -560,7 +560,7 @@ class DoclingClient {
 
         try {
             // A timeout/5xx can leave a conversion running; never resubmit or follow redirects.
-            $response = $this->clientService->newClient()->post($endpoint, [
+            $response = IdentityHttpClient::fromService($this->clientService)->post($endpoint, [
                 'headers' => $headers,
                 'multipart' => $multipart,
                 'timeout' => $timeout,

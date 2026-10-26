@@ -10,6 +10,7 @@ use OCA\EducAI\Db\ChatRoom;
 use OCA\EducAI\Exception\EmbeddingRateLimitedException;
 use OCA\EducAI\Exception\InvalidWebhookException;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\IdentityHttpClient;
 use OCA\EducAI\Service\MetadataFileFilter;
 use OCA\EducAI\Service\OnboardingService;
 use OCA\EducAI\Service\RoomDocumentIngestionService;
@@ -1354,7 +1355,7 @@ REGEX;
 			]);
 
 			try {
-				$client = $this->clientService->newClient();
+				$client = IdentityHttpClient::fromService($this->clientService);
 			} catch (Exception $e) {
 				$this->logger->error('Failed to create Talk HTTP client: ' . $e->getMessage(), [
 					'exception' => $e,

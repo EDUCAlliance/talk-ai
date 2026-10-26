@@ -111,7 +111,7 @@ class CatalogueClient {
 		}
 
 		try {
-			$client = $this->clientService->newClient();
+			$client = IdentityHttpClient::fromService($this->clientService);
 			$response = $client->get($url, [
 				'query' => $params,
 				'timeout' => 30,
@@ -164,7 +164,7 @@ class CatalogueClient {
 		$state = $isPast ? 'CLOSED' : 'OPEN';
 
 		try {
-			$client = $this->clientService->newClient();
+			$client = IdentityHttpClient::fromService($this->clientService);
 			$offset = 0;
 			$limit = 200;
 			$maxIterations = 10;
@@ -244,7 +244,7 @@ class CatalogueClient {
 		$url = $endpoint . '/filters';
 
 		try {
-			$client = $this->clientService->newClient();
+			$client = IdentityHttpClient::fromService($this->clientService);
 			$response = $client->get($url, [
 				'timeout' => 30,
 				'headers' => [
@@ -311,7 +311,7 @@ class CatalogueClient {
 		}
 
 		try {
-			$client = $this->clientService->newClient();
+			$client = IdentityHttpClient::fromService($this->clientService);
 			$response = $client->get($url, [
 				'query' => $params,
 				'timeout' => 30,
@@ -381,7 +381,7 @@ class CatalogueClient {
 		$url = $endpoint . '/version';
 
 		try {
-			$client = $this->clientService->newClient();
+			$client = IdentityHttpClient::fromService($this->clientService);
 			$response = $client->get($url, [
 				'timeout' => 10,
 				'headers' => [
