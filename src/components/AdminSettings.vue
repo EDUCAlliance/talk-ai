@@ -11,7 +11,7 @@
 				</div>
 			</div>
 			<a class="educai-admin__doc"
-				:href="documentationUrl"
+				href="https://github.com/EDUCAlliance/talk-ai/blob/main/docs/ADMIN_SETTINGS.md"
 				target="_blank"
 				rel="noopener noreferrer">{{ t('educai', 'Documentation') }} ↗</a>
 		</header>
@@ -410,9 +410,6 @@ export default {
 			const origin = typeof window !== 'undefined' ? window.location?.origin || '' : ''
 			return origin + generateUrl('/apps/educai/webhook/talk')
 		},
-		documentationUrl() {
-			return 'https://github.com/EDUCAlliance/talk-ai/blob/main/docs/ADMIN_SETTINGS.md'
-		},
 		toolTestNames() {
 			try {
 				const tools = JSON.parse(this.toolTestResult || '[]')
@@ -735,11 +732,19 @@ export default {
 			return Math.round(numeric * 100) / 100
 		},
 		normalizeAppIconUrl(value) {
+			if (value !== null && value !== undefined && typeof value !== 'string') {
+				return null
+			}
 			const url = (value || '').trim()
 			if (url === '') {
 				return ''
 			}
 			if (url.length > 1024) {
+				return null
+			}
+			// Browsers strip controls and treat backslashes as slashes in HTTP URLs.
+			// Reject them before checking root-relative paths (e.g. /\\host/icon.svg).
+			if ([...url].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127 || character === '\\')) {
 				return null
 			}
 			if (this.isUploadedAppIconReference(url)) {
@@ -849,7 +854,10 @@ export default {
 				)
 				if (this.isServerBackedAppIconReference(url)) {
 					const version = this.appIconPreviewVersion[variant] || 0
-					const previewUrl = this.appIconPreviewUrls[variant] || generateUrl(`/apps/educai/api/v1/admin/app-icon-preview/${variant}`)
+					const configuredPreviewUrl = this.normalizeAppIconUrl(this.appIconPreviewUrls[variant])
+					const previewUrl = configuredPreviewUrl && !this.isServerBackedAppIconReference(configuredPreviewUrl)
+						? configuredPreviewUrl
+						: generateUrl(`/apps/educai/api/v1/admin/app-icon-preview/${variant}`)
 					return `${previewUrl}?source=${encodeURIComponent(url)}&v=${version}`
 				}
 

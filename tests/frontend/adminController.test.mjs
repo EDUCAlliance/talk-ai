@@ -327,6 +327,51 @@ test('tabs are normalised and validation errors open the right place', async () 
 	assert.equal(state.activeTab, 'models')
 })
 
+test('custom icon previews reject executable schemes and ambiguous root-relative URLs', () => {
+	const state = admin()
+	state.settings.appIconMode = 'custom'
+	for (const value of [
+		'javascript:alert(1)', ' \tJaVaScRiPt:alert(1)', 'java\nscript:alert(1)',
+		'data:image/svg+xml,<svg onload="alert(1)"/>', 'vbscript:msgbox(1)',
+		'//external.example/icon.svg', '/\\external.example/icon.svg', '/\n/external.example/icon.svg',
+		'/\t/external.example/icon.svg', 'https://', {}, 123,
+	]) {
+		state.settings.appIconWhiteUrl = value
+		assert.equal(state.appIconWhitePreviewUrl, '', JSON.stringify(value))
+	}
+})
+
+test('custom icon previews retain HTTP(S) and Nextcloud paths including subdirectory deployments', () => {
+	const state = admin()
+	state.settings.appIconMode = 'custom'
+	for (const value of [
+		'https://images.example/icon.svg?version=2', 'http://images.example/icon.png',
+		'/nextcloud/index.php/apps/educai/api/v1/app-icon/white', '/apps/theming/img/logo.svg',
+	]) {
+		state.settings.appIconWhiteUrl = ` ${value} `
+		assert.equal(state.appIconWhitePreviewUrl, value)
+	}
+	state.settings.appIconMode = 'default'
+	assert.equal(state.appIconWhitePreviewUrl, '/apps/educai/img/app.svg')
+	assert.equal(state.appIconBlackPreviewUrl, '/apps/educai/img/app-dark.svg')
+})
+
+test('uploaded icon references use an HTTP(S) or local preview route, never an unsafe response URL', () => {
+	const state = admin()
+	state.settings.appIconMode = 'custom'
+	state.settings.appIconWhiteUrl = 'educai-upload://white'
+	state.appIconPreviewVersion.white = 42
+	const query = '?source=educai-upload%3A%2F%2Fwhite&v=42'
+	for (const value of ['javascript:alert(1)', 'data:image/svg+xml,<svg/>', 'educai-upload://black', '/\\external.example/preview', '/\n/external.example/preview', {}, '']) {
+		state.appIconPreviewUrls.white = value
+		assert.equal(state.appIconWhitePreviewUrl, `/apps/educai/api/v1/admin/app-icon-preview/white${query}`, JSON.stringify(value))
+	}
+	for (const value of ['/nextcloud/index.php/apps/educai/api/v1/admin/app-icon-preview/white', 'https://cloud.example/nextcloud/preview/white']) {
+		state.appIconPreviewUrls.white = value
+		assert.equal(state.appIconWhitePreviewUrl, `${value}${query}`)
+	}
+})
+
 test('rate-limit presets fill both chat and embedding limits', () => {
 	const state = admin()
 	Object.assign(state.settings, { rateLimitSecond: 5, rateLimitMinute: 1, rateLimitHour: 2, rateLimitDay: 3 })
