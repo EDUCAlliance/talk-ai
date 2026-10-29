@@ -28,9 +28,10 @@ No configuration is needed — the provider is active as soon as the app is enab
 **Provider missing from the picker:**
 
 1. Hard-refresh the page (Ctrl/Cmd+Shift+R).
-2. Verify registration:
+2. Verify registration (replace `YOUR_USERNAME` with your Nextcloud username;
+   curl will prompt for your app password without putting it in shell history):
    ```bash
-   curl -u USER:PASSWORD -H "OCS-APIRequest: true" \
+   curl --user 'YOUR_USERNAME' -H "OCS-APIRequest: true" \
      "https://cloud.example.com/ocs/v2.php/references/providers" | grep educai
    ```
 3. Check the browser console for `[EducAI] Bot picker:` messages — you should see "Detected Talk via …" and "Successfully registered".

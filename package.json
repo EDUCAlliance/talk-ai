@@ -19,13 +19,13 @@
     "extends @nextcloud/browserslist-config"
   ],
   "overrides": {
-    "fast-uri": "3.1.2",
-    "fast-xml-builder": "1.1.7",
+    "fast-uri": "3.1.9",
+    "fast-xml-builder": "1.3.1",
     "@nextcloud/eslint-plugin": {
       "fast-xml-parser": "5.7.2"
     },
-    "dompurify": "^3.4.11",
-    "qs": "^6.15.2",
+    "dompurify": "^3.4.17",
+    "qs": "^6.17.1",
     "@babel/core": "^7.29.6",
     "@microsoft/api-extractor": {
       "minimatch": {
