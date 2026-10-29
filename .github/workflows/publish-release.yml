@@ -21,7 +21,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: appstore-release-${{ github.event.release.tag_name || inputs.tag }}
@@ -43,6 +43,9 @@ jobs:
     name: Build, sign and publish
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      # Required to attach the production tarball to the existing GitHub release.
+      contents: write
 
     steps:
       - name: Checkout release automation
