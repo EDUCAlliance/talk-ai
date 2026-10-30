@@ -13,6 +13,7 @@ use OCA\EducAI\OpenApi\ApiHttpTransport;
 use OCA\EducAI\OpenApi\ApiNetworkPolicy;
 use OCA\EducAI\OpenApi\ApiRequestBuilder;
 use OCA\EducAI\OpenApi\ApiResultProjector;
+use OCA\EducAI\OpenApi\ApiToolAccess;
 use OCA\EducAI\OpenApi\ArgumentValidator;
 use OCA\EducAI\OpenApi\OpenApiCompiler;
 use OCA\EducAI\OpenApi\OpenApiDocumentLoader;
@@ -24,6 +25,7 @@ use OCA\EducAI\ToolProvider\OpenApiToolProvider;
 use OCP\Http\Client\IResponse;
 use OCP\IConfig;
 use OCP\IDBConnection;
+use OCP\IGroupManager;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -42,6 +44,11 @@ final class OpenApiHarness {
 	public OpenApiToolCatalog $catalog;
 	public OpenApiExecutionService $execution;
 	public OpenApiToolProvider $provider;
+	public ApiToolAccess $access;
+	/** @var list<string> */
+	public array $admins = [self::ADMIN];
+	/** @var array<string,list<string>> */
+	public array $memberships = [];
 	/** @var list<string> */
 	public array $transactions = [];
 	/** @var list<array{string,string,array<string,mixed>}> */
@@ -116,6 +123,33 @@ final class OpenApiHarness {
 		$policies = (new MockFactory($test))->mock(ToolExecutionPolicyService::class, []);
 		$policies->method('readToolPolicy')->willReturn(['kind' => 'read', 'source' => 'openapi']);
 		$this->provider = new OpenApiToolProvider($this->catalog, $this->execution, $this->connections, $this->operations, $policies, $logger);
+
+		$groups = (new MockFactory($test))->mock(IGroupManager::class, ['isAdmin', 'isInGroup']);
+		$groups->method('isAdmin')->willReturnCallback(fn (string $userId): bool => in_array($userId, $this->admins, true));
+		$groups->method('isInGroup')->willReturnCallback(fn (string $userId, string $group): bool => in_array($group, $this->memberships[$userId] ?? [], true));
+		$this->access = new ApiToolAccess($this->catalog, $this->connections, $groups);
+	}
+
+	/**
+	 * Invocation context as BotService sets it for a bot run.
+	 *
+	 * @param array<string,mixed> $overrides
+	 * @return array<string,mixed>
+	 */
+	public static function runContext(array $overrides = []): array {
+		return $overrides + [
+			'bot_id' => 7,
+			'room_token' => 'room1',
+			'actor_id' => 'alice',
+			'bot_visibility' => 'groups',
+			'deadline' => microtime(true) + 300,
+			'trace_run_id' => 41,
+		];
+	}
+
+	/** @param array<string,mixed> $overrides */
+	public function enterRun(array $overrides = []): void {
+		$this->provider->setInvocationContext(self::runContext($overrides));
 	}
 
 	public function createCoursesConnection(): ApiConnection {

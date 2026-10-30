@@ -156,7 +156,7 @@ class OpenApiToolCatalog {
 		if ($revision->getApprovedBaseUrl() === null || $revision->getApprovedBaseUrl() !== $connection->getBaseUrl()) {
 			return 'base_url_changed';
 		}
-		if ($revision->getApprovedAuthArray() != ApiConnectionService::authSnapshot($connection)) {
+		if ($revision->getApprovedAuthArray() !== ApiConnectionService::authSnapshot($connection)) {
 			return 'auth_changed';
 		}
 		return null;

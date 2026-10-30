@@ -29,18 +29,27 @@ class OpenApiExecutionService {
 	}
 
 	/**
+	 * Runs an API tool for the bot run described by $invocation. Without a
+	 * verified invocation nothing is resolved or sent.
+	 *
 	 * @param array<string,mixed> $arguments
-	 * @param array<string,scalar|null> $logContext
 	 * @return array{content:list<array{type:string,text:string}>,isError:bool,error?:array<string,mixed>}
 	 */
-	public function execute(string $toolName, array $arguments, float $timeout = self::DEFAULT_TIMEOUT_SECONDS, array $logContext = []): array {
+	public function execute(string $toolName, array $arguments, ?ApiInvocation $invocation): array {
 		try {
+			if ($invocation === null) {
+				throw new ApiExecutionException('invocation_context_missing', 'API tools can only run inside a verified bot conversation.');
+			}
 			$ids = OpenApiToolCatalog::parseToolName($toolName);
 			if ($ids === null) {
 				throw new ApiExecutionException('tool_not_available', 'This API tool is currently not available.', ['reason' => 'tool_name_invalid']);
 			}
 			$resolved = $this->catalog->resolve($ids[0], $ids[1]);
-			return self::success($this->call($resolved, $arguments, $timeout, $logContext + [
+			if (!ApiToolAccess::allowsVisibility($resolved['connection'], $invocation->botVisibility)) {
+				throw new ApiExecutionException('tool_not_available', 'This API tool is currently not available.', ['reason' => 'bot_visibility_not_allowed']);
+			}
+			$timeout = $invocation->beginCall(self::DEFAULT_TIMEOUT_SECONDS, microtime(true));
+			return self::success($this->call($resolved, $arguments, $timeout, $invocation->logContext() + [
 				'connection_id' => $ids[0],
 				'operation_id' => $ids[1],
 			]));

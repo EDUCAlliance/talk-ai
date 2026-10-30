@@ -6,6 +6,7 @@ namespace OCA\EducAI\ToolProvider;
 
 use OCA\EducAI\Db\ApiConnectionMapper;
 use OCA\EducAI\Db\ApiOperationMapper;
+use OCA\EducAI\OpenApi\ApiInvocation;
 use OCA\EducAI\OpenApi\OpenApiExecutionService;
 use OCA\EducAI\OpenApi\OpenApiToolCatalog;
 use OCA\EducAI\Service\ToolExecutionPolicyService;
@@ -17,8 +18,7 @@ use Psr\Log\LoggerInterface;
  * and show up as unavailable; they never execute until approved again.
  */
 class OpenApiToolProvider implements IToolProvider {
-	/** @var array<string,mixed>|null */
-	private ?array $context = null;
+	private ?ApiInvocation $invocation = null;
 	/** @var array<string,array{label?:string,summary?:string}>|null */
 	private ?array $metadata = null;
 
@@ -59,10 +59,7 @@ class OpenApiToolProvider implements IToolProvider {
 	 * @return array{content:array<int,array{type:string,text:string}>,isError:bool}
 	 */
 	public function executeTool(string $toolName, array $arguments, array $config = []): array {
-		$botId = $this->context['bot_id'] ?? null;
-		return $this->execution->execute($toolName, $arguments, OpenApiExecutionService::DEFAULT_TIMEOUT_SECONDS, [
-			'bot_id' => is_int($botId) ? $botId : null,
-		]);
+		return $this->execution->execute($toolName, $arguments, $this->invocation);
 	}
 
 	/**
@@ -95,8 +92,12 @@ class OpenApiToolProvider implements IToolProvider {
 		return $this->metadata = $metadata;
 	}
 
+	/**
+	 * Expects actor_id, bot_id, bot_visibility, room_token and deadline (Unix
+	 * time) from BotService; API tools refuse to run with anything less.
+	 */
 	public function setInvocationContext(?array $context): void {
-		$this->context = $context;
+		$this->invocation = ApiInvocation::fromContext($context);
 		$this->metadata = null;
 		$this->catalog->reset();
 	}

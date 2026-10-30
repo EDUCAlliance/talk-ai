@@ -26,6 +26,7 @@ class ApiConnectionService {
 	public const MAX_NAME = 128;
 	public const MAX_DESCRIPTION = 1000;
 	public const MAX_CREDENTIAL = 4096;
+	public const MAX_ASSIGN_GROUPS = 50;
 	private const DIFF_ASPECTS = ['parameters', 'security', 'servers', 'response', 'blockers', 'summary', 'description', 'deprecated'];
 
 	public function __construct(
@@ -466,10 +467,13 @@ class ApiConnectionService {
 			'auth_header' => $connection->getAuthHeader(),
 			'credential_set' => $this->hasCredential($connection),
 			'data_visibility' => $connection->getDataVisibility(),
+			'assign_policy' => $connection->getAssignPolicy(),
+			'assign_groups' => $connection->getAssignGroupList(),
+			'bot_visibilities' => $connection->getBotVisibilityList(),
 			'active_revision_id' => $active?->getId(),
 			'approval_current' => $active !== null
 				&& $active->getApprovedBaseUrl() === $connection->getBaseUrl()
-				&& $active->getApprovedAuthArray() == self::authSnapshot($connection),
+				&& $active->getApprovedAuthArray() === self::authSnapshot($connection),
 			'last_check' => $connection->getLastCheckAt() === null ? null : [
 				'at' => $connection->getLastCheckAt(),
 				'status' => $connection->getLastCheckStatus(),
@@ -595,6 +599,44 @@ class ApiConnectionService {
 				$connection->setEnabled(false);
 			}
 		}
+		if (array_key_exists('assign_policy', $input)) {
+			$policy = $input['assign_policy'];
+			if (!in_array($policy, [ApiConnection::ASSIGN_ADMINS, ApiConnection::ASSIGN_GROUPS, ApiConnection::ASSIGN_ALL_USERS], true)) {
+				throw new ApiConnectionException('assign_policy_invalid', 'Unknown assignment policy.');
+			}
+			$connection->setAssignPolicy($policy);
+		}
+		if (array_key_exists('assign_groups', $input)) {
+			$connection->setAssignGroupList(self::stringList($input['assign_groups'], self::MAX_ASSIGN_GROUPS, 255, 'assign_groups_invalid'));
+		}
+		if ($connection->getAssignPolicy() === ApiConnection::ASSIGN_GROUPS && $connection->getAssignGroupList() === []) {
+			throw new ApiConnectionException('assign_groups_missing', 'Choose at least one group that may assign this API.');
+		}
+		if ($connection->getAssignPolicy() !== ApiConnection::ASSIGN_GROUPS) {
+			$connection->setAssignGroupList([]);
+		}
+		if (array_key_exists('bot_visibilities', $input)) {
+			$visibilities = self::stringList($input['bot_visibilities'], count(ApiConnection::BOT_VISIBILITIES), 16, 'bot_visibilities_invalid');
+			if ($visibilities === [] || array_diff($visibilities, ApiConnection::BOT_VISIBILITIES) !== []) {
+				throw new ApiConnectionException('bot_visibilities_invalid', 'Choose the bot visibilities this API may be used with.');
+			}
+			$connection->setBotVisibilityList($visibilities);
+		}
+	}
+
+	/** @return list<string> */
+	private static function stringList(mixed $value, int $maxItems, int $maxLength, string $code): array {
+		if (!is_array($value) || !array_is_list($value) || count($value) > $maxItems) {
+			throw new ApiConnectionException($code, 'The list is invalid.');
+		}
+		$items = [];
+		foreach ($value as $item) {
+			if (!is_string($item) || trim($item) === '' || mb_strlen($item) > $maxLength || preg_match('/[\x00-\x1f\x7f]/', $item) === 1) {
+				throw new ApiConnectionException($code, 'The list contains an invalid entry.');
+			}
+			$items[] = $item;
+		}
+		return array_values(array_unique($items));
 	}
 
 	/**

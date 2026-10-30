@@ -32,7 +32,7 @@ class AgentExecutor {
 	private const HARD_MAX_TURNS = 16;
 	private const DEFAULT_MAX_TOOL_CALLS = 24;
 	private const HARD_MAX_TOOL_CALLS = 24;
-	private const DEFAULT_MAX_WALL_CLOCK_SECONDS = 300;
+	public const DEFAULT_MAX_WALL_CLOCK_SECONDS = 300;
 	/**
 	 * Queue processing leases must exceed this hard execution bound so a live
 	 * agent run cannot be reclaimed merely because it uses its allowed budget.

@@ -1,4 +1,7 @@
 { "translations": {
+    "You are not allowed to give the API tool \"%s\" to bots." : "Du darfst Bots das API-Tool „%s“ nicht zuweisen.",
+    "The API tool \"%s\" is not allowed for bots with this visibility." : "Das API-Tool „%s“ ist für Bots mit dieser Sichtbarkeit nicht erlaubt.",
+    "The API tool \"%s\" is not available. Remove it from the bot or ask an administrator to approve it." : "Das API-Tool „%s“ ist nicht verfügbar. Entferne es aus dem Bot oder bitte eine Administratorin oder einen Administrator, es freizugeben.",
     "Enter the ID of a catalogue record." : "Gib die ID eines Katalogeintrags ein.",
     "The link field must be a JSON pointer such as /permalink." : "Das Linkfeld muss ein JSON-Pointer wie /permalink sein.",
     "Accepted origins must be HTTPS origins without a path, for example https://catalogue.example.org (at most 20)." : "Akzeptierte Origins müssen HTTPS-Origins ohne Pfad sein, zum Beispiel https://catalogue.example.org (höchstens 20).",

@@ -4336,3 +4336,15 @@ msgstr "Es ist keine Linkvorlage eingerichtet."
 #: src/components/admin/KnowledgeTab.vue
 msgid "The application link is not a safe web address and is not shown."
 msgstr "Der Bewerbungslink ist keine sichere Webadresse und wird nicht angezeigt."
+
+#: lib/Controller/BotController.php:563
+msgid "You are not allowed to give the API tool \"%s\" to bots."
+msgstr "Du darfst Bots das API-Tool „%s“ nicht zuweisen."
+
+#: lib/Controller/BotController.php:564
+msgid "The API tool \"%s\" is not allowed for bots with this visibility."
+msgstr "Das API-Tool „%s“ ist für Bots mit dieser Sichtbarkeit nicht erlaubt."
+
+#: lib/Controller/BotController.php:565
+msgid "The API tool \"%s\" is not available. Remove it from the bot or ask an administrator to approve it."
+msgstr "Das API-Tool „%s“ ist nicht verfügbar. Entferne es aus dem Bot oder bitte eine Administratorin oder einen Administrator, es freizugeben."

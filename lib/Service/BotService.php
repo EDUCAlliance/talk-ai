@@ -19,6 +19,9 @@ use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
+use OCA\EducAI\OpenApi\ApiToolAccess;
+use OCA\EducAI\OpenApi\ApiToolAssignmentException;
+use OCA\EducAI\OpenApi\OpenApiToolCatalog;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
 use OCP\App\IAppManager;
@@ -100,6 +103,7 @@ class BotService {
 		?IFactory $l10nFactory = null,
 		?LLMClient $llmClient = null,
 		?CatalogueLinkGuard $catalogueLinkGuard = null,
+		private ?ApiToolAccess $apiToolAccess = null,
 	) {
 		$this->l10nFactory = $l10nFactory;
 		$this->llmClient = $llmClient;
@@ -298,6 +302,7 @@ class BotService {
 		// Normalize visibility
 		$normalizedVisibility = $visibility ?? ($isPublic ? 'global' : 'groups');
 		$isPublicNormalized = $normalizedVisibility === 'global' ? true : $isPublic;
+		$this->assertApiToolAssignments($userId, [], $this->builtInToolNames($tools), null, $normalizedVisibility);
 
 		$bot = new Bot();
 		$bot->setUserId($userId);
@@ -404,6 +409,14 @@ class BotService {
 			$targetRagEnabled = $editableState['rag_enabled'];
 		}
 		$targetTools = $this->stripWikiToolsForVisibility($tools, $targetVisibility, $targetAllowedTeams, $bot->getUserId());
+		$editableToolNames = $this->editableBuiltInToolNames($bot);
+		$this->assertApiToolAssignments(
+			$userId,
+			$editableToolNames,
+			$targetTools === null ? $editableToolNames : $this->builtInToolNames($targetTools),
+			$editableState['visibility'],
+			$targetVisibility
+		);
 		$targetIsPublic = $targetVisibility === 'global';
 		$canPublishTargetScope = $this->permissionService->canPublishBotToScope(
 			$userId,
@@ -600,6 +613,13 @@ class BotService {
 			}
 			throw new Exception('Cannot submit this bot for approval');
 		}
+		$this->assertApiToolAssignments(
+			$userId,
+			[],
+			$this->liveBuiltInToolNames($bot),
+			null,
+			$this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic())
+		);
 
 		// Store questionnaire responses
 		$bot->setApprovalReason($approvalReason);
@@ -647,6 +667,19 @@ class BotService {
 
 		// Apply pending changes if any (versioning)
 		$pendingChanges = $bot->getPendingChangesArray();
+		$liveVisibility = $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic());
+		$liveToolNames = $this->liveBuiltInToolNames($bot);
+		$publishedBefore = $pendingChanges !== null && $bot->getApprovedAt() !== null;
+		$pendingVisibility = $pendingChanges['visibility'] ?? null;
+		$this->assertApiToolAssignments(
+			$approverId,
+			$publishedBefore ? $liveToolNames : [],
+			$pendingChanges !== null && is_array($pendingChanges['tools'] ?? null)
+				? $this->builtInToolNames($pendingChanges['tools'])
+				: $liveToolNames,
+			$publishedBefore ? $liveVisibility : null,
+			is_string($pendingVisibility) && $pendingVisibility !== '' ? $pendingVisibility : $liveVisibility
+		);
 		if ($pendingChanges !== null) {
 			$bot->applyPendingChanges();
 
@@ -1140,6 +1173,10 @@ class BotService {
 					'attachments' => $messageContext['attachments'],
 					'document_source_ids' => $messageContext['document_source_ids'],
 					'image_source_ids' => $messageContext['image_source_ids'],
+					'actor_id' => $userId,
+					'bot_visibility' => $this->effectiveToolVisibility($bot, $userId),
+					'deadline' => microtime(true) + AgentExecutor::DEFAULT_MAX_WALL_CLOCK_SECONDS,
+					'trace_run_id' => $traceRunId,
 				]);
 
 				$agentOptions = array_filter([
@@ -2307,23 +2344,39 @@ class BotService {
 	 * @return SplitToolLoadout
 	 */
 	private function resolveEffectiveToolLoadout(Bot $bot, string $userId): array {
-		$status = $bot->getApprovalStatus() ?? 'approved';
-		if ($status === 'pending') {
-			$normalizedUserId = $this->normalizeExternalUserId($userId);
-			if ($bot->getUserId() === $normalizedUserId || $this->userCanTestPendingBot($bot, $normalizedUserId)) {
-				return $this->resolveToolLoadout($bot, true);
-			}
-		}
+		return $this->resolveToolLoadout($bot, $this->usesPendingLoadout($bot, $userId));
+	}
 
-		return $this->resolveToolLoadout($bot, false);
+	/** Owners and testers of a pending bot run its pending tools. */
+	private function usesPendingLoadout(Bot $bot, string $userId): bool {
+		if (($bot->getApprovalStatus() ?? 'approved') !== 'pending') {
+			return false;
+		}
+		$normalizedUserId = $this->normalizeExternalUserId($userId);
+		return $bot->getUserId() === $normalizedUserId || $this->userCanTestPendingBot($bot, $normalizedUserId);
+	}
+
+	/** @return array<string,mixed>|null Pending changes whose tool list replaces the live one */
+	private function pendingToolChanges(Bot $bot, bool $preferPending): ?array {
+		$pendingChanges = $bot->getPendingChangesArray();
+		return $preferPending && $pendingChanges !== null && is_array($pendingChanges['tools'] ?? null) ? $pendingChanges : null;
+	}
+
+	/** Visibility of the bot version whose tool loadout runs for this user. */
+	private function effectiveToolVisibility(Bot $bot, string $userId): string {
+		$pendingChanges = $this->pendingToolChanges($bot, $this->usesPendingLoadout($bot, $userId));
+		$visibility = $pendingChanges['visibility'] ?? null;
+		return is_string($visibility) && $visibility !== ''
+			? $visibility
+			: $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic());
 	}
 
 	/**
 	 * @return SplitToolLoadout
 	 */
 	private function resolveToolLoadout(Bot $bot, bool $preferPending): array {
-		$pendingChanges = $bot->getPendingChangesArray();
-		if ($preferPending && $pendingChanges !== null && array_key_exists('tools', $pendingChanges) && is_array($pendingChanges['tools'])) {
+		$pendingChanges = $this->pendingToolChanges($bot, $preferPending);
+		if ($pendingChanges !== null) {
 			$visibility = isset($pendingChanges['visibility']) && is_string($pendingChanges['visibility']) && $pendingChanges['visibility'] !== ''
 				? $pendingChanges['visibility']
 				: $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic());
@@ -2412,6 +2465,54 @@ class BotService {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * @param array<int,mixed>|null $tools Tool assignments in any accepted input format
+	 * @return list<string>
+	 */
+	private function builtInToolNames(?array $tools): array {
+		$names = [];
+		foreach ($this->normalizeToolAssignments($tools) as $assignment) {
+			if ($assignment['is_builtin']) {
+				$names[] = (string)$assignment['builtin_name'];
+			}
+		}
+		return $names;
+	}
+
+	/** @return list<string> */
+	private function liveBuiltInToolNames(Bot $bot): array {
+		$names = [];
+		foreach ($this->toolRegistry->getBuiltInToolsForBot($bot->getId()) as $entry) {
+			if (is_string($entry['name'] ?? null) && $entry['name'] !== '') {
+				$names[] = $entry['name'];
+			}
+		}
+		return $names;
+	}
+
+	/** @return list<string> Tool names the editor currently sees (pending version first) */
+	private function editableBuiltInToolNames(Bot $bot): array {
+		$pendingChanges = $this->pendingToolChanges($bot, true);
+		return $pendingChanges !== null ? $this->builtInToolNames($pendingChanges['tools']) : $this->liveBuiltInToolNames($bot);
+	}
+
+	/**
+	 * @param list<string> $before
+	 * @param list<string> $after
+	 * @throws ApiToolAssignmentException
+	 */
+	private function assertApiToolAssignments(string $actorId, array $before, array $after, ?string $visibilityBefore, string $visibilityAfter): void {
+		if ($this->apiToolAccess !== null) {
+			$this->apiToolAccess->assertAssignable($actorId, $before, $after, $visibilityBefore, $visibilityAfter);
+			return;
+		}
+		foreach ($after as $name) {
+			if (OpenApiToolCatalog::parseToolName($name) !== null && ($visibilityBefore === null || !in_array($name, $before, true))) {
+				throw new ApiToolAssignmentException($name, ApiToolAssignmentException::TOOL_NOT_AVAILABLE);
+			}
+		}
 	}
 
 	private function syncBotTools(Bot $bot, array $tools): void {
