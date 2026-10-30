@@ -42,10 +42,11 @@ export function n(app, singular, plural, count, placeholders, options = {}) {
  * Script blocks should import t/n directly from this module so the
  * Nextcloud translation extractor can discover every source string.
  *
- * @param {typeof import('vue')} Vue Vue constructor
+ * @param {import('vue').App} app Vue application
  */
-export function installL10n(Vue) {
-	Vue.mixin({ methods: { t, n } })
+export function installL10n(app) {
+	app.config.globalProperties.t = t
+	app.config.globalProperties.n = n
 }
 
 export { getCanonicalLocale }

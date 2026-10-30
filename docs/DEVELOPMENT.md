@@ -1,6 +1,6 @@
 # Development
 
-Build, test, and local verification. Requirements: Nextcloud 30–35, PHP 8.1+, Node.js 22, npm 10.5+. The package scripts expect the app inside a Nextcloud checkout, usually under `apps-extra/educai`.
+Build, test, and local verification. Requirements: Nextcloud 32–35, PHP 8.1+, Node.js 22, npm 10.5+. The package scripts expect the app inside a Nextcloud checkout, usually under `apps-extra/educai`.
 
 ## Frontend
 
@@ -14,6 +14,26 @@ npm run test:frontend
 ```
 
 Commit the generated `js/` assets — the repository ships deployable bundles. After frontend changes, run a build and hard-refresh the browser (Nextcloud caches bundles aggressively).
+
+## Vue 3 compatibility
+
+The frontend uses Vue 3 (Options API) with `@nextcloud/vite-config` 2. Each
+entrypoint creates its own application and installs `src/l10n.js` on that app.
+Custom inputs use `modelValue` / `update:modelValue`; cleanup belongs in
+`beforeUnmount`.
+
+The exact `@nextcloud/vue` 9.11.0, dialogs 7.2.0 and files 3.13.0 versions are
+intentional: newer minor releases switch to Files 4, whose upstream compatibility
+floor is Nextcloud 33. Keep these versions coordinated when updating. The
+`floating-vue` 5.2.2 override preserves the lifecycle event API expected by this
+Nextcloud Vue version (upstream fix: nextcloud-vue#8994).
+
+A successful build alone does not establish cross-version compatibility. Check
+file/folder selection and repeated Smart Picker open/submit/close on Nextcloud
+32 and 35, and smoke-test 33/34 before changing the supported range. Test both
+admin and regular-user flows. Keep the generated bundles in sync with source.
+`npm run test:frontend` includes the migrated behavior suite and rendered Vue 3
+controls/lifecycle tests; PHP APIs and stored settings/bots are unchanged.
 
 ## Translations
 

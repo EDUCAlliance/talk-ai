@@ -3,7 +3,7 @@
 		<div class="ta-allow__head">
 			<strong>
 				{{ t('educai', 'Released models') }}
-				<span class="ta-allow__count">· {{ n('educai', '{count} selected', '{count} selected', value.length, { count: value.length }) }}</span>
+				<span class="ta-allow__count">· {{ n('educai', '{count} selected', '{count} selected', modelValue.length, { count: modelValue.length }) }}</span>
 			</strong>
 			<input v-model="filter"
 				class="ta-input"
@@ -11,8 +11,8 @@
 				:placeholder="t('educai', 'Filter models …')"
 				:aria-label="t('educai', 'Filter models')">
 		</div>
-		<template v-for="group in groups">
-			<div :key="`${group.endpoint}-head`" class="ta-allow__group">
+		<template v-for="group in groups" :key="group.endpoint">
+			<div class="ta-allow__group">
 				<span>{{ groupLabel(group) }}</span>
 				<span class="ta-allow__group-actions">
 					<button v-if="group.total > 0"
@@ -46,12 +46,12 @@
 						:title="tagTitle(tag)">{{ tagLabel(tag) }}</span>
 				</span>
 			</div>
-			<div v-if="group.hiddenCount > 0" :key="`${group.endpoint}-more`" class="ta-allow__more">
+			<div v-if="group.hiddenCount > 0" class="ta-allow__more">
 				<span>{{ n('educai', '… {count} more model', '… {count} more models', group.hiddenCount, { count: group.hiddenCount }) }}</span>
 				<button v-if="!filter"
 					type="button"
 					class="ta-btn ta-btn--ghost ta-btn--small"
-					@click="$set(expanded, group.endpoint, true)">
+					@click="expanded[group.endpoint] = true">
 					{{ t('educai', 'Show all') }}
 				</button>
 			</div>
@@ -104,19 +104,21 @@ import { splitModelReference } from '../../utils/modelSelection.js'
 export default {
 	name: 'ModelAllowList',
 	props: {
-		value: { type: Array, required: true },
+		modelValue: { type: Array, required: true },
 		options: { type: Array, default: () => [] },
 		defaultModel: { type: String, default: '' },
 		fallbackModel: { type: String, default: '' },
 		unlistedEndpoints: { type: Array, default: () => [] },
 		providerHosts: { type: Object, default: () => ({}) },
 	},
+	emits: ['update:modelValue'],
+
 	data() {
 		return { filter: '', expanded: {}, manualEndpoint: 'primary', manualModel: '', manualError: '' }
 	},
 	computed: {
 		groups() {
-			return buildAllowListGroups(this.options, this.value, {
+			return buildAllowListGroups(this.options, this.modelValue, {
 				filter: this.filter,
 				defaultModel: this.defaultModel,
 				fallbackModel: this.fallbackModel,
@@ -163,13 +165,13 @@ export default {
 			return 'ta-chip--info'
 		},
 		toggle(id, released) {
-			this.$emit('input', setReleased(this.value, [id], released))
+			this.$emit('update:modelValue', setReleased(this.modelValue, [id], released))
 		},
 		setGroup(group, released) {
 			const ids = released
 				? group.matchIds.filter(id => !!splitModelReference(id) && this.options.some(option => option.id === id))
 				: group.matchIds
-			this.$emit('input', setReleased(this.value, ids, released))
+			this.$emit('update:modelValue', setReleased(this.modelValue, ids, released))
 		},
 		addManual() {
 			const reference = `${this.manualEndpoint}:${this.manualModel.trim()}`
@@ -179,7 +181,7 @@ export default {
 			}
 			this.manualError = ''
 			this.manualModel = ''
-			this.$emit('input', setReleased(this.value, [reference], true))
+			this.$emit('update:modelValue', setReleased(this.modelValue, [reference], true))
 		},
 	},
 }

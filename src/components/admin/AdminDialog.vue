@@ -20,11 +20,13 @@ export default {
 		id: { type: String, required: true },
 		title: { type: String, required: true },
 	},
+	emits: ['close'],
+
 	mounted() {
 		this.previousFocus = document.activeElement
 		this.$nextTick(() => this.$refs.box?.querySelector('input, textarea, select, button')?.focus())
 	},
-	beforeDestroy() {
+	beforeUnmount() {
 		this.previousFocus?.focus?.()
 	},
 }

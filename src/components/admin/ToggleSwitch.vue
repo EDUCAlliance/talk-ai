@@ -3,10 +3,10 @@
 		<input :id="id"
 			type="checkbox"
 			role="switch"
-			:checked="value"
+			:checked="modelValue"
 			:disabled="disabled"
 			:aria-label="hideLabel ? label : null"
-			@change="$emit('input', $event.target.checked)">
+			@change="$emit('update:modelValue', $event.target.checked)">
 		<span class="ta-switch__track" aria-hidden="true" />
 		<span v-if="!hideLabel">{{ label }}</span>
 	</label>
@@ -17,10 +17,11 @@ export default {
 	name: 'ToggleSwitch',
 	props: {
 		id: { type: String, required: true },
-		value: { type: Boolean, default: false },
+		modelValue: { type: Boolean, default: false },
 		label: { type: String, required: true },
 		hideLabel: { type: Boolean, default: false },
 		disabled: { type: Boolean, default: false },
 	},
+	emits: ['update:modelValue'],
 }
 </script>

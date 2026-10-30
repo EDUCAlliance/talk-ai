@@ -77,6 +77,8 @@ export default {
 			required: true,
 		},
 	},
+	emits: ['show-details', 'speak-in-talk'],
+
 	computed: {
 		truncatedDescription() {
 			const desc = this.bot.description || ''

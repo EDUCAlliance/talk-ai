@@ -52,13 +52,13 @@
 						<SecretField :id="provider.keyId"
 							:name="`educai-${provider.keyId}`"
 							:label="provider.keyLabel"
-							:value="admin.settings[provider.keyKey]"
+							:model-value="admin.settings[provider.keyKey]"
 							:stored="admin.storedSecrets[provider.keyKey]"
 							:removable="provider.id === 'secondary'"
 							:removing="admin.clearCredentials.includes(provider.keyKey)"
 							:reset-key="admin.secretResetKey"
 							placeholder="sk-..."
-							@input="admin.setSecret(provider.keyKey, $event)"
+							@update:model-value="admin.setSecret(provider.keyKey, $event)"
 							@remove="admin.setSecretRemoval(provider.keyKey, $event)" />
 					</div>
 					<p class="ta-provider__meta">

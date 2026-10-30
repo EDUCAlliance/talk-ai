@@ -116,6 +116,8 @@ export default {
 		active: { type: Boolean, default: true },
 		refreshKey: { type: Number, default: 0 },
 	},
+	emits: ['save-settings', 'status'],
+
 	data() {
 		return { status: null, loading: false, queueing: false, error: '', queueMessage: '', timer: null, destroyed: false }
 	},
@@ -147,7 +149,7 @@ export default {
 		this.loadStatus()
 		this.timer = setInterval(() => { if (this.active) this.loadStatus() }, 5000)
 	},
-	beforeDestroy() {
+	beforeUnmount() {
 		this.destroyed = true
 		clearInterval(this.timer)
 	},

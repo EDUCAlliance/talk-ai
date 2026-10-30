@@ -14,11 +14,11 @@
 					<SecretField id="webhook-secret"
 						name="educai-webhook-secret"
 						:label="t('educai', 'Webhook Secret')"
-						:value="admin.settings.webhookSecret"
+						:model-value="admin.settings.webhookSecret"
 						:stored="admin.storedSecrets.webhookSecret"
 						generate
 						:reset-key="admin.secretResetKey"
-						@input="admin.setSecret('webhookSecret', $event)" />
+						@update:model-value="admin.setSecret('webhookSecret', $event)" />
 					<p class="ta-hint">
 						{{ t('educai', 'Saving a new secret registers the Talk bot again with it.') }}
 					</p>

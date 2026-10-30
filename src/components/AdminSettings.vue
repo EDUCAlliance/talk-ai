@@ -524,7 +524,7 @@ export default {
 		this.loadEmbeddingStatus()
 		window.addEventListener('beforeunload', this.onBeforeUnload)
 	},
-	beforeDestroy() {
+	beforeUnmount() {
 		this.modelPollingActive = false
 		clearTimeout(this.modelRefreshTimer)
 		if (typeof window !== 'undefined') window.removeEventListener('beforeunload', this.onBeforeUnload)

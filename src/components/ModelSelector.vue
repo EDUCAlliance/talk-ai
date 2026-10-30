@@ -12,7 +12,7 @@
 			</option>
 		</select>
 		<p :id="`${id}-status`" class="model-selector__hint" role="status">
-			<template v-if="value && !hasProvider">
+			<template v-if="modelValue && !hasProvider">
 				{{ t('educai', 'This saved model has no provider binding. Choose a provider-specific model to make routing explicit. Keeping it unchanged preserves the saved value.') }}
 			</template>
 			<template v-else-if="selectedAvailability === 'missing'">
@@ -70,29 +70,31 @@ export default {
 	name: 'ModelSelector',
 	props: {
 		id: { type: String, required: true },
-		value: { type: String, default: '' },
+		modelValue: { type: String, default: '' },
 		options: { type: Array, default: () => [] },
 		unlistedEndpoints: { type: Array, default: () => [] },
 		emptyLabel: { type: String, default: '' },
 		allowManual: { type: Boolean, default: false },
 		disabled: { type: Boolean, default: false },
 	},
+	emits: ['update:modelValue'],
+
 	data() {
 		return { manualEndpoint: 'primary', manualModel: '', manualError: '' }
 	},
 	computed: {
 		selectedValue: {
-			get() { return this.value || '' },
-			set(value) { this.$emit('input', value) },
+			get() { return this.modelValue || '' },
+			set(value) { this.$emit('update:modelValue', value) },
 		},
 		choices() {
-			return modelSelection.modelOptionsWithCurrent(this.options, this.value, this.unlistedEndpoints)
+			return modelSelection.modelOptionsWithCurrent(this.options, this.modelValue, this.unlistedEndpoints)
 		},
 		hasProvider() {
-			return !!modelSelection.splitModelReference(this.value)
+			return !!modelSelection.splitModelReference(this.modelValue)
 		},
 		selectedAvailability() {
-			return this.choices.find(option => option.id === this.value)?.availability
+			return this.choices.find(option => option.id === this.modelValue)?.availability
 		},
 	},
 	methods: {
@@ -104,7 +106,7 @@ export default {
 				return
 			}
 			this.manualError = ''
-			this.$emit('input', reference)
+			this.$emit('update:modelValue', reference)
 		},
 	},
 }

@@ -5,8 +5,8 @@
 			<input type="radio"
 				:name="name"
 				value="inherit"
-				:checked="value === 'inherit'"
-				@change="$emit('input', 'inherit')">
+				:checked="modelValue === 'inherit'"
+				@change="$emit('update:modelValue', 'inherit')">
 			<span>
 				<strong>{{ inheritTitle }}</strong>
 				<small>{{ inheritDetail }}</small>
@@ -16,8 +16,8 @@
 			<input type="radio"
 				:name="name"
 				value="custom"
-				:checked="value === 'custom'"
-				@change="$emit('input', 'custom')">
+				:checked="modelValue === 'custom'"
+				@change="$emit('update:modelValue', 'custom')">
 			<span>
 				<strong>{{ customTitle }}</strong>
 				<small>{{ customDetail }}</small>
@@ -31,12 +31,13 @@ export default {
 	name: 'ServiceSource',
 	props: {
 		name: { type: String, required: true },
-		value: { type: String, default: 'inherit' },
+		modelValue: { type: String, default: 'inherit' },
 		legend: { type: String, required: true },
 		inheritTitle: { type: String, required: true },
 		inheritDetail: { type: String, default: '' },
 		customTitle: { type: String, required: true },
 		customDetail: { type: String, default: '' },
 	},
+	emits: ['update:modelValue'],
 }
 </script>

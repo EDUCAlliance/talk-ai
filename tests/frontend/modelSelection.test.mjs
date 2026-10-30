@@ -139,11 +139,11 @@ test('unqualified legacy values are neither assigned to primary nor stripped on 
 })
 
 test('manual models always carry the explicitly selected provider; invalid IDs do not emit', () => {
-	const { state } = component('ModelSelector', {}, { value: '', options: [], id: 'model', disabled: false })
+	const { state } = component('ModelSelector', {}, { modelValue: '', options: [], id: 'model', disabled: false })
 	state.manualEndpoint = 'secondary'
 	state.manualModel = 'my/model:version'
 	state.useManualModel()
-	assert.deepEqual(state.emitted.at(-1), ['input', 'secondary:my/model:version'])
+	assert.deepEqual(state.emitted.at(-1), ['update:modelValue', 'secondary:my/model:version'])
 	for (const value of ['', 'two words', 'bad\u0000id']) {
 		state.manualModel = value
 		state.useManualModel()
@@ -231,7 +231,7 @@ test('polling respects server cache interval and is torn down with the component
 	await state.loadModels()
 	assert.equal(timers.length, 1)
 	assert.equal(timers[0].delay, 300000)
-	definition.beforeDestroy.call(state)
+	definition.beforeUnmount.call(state)
 	assert.equal(cleared.at(-1), 1)
 	state.scheduleModelRefresh()
 	assert.equal(timers.length, 1)
@@ -327,11 +327,11 @@ test('qualifying the inherited embedding model does not demand a reindex', () =>
 
 
 test('selector value follows a newly appended manual option and emits user changes', () => {
- const { state } = component('ModelSelector', {}, { value: 'secondary:unlisted', options: [primary], id: 'choice' })
+ const { state } = component('ModelSelector', {}, { modelValue: 'secondary:unlisted', options: [primary], id: 'choice' })
  assert.equal(state.selectedValue, 'secondary:unlisted')
  assert(state.choices.some(option => option.id === state.selectedValue))
  state.selectedValue = ''
- assert.deepEqual(state.emitted.at(-1), ['input', ''])
+ assert.deepEqual(state.emitted.at(-1), ['update:modelValue', ''])
 })
 
 test('stored models of a provider without a model list are manual entries, not missing', () => {

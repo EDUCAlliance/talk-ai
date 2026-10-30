@@ -59,7 +59,7 @@
 						</span>
 						<div class="bot-picker__item-meta">
 							<NcChip
-								:type="getVisibilityChipType(bot)"
+								:variant="getVisibilityChipType(bot)"
 								:text="getVisibilityLabel(bot)"
 								no-close />
 							<span v-if="bot.owner_display_name" class="bot-picker__item-creator">
@@ -98,11 +98,11 @@ import { APP_DISPLAY_NAME } from '../branding.js'
 import { t } from '../l10n.js'
 import axios from '@nextcloud/axios'
 
-import NcTextField from '@nextcloud/vue/dist/Components/NcTextField.js'
-import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
-import NcNoteCard from '@nextcloud/vue/dist/Components/NcNoteCard.js'
-import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
-import NcChip from '@nextcloud/vue/dist/Components/NcChip.js'
+import NcTextField from '@nextcloud/vue/components/NcTextField'
+import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
+import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
+import NcChip from '@nextcloud/vue/components/NcChip'
 import IconRobot from 'vue-material-design-icons/Robot.vue'
 import BotPickerModal from './BotPickerModal.vue'
 
@@ -173,7 +173,7 @@ export default {
 		this.loadRoomStatus()
 		// Focus search input when picker opens
 		this.$nextTick(() => {
-			this.$refs.searchInput?.$el?.querySelector('input')?.focus()
+			this.$refs.searchInput?.focus()
 		})
 	},
 

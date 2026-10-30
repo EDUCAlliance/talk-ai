@@ -34,5 +34,6 @@ export default {
 		result: { type: Object, default: null },
 		idleText: { type: String, default: '' },
 	},
+	emits: ['run'],
 }
 </script>

@@ -13,13 +13,13 @@
 					hide-label />
 			</template>
 			<ServiceSource name="embedding-source"
-				:value="admin.serviceModes.embedding"
+				:model-value="admin.serviceModes.embedding"
 				:legend="t('educai', 'Embeddings')"
 				:inherit-title="t('educai', 'Like the primary provider')"
 				:inherit-detail="primaryDetail"
 				:custom-title="t('educai', 'Own endpoint')"
 				:custom-detail="t('educai', 'Own address and key for embeddings')"
-				@input="admin.setServiceMode('embedding', $event)" />
+				@update:model-value="admin.setServiceMode('embedding', $event)" />
 			<p v-if="admin.serviceModes.embedding === 'inherit' && admin.clearCredentials.includes('embeddingApiKey')" class="ta-note ta-note--warn" role="status">
 				{{ t('educai', 'The separate embedding key will be removed when saving.') }}
 			</p>
@@ -42,13 +42,13 @@
 					<SecretField id="embedding-key"
 						name="educai-embedding-key"
 						:label="t('educai', 'Embedding API Key')"
-						:value="admin.settings.embeddingApiKey"
+						:model-value="admin.settings.embeddingApiKey"
 						:stored="admin.storedSecrets.embeddingApiKey"
 						removable
 						:removing="admin.clearCredentials.includes('embeddingApiKey')"
 						:reset-key="admin.secretResetKey"
 						placeholder="sk-..."
-						@input="admin.setSecret('embeddingApiKey', $event)"
+						@update:model-value="admin.setSecret('embeddingApiKey', $event)"
 						@remove="admin.setSecretRemoval('embeddingApiKey', $event)" />
 				</div>
 			</div>
@@ -188,12 +188,12 @@
 					<SecretField id="docling-key"
 						name="educai-docling-key"
 						:label="t('educai', 'Docling API Key')"
-						:value="admin.settings.doclingApiKey"
+						:model-value="admin.settings.doclingApiKey"
 						:stored="admin.storedSecrets.doclingApiKey"
 						removable
 						:removing="admin.clearCredentials.includes('doclingApiKey')"
 						:reset-key="admin.secretResetKey"
-						@input="onDoclingKey"
+						@update:model-value="onDoclingKey"
 						@remove="admin.setSecretRemoval('doclingApiKey', $event)" />
 					<p class="ta-hint">
 						{{ admin.doclingKeyHint }}

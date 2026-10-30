@@ -30,6 +30,8 @@ export default {
 		labels: { type: Array, required: true },
 		saving: { type: Boolean, default: false },
 	},
+	emits: ['discard', 'save'],
+
 	computed: {
 		summary() {
 			const shown = this.labels.slice(0, 3).join(', ')
