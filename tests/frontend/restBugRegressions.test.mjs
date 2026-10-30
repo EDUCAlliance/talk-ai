@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
-import Vue from 'vue'
+import { nextTick } from 'vue'
+import { mountState } from './helpers/vueState.mjs'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
 import { normalizeToolSelectionAliases } from '../../src/utils/toolAliases.js'
 import * as modelSelection from '../../src/utils/modelSelection.js'
@@ -15,9 +16,9 @@ const deferred = () => {
 	return { promise, resolve, reject }
 }
 const settle = async () => {
-	await Vue.nextTick()
+	await nextTick()
 	await Promise.resolve()
-	await Vue.nextTick()
+	await nextTick()
 }
 
 // Real component methods, computed state and Vue watchers; HTTP/dialogs are fixtures.
@@ -36,11 +37,12 @@ function component(ctx, path, axios, props = {}, globals = {}) {
 		setInterval: () => 1, clearInterval() {}, ...globals,
 	}
 	vm.runInNewContext(script, scope)
-	const state = new Vue({ ...scope.component, propsData: props })
-	state.$on('save', value => emitted.push(['save', value]))
-	state.$on('cancel', () => emitted.push(['cancel']))
-	ctx.after(() => state.$destroy())
-	return { state, definition: scope.component, errors, successes, emitted }
+	const mounted = mountState(scope.component, props, {
+		onSave: value => emitted.push(['save', value]),
+		onCancel: () => emitted.push(['cancel']),
+	})
+	ctx.after(mounted.unmount)
+	return { ...mounted, definition: scope.component, errors, successes, emitted }
 }
 
 const originalTree = () => ({ start: 'q1', questions: [
@@ -255,7 +257,7 @@ test('tool load failure or a still pending response cannot erase saved tools thr
 
 test('switching edited bots resets local drafts and rejects the previous bot tools and sources', async ctx => {
 	const oldTools = deferred(), oldSources = deferred()
-	const { state, errors } = form(ctx, { get: url => {
+	const { state, errors, setProps } = form(ctx, { get: url => {
 		if (url.includes('/1/')) return url.endsWith('/tools') ? oldTools.promise : oldSources.promise
 		return Promise.resolve({ data: url.endsWith('/tools') ? { tools: wikiTools(8) } : { sources: [{ id: 202, status: 'ready' }] } })
 	} })
@@ -263,7 +265,7 @@ test('switching edited bots resets local drafts and rejects the previous bot too
 	state.availableCollectives = locations().data.collectives
 	state.initializeForm()
 	state.formData.onboardingQuestions.questions[0].text = 'Unsaved first bot edit'
-	state.bot = bot(2)
+	setProps({ bot: bot(2) })
 	await settle()
 	assert.equal(state.formData.botName, 'Bot 2')
 	assert.equal(state.formData.onboardingQuestions.questions[0].text, 'Original question')
@@ -276,7 +278,7 @@ test('switching edited bots resets local drafts and rejects the previous bot too
 	assert.equal(state.rag.sources[0].id, 202)
 	assert.equal(state.rag.pollingInterval, null)
 	assert.equal(errors.length, 0)
-	state.bot = null
+	setProps({ bot: null })
 	await settle()
 	assert.equal(state.formData.botName, '')
 	assert.equal(state.formData.personalWikiEnabled, false)
@@ -379,7 +381,7 @@ for (const transition of ['switch', 'close']) {
 		test(`source poll ${rejectOld ? 'failure' : 'success'} is ignored after form ${transition}`, async ctx => {
 			const old = deferred(), current = deferred()
 			let requests = 0
-			const { state, errors } = pollingForm(ctx, { get: url => {
+			const { state, errors, setProps, unmount } = pollingForm(ctx, { get: url => {
 				if (url.endsWith('/tools')) return Promise.resolve({ data: { tools: [] } })
 				requests++
 				return url.includes('/1/') ? old.promise : current.promise
@@ -387,8 +389,8 @@ for (const transition of ['switch', 'close']) {
 			state.rag.sources = [{ id: 101, status: 'pending' }]
 			state.startPolling()
 			ctx.mock.timers.tick(2000)
-			if (transition === 'switch') state.bot = bot(2)
-			else state.$destroy()
+			if (transition === 'switch') setProps({ bot: bot(2) })
+			else unmount()
 			await settle()
 			assert.equal(state.rag.pollingInterval, null)
 			const previousSources = plain(state.rag.sources)
@@ -541,9 +543,9 @@ for (const rejectOld of [false, true]) {
 
 test('destroying activity view invalidates in-flight details', async ctx => {
 	const pending = deferred()
-	const { state } = activity(ctx, { get: () => pending.promise })
+	const { state, unmount } = activity(ctx, { get: () => pending.promise })
 	const request = state.selectTrace(1)
-	state.$destroy()
+	unmount()
 	pending.resolve(detail(1))
 	await request
 	assert.equal(state.selectedTrace, null)
@@ -568,9 +570,9 @@ test('a delayed bot tool response does not overwrite a newer explicit wiki choic
 
 test('closing the form invalidates tool, collective and source requests without restarting polling', async ctx => {
 	const pendingTools = deferred(), pendingLists = deferred(), pendingSources = deferred()
-	const { state, errors } = form(ctx, { get: url => url.endsWith('/tools') ? pendingTools.promise : url.endsWith('/locations') ? pendingLists.promise : pendingSources.promise })
+	const { state, errors, unmount } = form(ctx, { get: url => url.endsWith('/tools') ? pendingTools.promise : url.endsWith('/locations') ? pendingLists.promise : pendingSources.promise })
 	const toolsRequest = state.loadBotTools(), listRequest = state.loadWikiLocations(), sourcesRequest = state.loadRagSources()
-	state.$destroy()
+	unmount()
 	pendingTools.resolve({ data: { tools: wikiTools(7) } })
 	pendingLists.resolve(locations())
 	pendingSources.resolve({ data: { sources: [{ id: 1, status: 'pending' }] } })

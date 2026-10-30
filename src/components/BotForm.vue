@@ -647,7 +647,7 @@ import { WIKI_ROOT_FOLDER } from '../branding.js'
 import { generateUrl } from '@nextcloud/router'
 import { getFilePickerBuilder, FilePickerType, showSuccess, showError } from '@nextcloud/dialogs'
 import { getClient, defaultRootPath, getDefaultPropfind, resultToNode } from '@nextcloud/files/dav'
-import NcProgressBar from '@nextcloud/vue/dist/Components/NcProgressBar.js'
+import NcProgressBar from '@nextcloud/vue/components/NcProgressBar'
 import { getCanonicalLocale, t } from '../l10n.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { normalizeToolSelectionAliases } from '../utils/toolAliases.js'
@@ -714,6 +714,8 @@ export default {
 			}),
 		},
 	},
+	emits: ['cancel', 'save'],
+
 	data() {
 		return {
 			WIKI_ROOT_FOLDER,
@@ -984,8 +986,11 @@ export default {
 			this.ensureWikiSelectionValid()
 			this.removeUnavailableSelectedTools()
 		},
-		'formData.allowedTeams'() {
-			this.ensureWikiSelectionValid()
+		'formData.allowedTeams': {
+			deep: true,
+			handler() {
+				this.ensureWikiSelectionValid()
+			},
 		},
 	},
 	mounted() {
@@ -996,7 +1001,7 @@ export default {
 		this.loadWikiLocations()
 		this.loadAvailableTools()
 	},
-	beforeDestroy() {
+	beforeUnmount() {
 		this.wikiLocationsRequestId++
 		this.botToolsRequestId++
 		this.ragSourcesRequestId++
@@ -1316,7 +1321,7 @@ export default {
 			const selectedKeys = selectedTools.map((toolKey) => String(toolKey))
 			Object.keys(this.toolConfigs).forEach((key) => {
 				if (!selectedKeys.includes(key)) {
-					this.$delete(this.toolConfigs, key)
+					delete this.toolConfigs[key]
 				}
 			})
 		},
@@ -1489,7 +1494,7 @@ export default {
 			if (!this.isEditing || !source || !source.id) {
 				return
 			}
-			this.$set(this.rag.removing, source.id, true)
+			this.rag.removing[source.id] = true
 			try {
 				await axios.delete(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources/${source.id}`))
 				showSuccess(t('educai', 'Source removed'))
@@ -1498,14 +1503,14 @@ export default {
 				console.error('Failed to remove source', error)
 				showError(getApiErrorMessage(error, t('educai', 'Failed to remove source')))
 			} finally {
-				this.$delete(this.rag.removing, source.id)
+				delete this.rag.removing[source.id]
 			}
 		},
 		async reindexSource(source) {
 			if (!this.isEditing || !source || !source.id) {
 				return
 			}
-			this.$set(this.rag.reindexing, source.id, true)
+			this.rag.reindexing[source.id] = true
 			try {
 				await axios.post(generateUrl(`/apps/educai/api/v1/bots/${this.bot.id}/sources/${source.id}/reindex`))
 				showSuccess(t('educai', 'Reindex queued'))
@@ -1514,7 +1519,7 @@ export default {
 				console.error('Failed to reindex source', error)
 				showError(getApiErrorMessage(error, t('educai', 'Failed to reindex source')))
 			} finally {
-				this.$delete(this.rag.reindexing, source.id)
+				delete this.rag.reindexing[source.id]
 			}
 		},
 		closeUrlModal() {
@@ -1801,16 +1806,16 @@ export default {
 			if (enabled) {
 				// Preserve existing "next" if present (best effort)
 				const next = Array.isArray(question.answers) && question.answers[0] ? question.answers[0].next : null
-				this.$set(question, 'answers', [
+				question.answers = [
 					{ id: 'text', text: '', type: 'free_text', next: next || null },
-				])
+				]
 				return
 			}
 			// Switch back to default fixed answers
-			this.$set(question, 'answers', [
+			question.answers = [
 				{ id: 'a', text: '', next: null },
 				{ id: 'b', text: '', next: null },
-			])
+			]
 		},
 		getAvailableNextQuestions(currentId) {
 			// Return all questions except the current one (to prevent self-loops)

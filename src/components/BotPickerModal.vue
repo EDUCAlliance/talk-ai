@@ -11,7 +11,7 @@
 						<span class="mention-badge">{{ formatMention(bot.mention_name) }}</span>
 					</div>
 				</div>
-				<NcButton type="tertiary" @click="$emit('close')">
+				<NcButton variant="tertiary" @click="$emit('close')">
 					<template #icon>
 						<IconClose :size="20" />
 					</template>
@@ -31,7 +31,7 @@
 					<div class="meta-item">
 						<span class="meta-label">{{ t('educai', 'Visibility') }}</span>
 						<NcChip
-							:type="visibilityChipType"
+							:variant="visibilityChipType"
 							:text="visibilityLabel"
 							no-close />
 					</div>
@@ -56,7 +56,7 @@
 							<span class="tool-name">{{ tool.name }}</span>
 							<NcChip
 								v-if="tool.is_builtin"
-								type="tertiary"
+								variant="tertiary"
 								:text="t('educai', 'Built-in')"
 								no-close />
 						</li>
@@ -80,12 +80,12 @@
 			</div>
 
 			<div class="modal-footer">
-				<NcButton type="secondary" @click="$emit('close')">
+				<NcButton variant="secondary" @click="$emit('close')">
 					{{ t('educai', 'Cancel') }}
 				</NcButton>
 				<NcButton
 					v-if="canUseBot"
-					type="primary"
+					variant="primary"
 					:disabled="enabling"
 					@click="handleUseBot">
 					<template v-if="enabling" #icon>
@@ -106,10 +106,10 @@ import { getApiErrorMessage } from '../utils/apiError.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 
-import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
-import NcChip from '@nextcloud/vue/dist/Components/NcChip.js'
-import NcNoteCard from '@nextcloud/vue/dist/Components/NcNoteCard.js'
-import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcChip from '@nextcloud/vue/components/NcChip'
+import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
+import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import IconRobot from 'vue-material-design-icons/Robot.vue'
 import IconClose from 'vue-material-design-icons/Close.vue'
 import IconBookOpenVariant from 'vue-material-design-icons/BookOpenVariant.vue'

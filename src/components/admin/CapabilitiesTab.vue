@@ -9,13 +9,13 @@
 				<span class="ta-chip" :class="service.configured ? 'ta-chip--ok' : ''">{{ service.configured ? t('educai', 'Active') : t('educai', 'Not set up') }}</span>
 			</template>
 			<ServiceSource :name="`${service.id}-source`"
-				:value="admin.serviceModes[service.id]"
+				:model-value="admin.serviceModes[service.id]"
 				:legend="t('educai', 'Provider')"
 				:inherit-title="t('educai', 'Like the primary provider')"
 				:inherit-detail="service.inheritDetail"
 				:custom-title="t('educai', 'Own endpoint')"
 				:custom-detail="service.customDetail"
-				@input="admin.setServiceMode(service.id, $event)" />
+				@update:model-value="admin.setServiceMode(service.id, $event)" />
 			<p v-if="admin.serviceModes[service.id] === 'inherit' && admin.clearCredentials.includes(service.keyKey)" class="ta-note ta-note--warn" role="status">
 				{{ t('educai', 'The separate key will be removed when saving.') }}
 			</p>
@@ -38,13 +38,13 @@
 					<SecretField :id="`${service.id}-key`"
 						:name="`educai-${service.id}-key`"
 						:label="service.keyLabel"
-						:value="admin.settings[service.keyKey]"
+						:model-value="admin.settings[service.keyKey]"
 						:stored="admin.storedSecrets[service.keyKey]"
 						removable
 						:removing="admin.clearCredentials.includes(service.keyKey)"
 						:reset-key="admin.secretResetKey"
 						placeholder="sk-..."
-						@input="admin.setSecret(service.keyKey, $event)"
+						@update:model-value="admin.setSecret(service.keyKey, $event)"
 						@remove="admin.setSecretRemoval(service.keyKey, $event)" />
 				</div>
 			</div>

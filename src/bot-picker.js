@@ -8,12 +8,10 @@
  * If not in Talk, the picker simply won't be registered, making it invisible.
  */
 
-import { registerCustomPickerElement, NcCustomPickerRenderResult } from '@nextcloud/vue/dist/Components/NcRichText.js'
-import Vue from 'vue'
+import { registerCustomPickerElement, NcCustomPickerRenderResult } from '@nextcloud/vue/functions/reference'
+import { createApp, markRaw } from 'vue'
 import BotPickerElement from './components/BotPickerElement.vue'
 import { installL10n } from './l10n.js'
-
-installL10n(Vue)
 
 /**
  * Detect if we're currently in Nextcloud Talk context.
@@ -102,20 +100,21 @@ function registerBotPicker() {
 				const roomToken = extractRoomToken()
 				console.debug('[EducAI] Bot picker: Creating picker element', { providerId, accessible, roomToken })
 
-				const Element = Vue.extend(BotPickerElement)
-				const vueElement = new Element({
-					propsData: {
-						providerId,
-						accessible,
-						roomToken,
-					},
-				}).$mount(el)
-				return new NcCustomPickerRenderResult(vueElement.$el, vueElement)
+				const app = createApp(BotPickerElement, {
+					providerId,
+					accessible,
+					roomToken,
+				})
+				installL10n(app)
+				app.mount(el)
+				// The host listens for bubbling DOM events, not Vue instance events.
+				// Keep the application opaque when the host stores this result reactively.
+				return new NcCustomPickerRenderResult(el, markRaw(app))
 			},
 			(el, renderResult) => {
 				// Cleanup when picker is closed
 				console.debug('[EducAI] Bot picker: Destroying picker element')
-				renderResult.object.$destroy()
+				renderResult.object.unmount()
 			},
 		)
 		console.debug('[EducAI] Bot picker: Successfully registered')

@@ -25,6 +25,8 @@ export default {
 		values: { type: Object, required: true },
 		placeholders: { type: Object, default: () => ({}) },
 	},
+	emits: ['update'],
+
 	computed: {
 		windows() {
 			return RATE_LIMIT_WINDOWS

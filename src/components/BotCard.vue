@@ -75,6 +75,8 @@ export default {
 			}),
 		},
 	},
+	emits: ['delete', 'edit', 'submit'],
+
 	computed: {
 		truncatedPrompt() {
 			const prompt = this.bot.system_prompt || ''

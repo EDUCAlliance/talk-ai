@@ -42,12 +42,12 @@
 				class="ta-input ta-input--mono"
 				:type="revealed ? 'text' : 'password'"
 				:name="name || id"
-				:value="value"
+				:value="modelValue"
 				:placeholder="placeholder"
 				:disabled="disabled"
 				autocomplete="new-password"
 				spellcheck="false"
-				@input="$emit('input', $event.target.value)">
+				@input="$emit('update:modelValue', $event.target.value)">
 			<button v-if="generate"
 				type="button"
 				class="ta-btn"
@@ -55,7 +55,7 @@
 				@click="generateValue">
 				{{ t('educai', 'Generate') }}
 			</button>
-			<button v-if="generate && value"
+			<button v-if="generate && modelValue"
 				type="button"
 				class="ta-btn ta-btn--ghost"
 				:aria-pressed="String(revealed)"
@@ -82,7 +82,7 @@ export default {
 		id: { type: String, required: true },
 		name: { type: String, default: '' },
 		label: { type: String, required: true },
-		value: { type: String, default: '' },
+		modelValue: { type: String, default: '' },
 		stored: { type: Boolean, default: false },
 		removable: { type: Boolean, default: false },
 		removing: { type: Boolean, default: false },
@@ -91,12 +91,14 @@ export default {
 		generate: { type: Boolean, default: false },
 		resetKey: { type: Number, default: 0 },
 	},
+	emits: ['remove', 'update:modelValue'],
+
 	data() {
 		return { editing: false, revealed: false }
 	},
 	computed: {
 		showStored() {
-			return (this.stored || this.removing) && !this.editing && !this.value
+			return (this.stored || this.removing) && !this.editing && !this.modelValue
 		},
 	},
 	watch: {
@@ -114,12 +116,12 @@ export default {
 		cancelEditing() {
 			this.editing = false
 			this.revealed = false
-			this.$emit('input', '')
+			this.$emit('update:modelValue', '')
 		},
 		generateValue() {
 			this.editing = true
 			this.revealed = true
-			this.$emit('input', generateSecret())
+			this.$emit('update:modelValue', generateSecret())
 		},
 	},
 }

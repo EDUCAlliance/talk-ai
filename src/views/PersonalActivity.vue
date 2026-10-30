@@ -285,7 +285,7 @@ export default {
 		this.loadTraces()
 	},
 
-	beforeDestroy() {
+	beforeUnmount() {
 		this.tracesRequestId++
 		this.detailRequestId++
 	},

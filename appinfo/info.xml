@@ -33,7 +33,7 @@ Funded by the European Union. Views and opinions expressed are however those of 
 	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/create-bot.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/EDUCAlliance/talk-ai/main/docs/screenshots/admin-settings.png</screenshot>
 	<dependencies>
-		<nextcloud min-version="30" max-version="35"/>
+		<nextcloud min-version="32" max-version="35"/>
 	</dependencies>
 	<navigations>
 		<navigation>

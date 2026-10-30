@@ -145,6 +145,8 @@ export default {
 			required: true,
 		},
 	},
+	emits: ['close'],
+
 	data() {
 		return {
 			APP_DISPLAY_NAME,

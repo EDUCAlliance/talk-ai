@@ -13,7 +13,7 @@
 					{{ description }}
 				</p>
 			</div>
-			<div v-if="$scopedSlots.actions" class="ta-section__actions">
+			<div v-if="$slots.actions" class="ta-section__actions">
 				<slot name="actions" />
 			</div>
 		</div>
