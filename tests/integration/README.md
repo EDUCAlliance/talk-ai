@@ -31,6 +31,44 @@ redirect and chunked-SSE behavior. SSE checks preserve stream resources and
 payloads; they do not claim the underlying Nextcloud handler delivers network
 chunks incrementally. Output contains only runtime versions and check results.
 
+## OpenAPI tool transport
+
+`openapi-transport-smoke.php` drives the API-connection transport through the
+real Nextcloud `ClientService`, DNS pinning, remote-host validation and
+Guzzle/cURL against the synthetic loopback API `openapi-http-fixture.php`. No
+installation, DB or credentials are needed (the bearer token is synthetic).
+Verified on Nextcloud 30, 31 and 32:
+
+```sh
+composer install --no-scripts --no-interaction
+composer bin phpunit install --no-interaction
+docker run --rm --network none --add-host api.rebind.example:127.0.0.1 \
+  --mount "type=bind,src=$PWD,dst=/app,readonly" --workdir /app \
+  --entrypoint php nextcloud:32-apache tests/integration/openapi-transport-smoke.php
+```
+
+The `--add-host` entry is required: the container's own resolver maps the test
+name to the fixture, while the runner's overridden `DnsPinMiddleware::dnsGetRecord()`
+answers what Nextcloud sees. That proves both halves of the rebinding protection
+on the real connection path: a loopback answer is refused before any connection,
+and a public answer is pinned via `CURLOPT_RESOLVE`, so the system resolver's
+loopback entry is never used. Both checks require that the fixture logs no
+connection at all.
+
+Further checks: loopback bases need the test-target flag; exact path/query
+encoding (including `%2F` inside one path segment), bearer header, JSON `Accept`
+and identity encoding; vendor JSON types; no request outside the approved base;
+redirects reported, not followed; 401/429/5xx classification without echoing
+bodies; non-JSON, invalid, too deep and compressed responses; credential-free
+document fetches; timeouts. Refusals from status or headers (error status, wrong
+content type, declared oversize) must return before the fixture's delayed body,
+and a streamed oversize body must abort mid-transfer. Nextcloud's synchronous
+cURL handler downloads the whole body even in stream mode, so these limits are
+enforced by `on_headers` and `CURLOPT_MAXFILESIZE`; running the smoke against a
+transport without them fails those four checks. cURL before 8.4 enforces the size
+limit only for declared lengths; the app's bounded read and the request timeout
+still apply. Output contains only versions and check results.
+
 ## Application integration
 
 `nextcloud-smoke.php` exercises real Nextcloud DI, app services, SQL mappers,

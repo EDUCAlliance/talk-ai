@@ -9,6 +9,7 @@ use OCA\EducAI\Service\IdentityHttpClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
 use OCP\Http\Client\LocalServerException;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -103,6 +104,27 @@ class ApiHttpTransport {
 			'http_errors' => false,
 			'stream' => true,
 			'nextcloud' => ['allow_local_address' => $this->networkPolicy->allowsTestTargets()],
+			// Nextcloud's synchronous cURL handler downloads the whole body even
+			// with "stream", so refusals must abort the transfer inside cURL.
+			'on_headers' => static function (ResponseInterface $response) use ($maxBytes, $requireJson): void {
+				$failure = self::headerFailure(
+					$response->getStatusCode(),
+					$response->getHeaderLine('Retry-After'),
+					$response->getHeaderLine('Content-Type'),
+					$response->getHeaderLine('Content-Length'),
+					$maxBytes,
+					$requireJson,
+				);
+				if ($failure !== null) {
+					throw $failure;
+				}
+			},
+			// Nextcloud merges "curl" shallowly; keep its HTTP/2 default. cURL
+			// enforces the size limit during the transfer from version 8.4 on.
+			'curl' => [
+				CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
+				CURLOPT_MAXFILESIZE => $maxBytes,
+			],
 		];
 
 		try {
@@ -111,19 +133,52 @@ class ApiHttpTransport {
 			$this->log('response_compressed', $logContext, $start);
 			throw new ApiExecutionException('response_compressed', 'The server sent a compressed response, which is refused.', [], true);
 		} catch (\Throwable $e) {
+			$curlError = null;
 			for ($cause = $e; $cause !== null; $cause = $cause->getPrevious()) {
+				if ($cause instanceof ApiExecutionException) {
+					$this->log($cause->getErrorCode(), $logContext + array_intersect_key($cause->getDetails(), ['http_status' => true]), $start);
+					throw $cause;
+				}
 				if ($cause instanceof LocalServerException) {
 					$this->log('target_not_allowed', $logContext, $start);
 					throw new ApiExecutionException('target_not_allowed', 'The address is not allowed by the server network policy.');
 				}
+				$curlError ??= self::curlError($cause);
 			}
-			$timedOut = str_contains($e->getMessage(), 'cURL error 28') || stripos($e->getMessage(), 'timed out') !== false;
+			if ($curlError === CURLE_FILESIZE_EXCEEDED) {
+				$this->log('response_too_large', $logContext, $start);
+				throw self::tooLarge($maxBytes);
+			}
+			$timedOut = $curlError === CURLE_OPERATION_TIMEDOUT || stripos($e->getMessage(), 'timed out') !== false;
 			$code = $timedOut ? 'timeout' : 'transport_error';
 			$this->log($code, $logContext + ['exception_class' => get_class($e)], $start);
 			throw new ApiExecutionException($code, $timedOut ? 'The server did not answer in time.' : 'The server could not be reached.', [], true);
 		}
 
 		$status = $response->getStatusCode();
+		$failure = self::headerFailure(
+			$status,
+			$response->getHeader('Retry-After'),
+			$response->getHeader('Content-Type'),
+			$response->getHeader('Content-Length'),
+			$maxBytes,
+			$requireJson,
+		);
+		$body = $failure === null ? self::read($response->getBody(), $maxBytes) : null;
+		if ($body === null) {
+			self::close($response);
+			$failure ??= self::tooLarge($maxBytes);
+			$this->log($failure->getErrorCode(), $logContext + ['http_status' => $status], $start);
+			throw $failure;
+		}
+		return [$status, $body];
+	}
+
+	/**
+	 * Decides from the status line and headers alone whether a response is
+	 * refused, so that the body of a refused response is never transferred.
+	 */
+	private static function headerFailure(int $status, string $retryAfter, string $contentType, string $contentLength, int $maxBytes, bool $requireJson): ?ApiExecutionException {
 		$failure = match (true) {
 			$status >= 300 && $status < 400 => ['redirect_blocked', 'The server answered with a redirect, which is not followed.'],
 			$status === 401 || $status === 403 => ['auth_rejected', 'The server rejected the configured authentication.'],
@@ -134,31 +189,35 @@ class ApiHttpTransport {
 			default => null,
 		};
 		if ($failure !== null) {
-			self::close($response);
 			$details = ['http_status' => $status];
-			$retryAfter = trim($response->getHeader('Retry-After'));
+			$retryAfter = trim($retryAfter);
 			if ($status === 429 && preg_match('/^[0-9]{1,6}$/D', $retryAfter) === 1) {
 				$details['retry_after_seconds'] = (int)$retryAfter;
 			}
-			$this->log($failure[0], $logContext + ['http_status' => $status], $start);
-			throw new ApiExecutionException($failure[0], $failure[1], $details, true);
+			return new ApiExecutionException($failure[0], $failure[1], $details, true);
 		}
+		if ($requireJson && preg_match(self::JSON_TYPE, $contentType) !== 1) {
+			return new ApiExecutionException('response_not_json', 'The server did not answer with JSON.', ['http_status' => $status], true);
+		}
+		$contentLength = trim($contentLength);
+		if (preg_match('/^[0-9]{1,15}$/D', $contentLength) === 1 && (int)$contentLength > $maxBytes) {
+			return self::tooLarge($maxBytes);
+		}
+		return null;
+	}
 
-		if ($requireJson && preg_match(self::JSON_TYPE, $response->getHeader('Content-Type')) !== 1) {
-			self::close($response);
-			$this->log('response_not_json', $logContext + ['http_status' => $status], $start);
-			throw new ApiExecutionException('response_not_json', 'The server did not answer with JSON.', ['http_status' => $status], true);
+	private static function tooLarge(int $maxBytes): ApiExecutionException {
+		return new ApiExecutionException('response_too_large', 'The response is larger than allowed.', ['limit_bytes' => $maxBytes], true);
+	}
+
+	private static function curlError(\Throwable $exception): ?int {
+		if (method_exists($exception, 'getHandlerContext')) {
+			$errno = $exception->getHandlerContext()['errno'] ?? null;
+			if (is_int($errno)) {
+				return $errno;
+			}
 		}
-		$declared = trim($response->getHeader('Content-Length'));
-		$body = preg_match('/^[0-9]{1,15}$/D', $declared) === 1 && (int)$declared > $maxBytes
-			? null
-			: self::read($response->getBody(), $maxBytes);
-		if ($body === null) {
-			self::close($response);
-			$this->log('response_too_large', $logContext, $start);
-			throw new ApiExecutionException('response_too_large', 'The response is larger than allowed.', ['limit_bytes' => $maxBytes], true);
-		}
-		return [$status, $body];
+		return preg_match('/\bcURL error (\d{1,4})\b/', $exception->getMessage(), $match) === 1 ? (int)$match[1] : null;
 	}
 
 	/**

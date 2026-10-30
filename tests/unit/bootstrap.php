@@ -22,6 +22,17 @@ interface LoggerInterface {
 PHP);
 }
 
+if (!interface_exists(\Psr\Http\Message\ResponseInterface::class)) {
+	eval(<<<'PHP'
+namespace Psr\Http\Message;
+
+interface ResponseInterface {
+	public function getStatusCode();
+	public function getHeaderLine(string $name);
+}
+PHP);
+}
+
 if (!class_exists(\GuzzleHttp\Cookie\CookieJar::class)) {
 	eval(<<<'PHP'
 namespace GuzzleHttp\Cookie;

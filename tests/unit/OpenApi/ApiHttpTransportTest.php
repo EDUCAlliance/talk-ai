@@ -9,6 +9,7 @@ require_once __DIR__ . '/Support/OpenApiTestDoubles.php';
 use OCA\EducAI\OpenApi\ApiExecutionException;
 use OCA\EducAI\OpenApi\ApiHttpTransport;
 use OCA\EducAI\OpenApi\ApiNetworkPolicy;
+use OCA\EducAI\OpenApi\OpenApiDocumentLoader;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\FakeResponse;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\RecordingClient;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\RecordingClientService;
@@ -17,6 +18,7 @@ use OCP\Http\Client\LocalServerException;
 use OCP\IConfig;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 
 final class ApiHttpTransportTest extends TestCase {
@@ -117,6 +119,70 @@ final class ApiHttpTransportTest extends TestCase {
 		$this->assertFailure('response_too_large', static fn (): IResponse => self::json('{}', 200, ['Content-Length' => (string)(ApiHttpTransport::MAX_RESPONSE_BYTES + 1)]));
 		$this->assertFailure('response_too_large', static fn (): IResponse => self::json('"' . str_repeat('a', ApiHttpTransport::MAX_RESPONSE_BYTES) . '"'));
 		$this->assertFailure('response_compressed', static fn (): IResponse => self::json('{}', 200, ['Content-Encoding' => 'gzip']));
+	}
+
+	/** @param array<string,string> $headers */
+	private function headers(int $status, array $headers): ResponseInterface {
+		$response = $this->createMock(ResponseInterface::class);
+		$response->method('getStatusCode')->willReturn($status);
+		$response->method('getHeaderLine')->willReturnCallback(static fn (string $name): string => array_change_key_case($headers)[strtolower($name)] ?? '');
+		return $response;
+	}
+
+	public function testRefusalsAbortTheTransferInsideCurl(): void {
+		[$transport, $client] = $this->transport(static fn (): IResponse => self::json('{}'));
+		$transport->getJson(self::BASE . '/courses', self::BASE, [], 5.0);
+		$options = $client->requests[0]['options'];
+
+		self::assertSame([
+			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
+			CURLOPT_MAXFILESIZE => ApiHttpTransport::MAX_RESPONSE_BYTES,
+			CURLOPT_ENCODING => 'identity',
+			CURLOPT_HTTP_CONTENT_DECODING => false,
+		], $options['curl']);
+		$onHeaders = $options['on_headers'];
+		$onHeaders($this->headers(200, ['Content-Type' => 'application/json', 'Content-Length' => (string)ApiHttpTransport::MAX_RESPONSE_BYTES]));
+		$refusals = [
+			'response_not_json' => $this->headers(200, ['Content-Type' => 'text/html']),
+			'response_too_large' => $this->headers(200, ['Content-Type' => 'application/json', 'Content-Length' => (string)(ApiHttpTransport::MAX_RESPONSE_BYTES + 1)]),
+			'upstream_error' => $this->headers(502, ['Content-Type' => 'text/html']),
+			'rate_limited' => $this->headers(429, ['Retry-After' => '9']),
+		];
+		foreach ($refusals as $code => $response) {
+			try {
+				$onHeaders($response);
+				self::fail('Expected ' . $code);
+			} catch (ApiExecutionException $e) {
+				self::assertSame($code, $e->getErrorCode());
+				self::assertTrue($e->wasRequestSent());
+			}
+		}
+		self::assertSame(9, $e->getDetails()['retry_after_seconds']);
+	}
+
+	public function testDocumentDownloadsUseTheDocumentLimitAndAcceptAnyType(): void {
+		[$transport, $client] = $this->transport(static fn (): IResponse => new FakeResponse(200, ['Content-Type' => 'text/yaml'], 'openapi: 3.0.3'), true);
+		$transport->fetchDocument('http://127.0.0.1/openapi.yaml');
+		$options = $client->requests[0]['options'];
+
+		self::assertSame(OpenApiDocumentLoader::MAX_BYTES, $options['curl'][CURLOPT_MAXFILESIZE]);
+		$options['on_headers']($this->headers(200, ['Content-Type' => 'text/yaml']));
+		$this->expectExceptionObject(new ApiExecutionException('response_too_large', 'The response is larger than allowed.'));
+		$options['on_headers']($this->headers(200, ['Content-Length' => (string)(OpenApiDocumentLoader::MAX_BYTES + 1)]));
+	}
+
+	public function testRefusalsRaisedInsideTheClientKeepTheirClassification(): void {
+		$wrapped = new ApiExecutionException('response_not_json', 'The server did not answer with JSON.', ['http_status' => 200], true);
+		$e = $this->assertFailure('response_not_json', static fn (): IResponse => throw new \RuntimeException('An error was encountered during the on_headers event', 0, $wrapped));
+		self::assertSame($wrapped, $e);
+		self::assertSame(['http_status' => 200], array_intersect_key($this->logs[0][2], ['http_status' => true]));
+
+		$this->assertFailure('response_too_large', static fn (): IResponse => throw new \RuntimeException('cURL error 63: Maximum file size exceeded (see https://curl.haxx.se/libcurl/c/libcurl-errors.html)'));
+		$this->assertFailure('response_too_large', static fn (): IResponse => throw new class('Transfer aborted') extends \RuntimeException {
+			public function getHandlerContext(): array {
+				return ['errno' => CURLE_FILESIZE_EXCEEDED];
+			}
+		});
 	}
 
 	public function testVendorJsonMediaTypesAreAccepted(): void {
