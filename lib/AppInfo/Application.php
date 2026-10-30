@@ -75,6 +75,7 @@ use OCA\EducAI\Service\WikiService;
 use OCA\EducAI\Service\WikiPathService;
 use OCA\EducAI\ToolProvider\CatalogueToolProviderListener;
 use OCA\EducAI\ToolProvider\CollectToolProvidersEvent;
+use OCA\EducAI\ToolProvider\OpenApiToolProviderListener;
 use OCA\EducAI\Webhook\TalkAttachmentNormalizer;
 use OCA\EducAI\Webhook\TalkHandler;
 use OCA\EducAI\Webhook\TalkMessageParser;
@@ -690,6 +691,7 @@ class Application extends App implements IBootstrap {
 
 		$context->registerReferenceProvider(BotReferenceProvider::class);
 		$context->registerEventListener(CollectToolProvidersEvent::class, CatalogueToolProviderListener::class);
+		$context->registerEventListener(CollectToolProvidersEvent::class, OpenApiToolProviderListener::class);
 
 		$context->registerEventListener(
 			RenderReferenceEvent::class,

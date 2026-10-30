@@ -6,6 +6,7 @@ Start with the root [README](../README.md) for the project overview.
 
 - [FEATURES.md](./FEATURES.md) — product surface and user-facing behavior
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — services, data model, and runtime flows
+- [adr/0001-openapi-connections.md](./adr/0001-openapi-connections.md) — data model and tool identity of OpenAPI connections
 
 ## Setup & Operations
 
