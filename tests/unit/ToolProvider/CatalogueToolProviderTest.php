@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Tests\Unit\ToolProvider;
 
+use OCA\EducAI\Service\AgentExecutor;
+use OCA\EducAI\Service\CanonicalLinkResolver;
 use OCA\EducAI\Service\CatalogueEmbeddingService;
+use OCA\EducAI\Service\CatalogueLinkService;
+use OCA\EducAI\Service\CatalogueReferenceLedger;
 use OCA\EducAI\Service\ToolExecutionPolicyService;
 use OCA\EducAI\ToolProvider\CatalogueToolProvider;
 use PHPUnit\Framework\TestCase;
@@ -60,5 +64,110 @@ class CatalogueToolProviderTest extends TestCase {
 		$this->assertTrue($past['isError']);
 		$this->assertSame('search_failed', $past['error']['code']);
 		$this->assertStringNotContainsString('No learning opportunities found', $past['content'][0]['text']);
+	}
+
+	/** @return array{0:CatalogueToolProvider,1:CatalogueReferenceLedger} */
+	private function linkedProvider(CatalogueEmbeddingService $embeddings, ?string $template = 'https://catalogue.educ.example/Opportunity/{id}'): array {
+		$resolver = CanonicalLinkResolver::fromConfig(null, $template, []);
+		$links = $this->createMock(CatalogueLinkService::class);
+		$links->method('resolve')->willReturnCallback(static fn (array $record): array => $resolver->resolve($record));
+		$ledger = new CatalogueReferenceLedger();
+		$ledger->begin();
+		return [new CatalogueToolProvider($embeddings, new ToolExecutionPolicyService(), $this->createMock(LoggerInterface::class), $links, $ledger), $ledger];
+	}
+
+	public function testAllCatalogueToolsShowTheSameCanonicalLinkAndSeparateApplicationLink(): void {
+		$record = [
+			'id' => 777,
+			'title' => 'AI Basics',
+			'summary' => 'Intro',
+			'permalink' => '/Opportunity/777',
+			'application_link' => 'https://apply.partner.example/777',
+		];
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('search')->willReturn(['courses' => [$record + ['_score' => 0.9]], 'total' => 1]);
+		$embeddings->method('searchPast')->willReturn(['courses' => [$record + ['_score' => 0.8]], 'total' => 1]);
+		$embeddings->method('getCourseFromEmbeddings')->willReturnCallback(static fn (int $id, bool $isPast): ?array => $id === 777 && !$isPast ? $record + ['is_past' => false] : null);
+		[$provider, $ledger] = $this->linkedProvider($embeddings);
+
+		$outputs = [
+			$provider->executeTool('catalogue_search', ['query' => 'ai'])['content'][0]['text'],
+			$provider->executeTool('catalogue_past_search', ['query' => 'ai'])['content'][0]['text'],
+			$provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777])['content'][0]['text'],
+		];
+
+		foreach ($outputs as $output) {
+			$this->assertStringContainsString('ID: 777', str_replace('**ID:** 777', 'ID: 777', $output));
+			$this->assertStringContainsString('🔗 Course page: https://catalogue.educ.example/Opportunity/777', $output);
+			$this->assertStringContainsString('Application link (external application form, not the course page): https://apply.partner.example/777', $output);
+			$this->assertStringContainsString('{{course:ID}}', $output);
+			$this->assertStringNotContainsString('](/Opportunity', $output);
+			$this->assertLessThanOrEqual(AgentExecutor::TOOL_OUTPUT_LIMIT, mb_strlen($output, 'UTF-8'));
+		}
+		$this->assertSame(['777'], array_map('strval', array_keys($ledger->records())));
+		$this->assertSame('https://catalogue.educ.example/Opportunity/777', $ledger->records()['777']['canonical_url']);
+	}
+
+	public function testMissingLinkConfigurationSaysCourseLinkIsUnavailable(): void {
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('search')->willReturn(['courses' => [['id' => 5, 'title' => 'X']], 'total' => 1]);
+		[$provider] = $this->linkedProvider($embeddings, null);
+
+		$text = $provider->executeTool('catalogue_search', ['query' => 'x'])['content'][0]['text'];
+
+		$this->assertStringContainsString('Course page: not available (no verified course link)', $text);
+	}
+
+	public function testSearchKeepsWholeEntriesWithinTheToolBudget(): void {
+		$courses = [];
+		for ($id = 1; $id <= 20; $id++) {
+			$courses[] = [
+				'id' => $id,
+				'title' => str_repeat('Long title ', 30),
+				'summary' => str_repeat('Summary text ', 40),
+				'application_link' => 'https://apply.partner.example/' . str_repeat('segment/', 40) . $id,
+				'discipline' => ['name' => str_repeat('Discipline ', 10)],
+			];
+		}
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('search')->willReturn(['courses' => $courses, 'total' => 25]);
+		[$provider, $ledger] = $this->linkedProvider($embeddings);
+
+		$text = $provider->executeTool('catalogue_search', ['query' => 'long', 'limit' => 20])['content'][0]['text'];
+
+		$this->assertLessThanOrEqual(AgentExecutor::TOOL_OUTPUT_LIMIT, mb_strlen($text, 'UTF-8'));
+		$this->assertStringContainsString('omitted to stay within the tool output limit', $text);
+		$shown = count($ledger->records());
+		$this->assertGreaterThan(0, $shown);
+		$this->assertLessThan(20, $shown);
+		$this->assertSame($shown, substr_count($text, '🔗 Course page: https://catalogue.educ.example/Opportunity/'));
+		$this->assertStringContainsString('Found ' . $shown . ' learning', $text);
+		$this->assertStringEndsWith('say so.', $text);
+	}
+
+	public function testDetailShortensLongSectionsButKeepsIdentityAndLinks(): void {
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('getCourseFromEmbeddings')->willReturn([
+			'id' => 9,
+			'title' => 'Big course',
+			'summary' => str_repeat('S', 1500),
+			'description' => str_repeat('D', 5000),
+			'prerequisites' => str_repeat('P', 3000),
+			'application_link' => 'https://apply.partner.example/9',
+			'is_past' => true,
+		]);
+		[$provider] = $this->linkedProvider($embeddings);
+
+		$text = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 9, 'is_past' => true])['content'][0]['text'];
+
+		$this->assertLessThanOrEqual(AgentExecutor::TOOL_OUTPUT_LIMIT, mb_strlen($text, 'UTF-8'));
+		$this->assertStringStartsWith("# Big course\n\n**Status:** ⏳ PAST/ARCHIVED\n**ID:** 9\n🔗 Course page: https://catalogue.educ.example/Opportunity/9\n", $text);
+		$this->assertStringContainsString('… [shortened]', $text);
+		$this->assertStringContainsString('section(s) omitted', $text);
+		$this->assertStringContainsString('{{course:ID}}', $text);
 	}
 }

@@ -175,3 +175,19 @@ test('endpoint hosts and generated secrets', () => {
 	assert.match(adminSettings.generateSecret(), /^[0-9a-f]{64}$/)
 	assert.notEqual(adminSettings.generateSecret(), adminSettings.generateSecret())
 })
+
+test('course link origins are compared as a normalized list', () => {
+	assert.deepEqual(adminSettings.parseOriginList(' https://a.example/ \n\nhttps://b.example,https://a.example'), ['https://a.example', 'https://b.example'])
+	assert.deepEqual(adminSettings.parseOriginList(['https://a.example', ' ']), ['https://a.example'])
+	const baseline = adminSettings.snapshotSettings({ catalogueLinkOrigins: 'https://a.example\nhttps://b.example', catalogueLinkField: '', catalogueLinkTemplate: '' })
+	assert.deepEqual(adminSettings.changedSettingKeys({ catalogueLinkOrigins: 'https://a.example/\nhttps://b.example\n', catalogueLinkField: '/permalink', catalogueLinkTemplate: '' }, [], baseline), [])
+	assert.deepEqual(adminSettings.changedSettingKeys({ catalogueLinkOrigins: 'https://a.example', catalogueLinkField: '', catalogueLinkTemplate: '' }, [], baseline), ['catalogueLinkOrigins'])
+	assert.deepEqual(adminSettings.changedLabels(['catalogueLinkTemplate', 'catalogueLinkOrigins']), ['Course links'])
+})
+
+test('course link template origin is derived only from absolute HTTPS templates', () => {
+	assert.equal(adminSettings.linkTemplateOrigin('https://catalogue.example.org/Opportunity/{id}'), 'https://catalogue.example.org')
+	assert.equal(adminSettings.linkTemplateOrigin('http://catalogue.example.org/{id}'), '')
+	assert.equal(adminSettings.linkTemplateOrigin('/Opportunity/{id}'), '')
+	assert.equal(adminSettings.CATALOGUE_LINK_PRESETS.educ.template, 'https://catalogue.educalliance.eu/Opportunity/{id}')
+})

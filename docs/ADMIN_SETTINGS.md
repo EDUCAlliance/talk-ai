@@ -29,6 +29,10 @@ The overview is based on saved settings only. Unsaved edits do not change it.
 
 Explicit tests of the model, Docling, image understanding, speech to text and the course catalogue are remembered on the server. The overview shows the last result together with whether it still matches the saved configuration. A test of unsaved values counts once exactly those values are saved. Only the success flag, time, duration, a short summary and the safe error text are stored, plus an HMAC of the tested configuration keyed with the instance secret. Keys and provider responses are never stored.
 
+## Course links
+
+The course catalogue section configures which web address bots use for a course: a link field in the record on accepted origins, otherwise a template with the record ID. Without configuration bots say that the course link is not available. See [course links from the catalogue](CATALOGUE_LINKS.md).
+
 ## Document conversion
 
 Enter the server address and, if the server requires it, a key. **Detect and test** looks for the Docling Serve or the AcademicCloud/EDUC-compatible API, chooses the authentication and proves the result with one small PDF conversion. Docling Serve wins if a server offers both. A successful detection fills in profile and authentication as unsaved changes; a failed one leaves the form unchanged. Both can still be set manually. See [Docling setup](DOCLING.md) for the detection steps.

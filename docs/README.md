@@ -19,6 +19,7 @@ Start with the root [README](../README.md) for the project overview.
 
 - [ONBOARDING.md](./ONBOARDING.md) — per-room onboarding and response modes
 - [RAG_TOOL_GUIDE.md](./RAG_TOOL_GUIDE.md) — document search tool
+- [CATALOGUE_LINKS.md](./CATALOGUE_LINKS.md) — verified course links from the catalogue
 - [SMART_PICKER_BOT_PROVIDER.md](./SMART_PICKER_BOT_PROVIDER.md) — "/" picker in Talk
 - [pseudo_streaming.md](./pseudo_streaming.md) — chunked replies in Talk
 

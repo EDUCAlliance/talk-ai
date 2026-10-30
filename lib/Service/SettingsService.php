@@ -774,6 +774,43 @@ class SettingsService {
 		];
 	}
 
+	/** @return array{link_field:string,link_template:?string,link_origins:list<string>} */
+	public function getCatalogueLinkConfig(): array {
+		$settings = $this->mapper->getSettings();
+		$template = $settings->getCatalogueLinkTemplate();
+		return [
+			'link_field' => $settings->getCatalogueLinkField() ?: CanonicalLinkResolver::DEFAULT_LINK_FIELD,
+			'link_template' => $template !== null && $template !== '' ? $template : null,
+			'link_origins' => $settings->getCatalogueLinkOriginsArray(),
+		];
+	}
+
+	/**
+	 * Validates and stores normalized course-link settings. Null leaves a value unchanged.
+	 *
+	 * Links are not part of the searchable text, so this never invalidates vectors.
+	 *
+	 * @param array<mixed>|null $origins
+	 * @throws \OCA\EducAI\Exception\CatalogueLinkConfigurationException
+	 */
+	public function updateCatalogueLinkConfig(?string $linkField, ?string $linkTemplate, ?array $origins): void {
+		if ($linkField === null && $linkTemplate === null && $origins === null) {
+			return;
+		}
+		$current = $this->getCatalogueLinkConfig();
+		$resolver = CanonicalLinkResolver::fromConfig(
+			$linkField ?? $current['link_field'],
+			$linkTemplate ?? $current['link_template'],
+			$origins ?? $current['link_origins'],
+		);
+		$settings = $this->mapper->getSettings();
+		$settings->setCatalogueLinkField($resolver->linkField());
+		$settings->setCatalogueLinkTemplate($resolver->template());
+		$settings->setCatalogueLinkOrigins($resolver->configuredOrigins() === [] ? null : json_encode($resolver->configuredOrigins(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+		$settings->setUpdatedAt(time());
+		$this->mapper->update($settings);
+	}
+
 	/**
 	 * Update catalogue index statistics
 	 */

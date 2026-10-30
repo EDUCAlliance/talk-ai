@@ -69,6 +69,7 @@ return [
 		['name' => 'settings#catalogueStatus', 'url' => '/api/v1/admin/catalogue/status', 'verb' => 'GET'],
 		['name' => 'settings#catalogueReindex', 'url' => '/api/v1/admin/catalogue/reindex', 'verb' => 'POST'],
 		['name' => 'tools#testCatalogue', 'url' => '/api/v1/admin/catalogue/test', 'verb' => 'POST'],
+		['name' => 'settings#catalogueLinkPreview', 'url' => '/api/v1/admin/catalogue/link-preview', 'verb' => 'POST'],
 		['name' => 'settings#reindexAllEmbeddings', 'url' => '/api/v1/admin/embeddings/reindex-all', 'verb' => 'POST'],
 
 		// Provider health-check routes

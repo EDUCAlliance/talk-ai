@@ -26,6 +26,8 @@ use Psr\Log\LoggerInterface;
  * }
  */
 class AgentExecutor {
+	/** Characters of one tool result the model receives; providers fit their output to it. */
+	public const TOOL_OUTPUT_LIMIT = 4000;
 	private const DEFAULT_MAX_TURNS = 12;
 	private const HARD_MAX_TURNS = 16;
 	private const DEFAULT_MAX_TOOL_CALLS = 24;
@@ -1347,14 +1349,14 @@ class AgentExecutor {
 			if ($wikiPage) {
 				return $this->sanitizeWikiPageOutput($textContent);
 			}
-			return $this->truncateUtf8($textContent, 4000);
+			return $this->truncateUtf8($textContent, self::TOOL_OUTPUT_LIMIT);
 		}
 
 		$encoded = json_encode($result, JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE);
 		if ($encoded === false) {
 			return 'Received invalid tool response';
 		}
-		return $this->truncateUtf8($encoded, 4000);
+		return $this->truncateUtf8($encoded, self::TOOL_OUTPUT_LIMIT);
 	}
 
 	/** Keep whole search entries and pagination metadata within the model's budget. */
@@ -1384,7 +1386,7 @@ class AgentExecutor {
 		};
 		$minimum = min(1, count($entries));
 		$best = $encode($minimum);
-		if (mb_strlen($best, 'UTF-8') > 4000) {
+		if (mb_strlen($best, 'UTF-8') > self::TOOL_OUTPUT_LIMIT) {
 			throw new \RuntimeException('Wiki search metadata or entry exceeds the tool output limit');
 		}
 		$low = $minimum;
@@ -1392,7 +1394,7 @@ class AgentExecutor {
 		while ($low <= $high) {
 			$count = intdiv($low + $high, 2);
 			$candidate = $encode($count);
-			if (mb_strlen($candidate, 'UTF-8') <= 4000) {
+			if (mb_strlen($candidate, 'UTF-8') <= self::TOOL_OUTPUT_LIMIT) {
 				$best = $candidate;
 				$low = $count + 1;
 			} else {
@@ -1404,7 +1406,7 @@ class AgentExecutor {
 
 	/** Keep pagination offsets aligned with the content actually sent to the model. */
 	private function sanitizeWikiPageOutput(string $text): string {
-		if (mb_strlen($text, 'UTF-8') <= 4000) {
+		if (mb_strlen($text, 'UTF-8') <= self::TOOL_OUTPUT_LIMIT) {
 			return $text;
 		}
 		$page = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
@@ -1426,7 +1428,7 @@ class AgentExecutor {
 		// makes no progress, or cut serialized JSON and silently skip unseen text.
 		$minimum = min(1, $available);
 		$best = $encode($minimum);
-		if (mb_strlen($best, 'UTF-8') > 4000) {
+		if (mb_strlen($best, 'UTF-8') > self::TOOL_OUTPUT_LIMIT) {
 			throw new \RuntimeException('Wiki page metadata exceeds the tool output limit');
 		}
 		$low = $minimum;
@@ -1434,7 +1436,7 @@ class AgentExecutor {
 		while ($low <= $high) {
 			$length = intdiv($low + $high, 2);
 			$candidate = $encode($length);
-			if (mb_strlen($candidate, 'UTF-8') <= 4000) {
+			if (mb_strlen($candidate, 'UTF-8') <= self::TOOL_OUTPUT_LIMIT) {
 				$best = $candidate;
 				$low = $length + 1;
 			} else {

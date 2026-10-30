@@ -616,6 +616,7 @@ namespace OCP\DB;
 
 class Types {
 	public const INTEGER = 'integer';
+	public const STRING = 'string';
 	public const TEXT = 'text';
 }
 PHP);

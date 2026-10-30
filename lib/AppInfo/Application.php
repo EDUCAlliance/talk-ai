@@ -557,6 +557,7 @@ class Application extends App implements IBootstrap {
 				$c->get(WikiPathService::class),
 				$c->get(\OCP\L10N\IFactory::class),
 				$c->get(LLMClient::class),
+				$c->get(\OCA\EducAI\Service\CatalogueLinkGuard::class),
 			);
 		});
 

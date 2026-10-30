@@ -9,10 +9,13 @@ use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Exception\CatalogueLinkConfigurationException;
 use OCA\EducAI\Exception\ModelTestException;
 use OCA\EducAI\Exception\ProviderContractException;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\CanonicalLinkResolver;
+use OCA\EducAI\Service\CatalogueEmbeddingService;
 use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\EmbeddingAdminService;
 use OCA\EducAI\Service\LLMClient;
@@ -70,6 +73,7 @@ class SettingsController extends Controller {
 		private EmbeddingAdminService $embeddingAdmin,
 		private ?ModelReferenceMigrationService $modelReferenceMigration = null,
 		private ?ConnectionCheckStore $connectionChecks = null,
+		private ?CatalogueEmbeddingService $catalogueEmbeddings = null,
 	) {
 		parent::__construct($appName, $request);
 		$this->settingsService = $settingsService;
@@ -160,7 +164,17 @@ class SettingsController extends Controller {
 		mixed $maxOutputTokens = null,
 		mixed $modelOutputTokenLimits = null,
 		?array $clearCredentials = null,
+		?string $catalogueLinkField = null,
+		?string $catalogueLinkTemplate = null,
+		?array $catalogueLinkOrigins = null,
 	): DataResponse {
+		if ($catalogueLinkField !== null || $catalogueLinkTemplate !== null || $catalogueLinkOrigins !== null) {
+			try {
+				$this->linkResolverForInput($catalogueLinkField, $catalogueLinkTemplate, $catalogueLinkOrigins);
+			} catch (CatalogueLinkConfigurationException $e) {
+				return $this->catalogueLinkError($e);
+			}
+		}
 		try {
 			if (trim($defaultModel) === '') {
 				return $this->errorResponse('default_model_required', $this->l10n->t('Choose a default model before saving.'), 400);
@@ -247,6 +261,10 @@ class SettingsController extends Controller {
 				$modelOutputTokenLimits,
 				$clearCredentials,
 			);
+			if ($catalogueLinkField !== null || $catalogueLinkTemplate !== null || $catalogueLinkOrigins !== null) {
+				$this->settingsService->updateCatalogueLinkConfig($catalogueLinkField, $catalogueLinkTemplate, $catalogueLinkOrigins);
+				$settings = $this->settingsService->getSettings();
+			}
 
 			$afterRateLimitConfig = $this->extractRateLimitConfig($settings);
 			if ($beforeRateLimitConfig !== $afterRateLimitConfig) {
@@ -1086,6 +1104,79 @@ class SettingsController extends Controller {
 			$this->logger->error('Failed to queue Catalogue reindex', ['exception' => $e]);
 			return $this->errorResponse('catalogue_reindex_failed', $this->l10n->t('Failed to queue catalogue reindex'), 500);
 		}
+	}
+
+	/**
+	 * @AdminRequired
+	 * Resolve one record's course link with unsaved settings, using only the local index.
+	 *
+	 * @param array<mixed>|null $linkOrigins
+	 */
+	public function catalogueLinkPreview(string $id, ?string $linkField = null, ?string $linkTemplate = null, ?array $linkOrigins = null): DataResponse {
+		try {
+			$resolver = $this->linkResolverForInput($linkField, $linkTemplate, $linkOrigins);
+		} catch (CatalogueLinkConfigurationException $e) {
+			return $this->catalogueLinkError($e);
+		}
+		$recordId = CanonicalLinkResolver::normalizeId(trim($id));
+		if ($recordId === null) {
+			return $this->errorResponse('catalogue_link_preview_id', $this->l10n->t('Enter the ID of a catalogue record.'), 400);
+		}
+
+		$record = null;
+		try {
+			if ($this->catalogueEmbeddings !== null && ctype_digit($recordId) && strlen($recordId) <= 18) {
+				$record = $this->catalogueEmbeddings->getCourseFromEmbeddings((int)$recordId, false)
+					?? $this->catalogueEmbeddings->getCourseFromEmbeddings((int)$recordId, true);
+			}
+		} catch (Exception $e) {
+			$this->logger->warning('Catalogue link preview lookup failed', ['exception' => $e]);
+		}
+		$foundInIndex = is_array($record);
+		$resolved = $resolver->resolve($foundInIndex ? $record : ['id' => ctype_digit($recordId) && strlen($recordId) <= 18 ? (int)$recordId : $recordId]);
+
+		return new DataResponse([
+			'id' => $recordId,
+			'found_in_index' => $foundInIndex,
+			'title' => $foundInIndex && is_string($record['title'] ?? null) ? $record['title'] : null,
+			'is_past' => $foundInIndex && (bool)($record['is_past'] ?? false),
+			'canonical_url' => $resolved['canonical_url'],
+			'source' => $resolved['source'],
+			'application_url' => $resolved['application_url'],
+			'issues' => $resolved['issues'],
+			'accepted_origins' => $resolver->acceptedOrigins(),
+			'template_origin' => $resolver->templateOrigin(),
+		]);
+	}
+
+	/**
+	 * @param array<mixed>|null $origins
+	 * @throws CatalogueLinkConfigurationException
+	 */
+	private function linkResolverForInput(?string $field, ?string $template, ?array $origins): CanonicalLinkResolver {
+		$current = $this->settingsService->getCatalogueLinkConfig();
+		return CanonicalLinkResolver::fromConfig(
+			$field ?? $current['link_field'],
+			$template ?? $current['link_template'],
+			$origins ?? $current['link_origins'],
+		);
+	}
+
+	private function catalogueLinkError(CatalogueLinkConfigurationException $e): DataResponse {
+		$message = match ($e->getReason()) {
+			'invalid_pointer' => $this->l10n->t('The link field must be a JSON pointer such as /permalink.'),
+			'invalid_origin', 'too_many_origins' => $this->l10n->t('Accepted origins must be HTTPS origins without a path, for example https://catalogue.example.org (at most 20).'),
+			'template_scheme' => $this->l10n->t('The link template must start with https://.'),
+			'template_placeholder' => $this->l10n->t('The link template must contain {id} exactly once, in the path or in a query value, and no other placeholder.'),
+			'template_authority' => $this->l10n->t('The {id} placeholder must not be part of the host name.'),
+			default => $this->l10n->t('The link template is not a valid absolute HTTPS address.'),
+		};
+		return new DataResponse([
+			'error' => $message,
+			'errorCode' => 'catalogue_link_invalid',
+			'field' => $e->getField(),
+			'reason' => $e->getReason(),
+		], 400);
 	}
 
 	/**

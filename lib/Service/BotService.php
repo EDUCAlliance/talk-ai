@@ -69,6 +69,7 @@ class BotService {
 	private WikiPathService $wikiPathService;
 	private ?IFactory $l10nFactory;
 	private ?LLMClient $llmClient;
+	private ?CatalogueLinkGuard $catalogueLinkGuard;
 
 	public function __construct(
 		BotMapper $botMapper,
@@ -98,9 +99,11 @@ class BotService {
 		?WikiPathService $wikiPathService = null,
 		?IFactory $l10nFactory = null,
 		?LLMClient $llmClient = null,
+		?CatalogueLinkGuard $catalogueLinkGuard = null,
 	) {
 		$this->l10nFactory = $l10nFactory;
 		$this->llmClient = $llmClient;
+		$this->catalogueLinkGuard = $catalogueLinkGuard;
 		$this->botMapper = $botMapper;
 		$this->conversationMapper = $conversationMapper;
 		$this->chatRoomMapper = $chatRoomMapper;
@@ -1130,6 +1133,7 @@ class BotService {
 			]);
 
 			try {
+				$this->catalogueLinkGuard?->beginRun();
 				$this->toolProviderRegistry->setInvocationContext([
 					'bot_id' => $effectiveBot->getId(),
 					'room_token' => $roomToken,
@@ -1157,6 +1161,7 @@ class BotService {
 				);
 			} finally {
 				$this->toolProviderRegistry->setInvocationContext(null);
+				$this->catalogueLinkGuard?->endRun();
 			}
 
 			$agentStatus = $agentResult['status'] ?? null;
@@ -1227,6 +1232,14 @@ class BotService {
 			if (trim($assistantMessage) === '') {
 				$discardAssistantBuffer();
 				throw new Exception('Agent execution completed without assistant content');
+			}
+
+			$guardedMessage = $this->enforceCatalogueLinks($assistantMessage, $userId, $traceRunId);
+			if ($guardedMessage !== $assistantMessage) {
+				// Assistant text is only buffered so far; publish the checked answer once.
+				$assistantMessage = $guardedMessage;
+				$partialBuffer = $assistantMessage;
+				$currentAssistantTurnText = $assistantMessage;
 			}
 
 			if ($onProgress !== null) {
@@ -1334,6 +1347,31 @@ class BotService {
 				? self::CONTEXT_LIMIT_MESSAGE
 				: self::AI_SERVICE_UNAVAILABLE_MESSAGE;
 		}
+	}
+
+	private function enforceCatalogueLinks(string $assistantMessage, string $userId, ?int $traceRunId): string {
+		if ($this->catalogueLinkGuard === null || $this->l10nFactory === null) {
+			return $assistantMessage;
+		}
+		$localUserId = str_starts_with($userId, 'users/') ? substr($userId, 6) : $userId;
+		$language = $this->l10nFactory->getUserLanguage($this->userManager->get($localUserId));
+		try {
+			$result = $this->catalogueLinkGuard->enforce($assistantMessage, $this->l10nFactory->get('educai', $language));
+		} catch (\Throwable $e) {
+			$this->logger->error('Catalogue link verification failed; answer withheld', ['exception' => $e]);
+			return (string)$this->l10nFactory->get('educai', $language)->t('The course links in this answer could not be verified. Please ask again.');
+		}
+		if ($result['outcome'] !== CatalogueLinkGuard::OUTCOME_UNCHANGED) {
+			$this->traceService?->recordEvent($traceRunId, 'catalogue_link_guard', [
+				'status' => $result['outcome'] === CatalogueLinkGuard::OUTCOME_REPLACED ? 'warning' : 'ok',
+				'payload' => [
+					'outcome' => $result['outcome'],
+					'reasons' => $result['reasons'],
+					'referenced_ids' => array_slice($result['referenced_ids'], 0, CatalogueLinkGuard::MAX_FALLBACK_ITEMS),
+				],
+			]);
+		}
+		return $result['text'];
 	}
 
 	private function translateOutputLimitMessage(string $message, string $userId): string {

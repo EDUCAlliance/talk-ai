@@ -80,6 +80,12 @@ use OCP\AppFramework\Db\Entity;
  * @method void setCatalogueLastIndexed(?int $catalogueLastIndexed)
  * @method ?int getCatalogueCourseCount()
  * @method void setCatalogueCourseCount(?int $catalogueCourseCount)
+ * @method ?string getCatalogueLinkField()
+ * @method void setCatalogueLinkField(?string $catalogueLinkField)
+ * @method ?string getCatalogueLinkTemplate()
+ * @method void setCatalogueLinkTemplate(?string $catalogueLinkTemplate)
+ * @method ?string getCatalogueLinkOrigins()
+ * @method void setCatalogueLinkOrigins(?string $catalogueLinkOrigins)
  * @method bool getDoclingEnabled()
  * @method void setDoclingEnabled(bool $doclingEnabled)
  * @method ?string getDoclingApiEndpoint()
@@ -169,6 +175,10 @@ class Settings extends Entity implements JsonSerializable {
     protected ?int $catalogueReindexHours = 24;
     protected ?int $catalogueLastIndexed = null;
     protected ?int $catalogueCourseCount = 0;
+    protected ?string $catalogueLinkField = null;
+    protected ?string $catalogueLinkTemplate = null;
+    /** JSON list of accepted course-page origins */
+    protected ?string $catalogueLinkOrigins = null;
     protected bool $doclingEnabled = false;
     protected ?string $doclingApiEndpoint = null;
     protected ?string $doclingApiKey = null;
@@ -264,6 +274,9 @@ class Settings extends Entity implements JsonSerializable {
 			'catalogue_reindex_hours' => $this->catalogueReindexHours ?? 24,
 			'catalogue_last_indexed' => $this->catalogueLastIndexed,
 			'catalogue_course_count' => $this->catalogueCourseCount ?? 0,
+			'catalogue_link_field' => $this->catalogueLinkField ?? '',
+			'catalogue_link_template' => $this->catalogueLinkTemplate ?? '',
+			'catalogue_link_origins' => self::decodeStringList($this->catalogueLinkOrigins),
 			'docling_enabled' => (bool)$this->doclingEnabled,
 			'docling_api_endpoint' => $this->doclingApiEndpoint,
 			'docling_api_key' => $this->doclingApiKey ? '***' : '',
@@ -289,6 +302,19 @@ class Settings extends Entity implements JsonSerializable {
 			'llm_models_timeout' => $this->llmModelsTimeout ?? 20,
 			'updated_at' => $this->updatedAt,
 		];
+	}
+
+	/** @return list<string> */
+	public function getCatalogueLinkOriginsArray(): array {
+		return self::decodeStringList($this->catalogueLinkOrigins);
+	}
+
+	/** @return list<string> */
+	private static function decodeStringList(?string $raw): array {
+		$decoded = json_decode($raw ?? '[]', true);
+		return is_array($decoded) && array_is_list($decoded)
+			? array_values(array_filter($decoded, 'is_string'))
+			: [];
 	}
 
 	/** @return array<string,mixed> */

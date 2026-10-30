@@ -53,6 +53,9 @@ export const SETTING_TABS = {
 	catalogueEnabled: 'knowledge',
 	catalogueApiEndpoint: 'knowledge',
 	catalogueReindexHours: 'knowledge',
+	catalogueLinkField: 'knowledge',
+	catalogueLinkTemplate: 'knowledge',
+	catalogueLinkOrigins: 'knowledge',
 	visionApiEndpoint: 'capabilities',
 	visionApiKey: 'capabilities',
 	visionModel: 'capabilities',
@@ -119,6 +122,9 @@ export function settingLabel(key) {
 	case 'catalogueEnabled':
 	case 'catalogueApiEndpoint':
 	case 'catalogueReindexHours': return t('educai', 'Course catalogue')
+	case 'catalogueLinkField':
+	case 'catalogueLinkTemplate':
+	case 'catalogueLinkOrigins': return t('educai', 'Course links')
 	case 'visionApiEndpoint':
 	case 'visionApiKey':
 	case 'visionModel': return t('educai', 'Image understanding')
@@ -142,6 +148,39 @@ export function settingLabel(key) {
 	}
 }
 
+export const CATALOGUE_DEFAULT_LINK_FIELD = '/permalink'
+
+// A selectable preset, never a default: existing installations keep their links unset.
+export const CATALOGUE_LINK_PRESETS = {
+	educ: {
+		template: 'https://catalogue.educalliance.eu/Opportunity/{id}',
+		origins: ['https://catalogue.educalliance.eu'],
+	},
+}
+
+/**
+ * @param {string|string[]} value One origin per line, or a list
+ * @return {string[]} Trimmed, non-empty, unique entries in input order
+ */
+export function parseOriginList(value) {
+	const entries = Array.isArray(value) ? value : String(value ?? '').split(/[\n,]/)
+	return [...new Set(entries.map(entry => String(entry).trim().replace(/\/+$/, '')).filter(Boolean))]
+}
+
+/**
+ * @param {string} template Course link template
+ * @return {string} Its origin, or '' while the value is not an absolute HTTPS URL
+ */
+export function linkTemplateOrigin(template) {
+	const raw = String(template ?? '').trim()
+	if (!/^https:\/\//i.test(raw)) return ''
+	try {
+		return new URL(raw.replace('{id}', '0')).origin
+	} catch {
+		return ''
+	}
+}
+
 function clone(value) {
 	return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
 }
@@ -152,6 +191,12 @@ function comparable(key, value) {
 	}
 	if (key === 'outputTokenOverrides') {
 		return JSON.stringify((Array.isArray(value) ? value : []).map(row => [String(row?.model ?? '').trim(), row?.tokens ?? null]))
+	}
+	if (key === 'catalogueLinkOrigins') {
+		return JSON.stringify(parseOriginList(value))
+	}
+	if (key === 'catalogueLinkField') {
+		return String(value ?? '').trim() || CATALOGUE_DEFAULT_LINK_FIELD
 	}
 	if (typeof value === 'boolean') {
 		return value
