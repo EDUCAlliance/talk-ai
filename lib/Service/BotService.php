@@ -244,9 +244,12 @@ class BotService {
 			if (in_array($name, BuiltInToolProvider::WIKI_TOOLS, true) && !$this->wikiAllowedForConfig($bot, $visibility, $config)) {
 				continue;
 			}
+			$unknownApiTool = OpenApiToolCatalog::parseToolName($name) !== null
+				&& !is_string($this->toolProviderRegistry->getToolMetadata($name)['label'] ?? null);
 			$result[] = [
 				'is_builtin' => true,
 				'builtin_name' => $name,
+				'label' => $unknownApiTool ? null : $this->formatBuiltInToolName($name),
 				'tool_id' => null,
 				'config' => $config,
 			];

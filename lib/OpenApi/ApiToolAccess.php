@@ -35,6 +35,28 @@ class ApiToolAccess {
 		};
 	}
 
+	/**
+	 * Callable API tools this user may give to bots, with the bot
+	 * visibilities each one is allowed for.
+	 *
+	 * @return array<string,array{connection:string,bot_visibilities:list<string>}>
+	 */
+	public function assignableTools(string $userId): array {
+		$tools = [];
+		$allowed = [];
+		foreach ($this->catalog->exposed() as $entry) {
+			$connection = $entry['connection'];
+			$allowed[$connection->getId()] ??= $this->canAssign($userId, $connection);
+			if ($allowed[$connection->getId()]) {
+				$tools[$entry['name']] = [
+					'connection' => $connection->getName(),
+					'bot_visibilities' => $connection->getBotVisibilityList(),
+				];
+			}
+		}
+		return $tools;
+	}
+
 	public static function allowsVisibility(ApiConnection $connection, string $botVisibility): bool {
 		return in_array($botVisibility, $connection->getBotVisibilityList(), true);
 	}

@@ -473,7 +473,7 @@
 						<div v-if="toolLoading" class="hint">
 							{{ t('educai', 'Loading tools…') }}
 						</div>
-						<div v-else-if="visibleTools.length === 0" class="hint">
+						<div v-else-if="visibleTools.length === 0 && unavailableSelectedTools.length === 0" class="hint">
 							{{ t('educai', 'No tools are currently enabled by the administrator.') }}
 						</div>
 						<div v-else class="tool-list">
@@ -490,15 +490,39 @@
 								<span class="tool-info">
 									<span class="tool-name">
 										{{ tool.name }}
-										<span v-if="tool.is_builtin" class="tool-badge builtin">{{ t('educai', 'Built-in') }}</span>
+										<span v-if="tool.api" class="tool-badge api">{{ tool.api.connection }}</span>
+										<span v-else-if="tool.is_builtin" class="tool-badge builtin">{{ t('educai', 'Built-in') }}</span>
 									</span>
 									<span v-if="tool.description" class="tool-description">{{ tool.description }}</span>
-									<span v-if="isToolDisabled(tool)" class="tool-description tool-unavailable">
+									<span v-if="isWikiTool(tool) && isToolDisabled(tool)" class="tool-description tool-unavailable">
 										{{ t('educai', 'Only available for personal bots.') }}
+									</span>
+									<span v-else-if="toolVisibilityBlock(tool)" class="tool-description tool-unavailable">
+										{{ toolVisibilityBlock(tool) }}
+										<template v-if="formData.selectedTools.includes(getToolKey(tool))">
+											{{ t('educai', 'Remove it or choose another visibility before saving.') }}
+										</template>
 									</span>
 									<span v-if="tool.mcp_endpoint_url" class="tool-endpoint">{{ tool.mcp_endpoint_url }}</span>
 								</span>
 							</label>
+							<div
+								v-for="tool in unavailableSelectedTools"
+								:key="tool.key"
+								class="tool-row tool-row--disabled">
+								<span class="tool-info">
+									<span class="tool-name">
+										{{ tool.label }}
+										<span class="tool-badge unavailable">{{ t('educai', 'Not available') }}</span>
+									</span>
+									<span class="tool-description">
+										{{ t('educai', 'Still assigned, but the bot cannot use it until an administrator offers it again.') }}
+									</span>
+								</span>
+								<button type="button" class="button subtle small" @click="removeSelectedTool(tool.key)">
+									{{ t('educai', 'Remove') }}
+								</button>
+							</div>
 						</div>
 						<p class="hint">
 							{{ t('educai', 'Selected tools allow the bot to call external capabilities during conversations.') }}
@@ -650,6 +674,7 @@ import { getClient, defaultRootPath, getDefaultPropfind, resultToNode } from '@n
 import NcProgressBar from '@nextcloud/vue/components/NcProgressBar'
 import { getCanonicalLocale, t } from '../l10n.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
+import { apiToolBlockReason, unavailableSelections } from '../utils/apiConnections.js'
 import { normalizeToolSelectionAliases } from '../utils/toolAliases.js'
 import * as modelSelection from '../utils/modelSelection.js'
 import ModelSelector from './ModelSelector.vue'
@@ -742,6 +767,8 @@ export default {
 			botToolsLoaded: true,
 			ragSourcesRequestId: 0,
 			availableTools: [],
+			offeredToolKeys: null,
+			storedToolLabels: {},
 			toolLoading: false,
 			toolConfigs: {},
 			rag: {
@@ -957,6 +984,13 @@ export default {
 			const id = this.formData.personalWikiCollectiveId
 			return !this.wikiLocationsLoaded && id && !this.filteredWikiCollectives.some((collective) => String(collective.id) === String(id)) ? id : ''
 		},
+		unavailableSelectedTools() {
+			if (this.offeredToolKeys === null || this.botToolsLoading) {
+				return []
+			}
+			const managedElsewhere = (key) => key === 'builtin:rag_search_documents' || this.isWikiTool(key)
+			return unavailableSelections(this.formData.selectedTools.filter((key) => !managedElsewhere(key)), new Set(this.offeredToolKeys), this.storedToolLabels)
+		},
 		visibleTools() {
 			return this.availableTools.filter((tool) => !this.isWikiTool(tool))
 		},
@@ -1015,6 +1049,7 @@ export default {
 			this.formData = createFormData()
 			this.initialModel = ''
 			this.toolConfigs = {}
+			this.storedToolLabels = {}
 			this.botToolsLoaded = true
 			this.botToolsLoading = false
 			this.rag.sources = []
@@ -1213,14 +1248,14 @@ export default {
 			this.toolLoading = true
 			try {
 				const response = await axios.get(generateUrl('/apps/educai/api/v1/tools'))
-				const tools = response.data?.tools
+				const tools = Array.isArray(response.data?.tools) ? response.data.tools : []
+				this.offeredToolKeys = tools.map((tool) => this.getToolKey(tool)).filter((key) => key !== null).map(String)
 				// Filter out RAG and Wiki tools - they are controlled by dedicated form sections.
-				this.availableTools = Array.isArray(tools)
-					? tools.filter(t => !(t.is_builtin && (t.builtin_name === 'rag_search_documents' || this.isWikiTool(t))))
-					: []
+				this.availableTools = tools.filter(t => !(t.is_builtin && (t.builtin_name === 'rag_search_documents' || this.isWikiTool(t))))
 				this.normalizeToolSelectionAliases()
 			} catch (e) {
 				this.availableTools = []
+				this.offeredToolKeys = null
 			} finally {
 				this.toolLoading = false
 			}
@@ -1310,7 +1345,17 @@ export default {
 			})
 		},
 		isToolDisabled(tool) {
-			return !this.isWikiCapableBot && this.isWikiTool(tool)
+			if (!this.isWikiCapableBot && this.isWikiTool(tool)) {
+				return true
+			}
+			return this.toolVisibilityBlock(tool) !== null && !this.formData.selectedTools.includes(this.getToolKey(tool))
+		},
+		toolVisibilityBlock(tool) {
+			return apiToolBlockReason(tool, this.formData.visibility)
+		},
+		removeSelectedTool(key) {
+			this.formData.selectedTools = this.formData.selectedTools.filter((selected) => selected !== key)
+			delete this.toolConfigs[key]
 		},
 		removeUnavailableSelectedTools() {
 			const selectedTools = this.sanitizeSelectedToolsForVisibility(this.formData.selectedTools)
@@ -1381,6 +1426,7 @@ export default {
 		applyToolSelection(entries) {
 			const selected = []
 			const configs = {}
+			const labels = {}
 			let wikiEnabled = false
 			let wikiConfig = {}
 			entries.forEach((entry) => {
@@ -1397,6 +1443,7 @@ export default {
 						return
 					}
 					selected.push(key)
+					labels[key] = typeof entry.label === 'string' ? entry.label : null
 					if (entry.config && Object.keys(entry.config).length > 0) {
 						configs[key] = entry.config
 					}
@@ -1420,6 +1467,7 @@ export default {
 			this.ensureWikiSelectionValid()
 			this.formData.selectedTools = this.sanitizeSelectedToolsForVisibility(selected)
 			this.toolConfigs = configs
+			this.storedToolLabels = labels
 			this.normalizeToolSelectionAliases()
 			this.removeUnavailableSelectedTools()
 		},
@@ -2301,6 +2349,20 @@ export default {
 .tool-badge.builtin {
 	background: var(--color-primary-element-light);
 	color: var(--color-primary-element-dark);
+}
+
+.tool-badge.api {
+	background: var(--color-background-darker);
+	color: var(--color-main-text);
+}
+
+.tool-badge.unavailable {
+	background: var(--color-warning);
+	color: var(--color-primary-element-text);
+}
+
+.tool-row--disabled .button {
+	margin-inline-start: auto;
 }
 
 .tool-description {

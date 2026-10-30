@@ -274,6 +274,33 @@ final class ApiConnectionServiceTest extends TestCase {
 		self::assertSame([], $this->exposedNames());
 	}
 
+	public function testASuspendedApprovalCanBeReviewedAgainWithoutANewDocument(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$revision = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$search = $this->harness->approveCourseSearch($connection, $revision);
+		$this->expectConnectionError('document_unchanged', fn () => $this->harness->service->reopenActive($connection->getId(), OpenApiHarness::ADMIN));
+		$this->expectConnectionError('document_unchanged', fn () => $this->harness->import($connection, Fixture::read('courses-api.json')));
+
+		$this->harness->service->updateConnection($connection->getId(), ['base_url' => 'https://other.courses.example/v1'], OpenApiHarness::ADMIN);
+		$draft = $this->harness->service->reopenActive($connection->getId(), OpenApiHarness::ADMIN);
+
+		self::assertSame(ApiSpecRevision::STATUS_DRAFT, $draft->getStatus());
+		self::assertSame($revision->getSha256(), $draft->getSha256());
+		self::assertSame($revision->getSourceKind(), $draft->getSourceKind());
+		self::assertTrue($draft->getOpConfigArray()[(string)$search]['enabled'], 'The approved review is carried over for confirmation');
+		self::assertSame([], $this->exposedNames(), 'Reopening approves nothing');
+
+		$this->harness->service->approve($draft->getId(), OpenApiHarness::ADMIN);
+		$this->harness->service->setEnabled($connection->getId(), true, OpenApiHarness::ADMIN);
+		self::assertSame([OpenApiToolCatalog::toolName($connection->getId(), $search)], $this->exposedNames());
+	}
+
+	public function testReopeningRequiresAnApprovedRevision(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$this->harness->import($connection, Fixture::read('courses-api.json'));
+		$this->expectConnectionError('no_approved_revision', fn () => $this->harness->service->reopenActive($connection->getId(), OpenApiHarness::ADMIN));
+	}
+
 	public function testEnablingRequiresAnApprovedRevisionAndDeclaredDataVisibility(): void {
 		$connection = $this->harness->service->createConnection(['name' => 'Bare', 'base_url' => 'https://api.courses.example/v1'], OpenApiHarness::ADMIN);
 		$this->expectConnectionError('no_approved_revision', fn () => $this->harness->service->setEnabled($connection->getId(), true, OpenApiHarness::ADMIN));

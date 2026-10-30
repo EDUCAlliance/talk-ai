@@ -6,6 +6,7 @@ namespace OCA\EducAI\Tests\Unit\Controller;
 
 use OCA\EducAI\Controller\ToolsController;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\OpenApi\ApiToolAccess;
 use OCA\EducAI\Service\BuiltInToolProvider;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\CatalogueClient;
@@ -47,6 +48,29 @@ class ToolsControllerTest extends TestCase {
 		$this->assertSame(BuiltInToolProvider::TOOL_RAG_SEARCH, $tool['builtin_name']);
 		$this->assertSame('translated:Document Search (RAG)', $tool['name']);
 		$this->assertSame('translated:Search through indexed documents attached to this bot.', $tool['description']);
+	}
+
+	public function testAvailableOffersOnlyApiToolsTheUserMayAssign(): void {
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getEnabledTools')->willReturn([]);
+		$providerRegistry = $this->createMock(ToolProviderRegistry::class);
+		$providerRegistry->method('getAvailableTools')->willReturn([
+			['name' => 'api_3_9', 'label' => 'Courses: Search courses', 'description' => 'Searches courses.'],
+			['name' => 'api_4_2', 'label' => 'Grades: Read grades', 'description' => 'Reads grades.'],
+			['name' => BuiltInToolProvider::TOOL_RAG_SEARCH, 'label' => 'RAG', 'description' => 'Search'],
+		]);
+		$access = $this->createMock(ApiToolAccess::class);
+		$access->expects($this->once())->method('assignableTools')->with('alice')
+			->willReturn(['api_3_9' => ['connection' => 'Courses', 'bot_visibilities' => ['personal', 'groups']]]);
+
+		$tools = $this->createController($toolRegistry, $providerRegistry, $this->createL10n(), apiToolAccess: $access)->available()->getData()['tools'];
+
+		$this->assertSame(['api_3_9', BuiltInToolProvider::TOOL_RAG_SEARCH], array_column($tools, 'builtin_name'));
+		$this->assertSame(['connection' => 'Courses', 'bot_visibilities' => ['personal', 'groups']], $tools[0]['api']);
+		$this->assertArrayNotHasKey('api', $tools[1]);
+
+		$withoutAccess = $this->createController($toolRegistry, $providerRegistry, $this->createL10n())->available()->getData()['tools'];
+		$this->assertSame([BuiltInToolProvider::TOOL_RAG_SEARCH], array_column($withoutAccess, 'builtin_name'));
 	}
 
 	public function testAvailableDoesNotExposeRegistryFailure(): void {
@@ -302,6 +326,7 @@ class ToolsControllerTest extends TestCase {
 		?SpeechToTextClient $speechClient = null,
 		?ConnectionCheckStore $connectionChecks = null,
 		?LoggerInterface $logger = null,
+		?ApiToolAccess $apiToolAccess = null,
 	): ToolsController {
 		return new ToolsController(
 			'educai',
@@ -321,6 +346,7 @@ class ToolsControllerTest extends TestCase {
 			new BuiltInToolUiService($l10n),
 			$catalogueClient ?? $this->createMock(CatalogueClient::class),
 			$connectionChecks,
+			$apiToolAccess,
 		);
 	}
 

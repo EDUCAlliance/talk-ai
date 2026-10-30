@@ -142,12 +142,19 @@ class ApiConnectionService {
 		}
 		$connection = $this->getConnection($connectionId);
 		$loaded = $this->loader->load($bytes);
-		$manifest = $this->compiler->compile($loaded['document'], $loaded['version'], $sourceUrl);
-
 		$active = $this->activeRevision($connection);
-		if ($active !== null && hash_equals($active->getSha256(), $loaded['sha256'])) {
+		if ($active !== null && hash_equals($active->getSha256(), $loaded['sha256']) && self::approvalCurrent($active, $connection)) {
 			throw new ApiConnectionException('document_unchanged', 'This document is identical to the approved revision.', 409);
 		}
+		return $this->createDraft($connection, $active, $loaded, $sourceKind, $sourceUrl, $userId);
+	}
+
+	/**
+	 * @param array{document:array<string,mixed>,version:string,sha256:string} $loaded
+	 * @throws OpenApiImportException
+	 */
+	private function createDraft(ApiConnection $connection, ?ApiSpecRevision $active, array $loaded, string $sourceKind, ?string $sourceUrl, string $userId): ApiSpecRevision {
+		$manifest = $this->compiler->compile($loaded['document'], $loaded['version'], $sourceUrl);
 		$activeOperations = [];
 		$activeConfig = $active?->getOpConfigArray() ?? [];
 		foreach ($active?->getManifestArray()['operations'] ?? [] as $operation) {
@@ -205,6 +212,27 @@ class ApiConnectionService {
 			throw new ApiConnectionException('document_fetch_failed', 'The document could not be downloaded.', 422, ['reason' => $e->getErrorCode()]);
 		}
 		return $this->importDocument($connectionId, $bytes, ApiSpecRevision::SOURCE_URL, $url, $userId);
+	}
+
+	/**
+	 * Opens the approved document as a new draft, so the review can be
+	 * confirmed again after the base URL or authentication changed.
+	 *
+	 * @throws ApiConnectionException
+	 * @throws OpenApiImportException
+	 */
+	public function reopenActive(int $connectionId, string $userId): ApiSpecRevision {
+		$connection = $this->getConnection($connectionId);
+		$active = $this->activeRevision($connection);
+		if ($active === null) {
+			throw new ApiConnectionException('no_approved_revision', 'There is no approved document to review again.', 409);
+		}
+		if (self::approvalCurrent($active, $connection)) {
+			throw new ApiConnectionException('document_unchanged', 'This document is identical to the approved revision.', 409);
+		}
+		$loaded = $this->loader->load($active->getDocument());
+		$loaded['sha256'] = $active->getSha256();
+		return $this->createDraft($connection, $active, $loaded, $active->getSourceKind(), $active->getSourceUrl(), $userId);
 	}
 
 	/**
@@ -430,6 +458,11 @@ class ApiConnectionService {
 		return $revision->isApproved() && $revision->getConnectionId() === $connection->getId() ? $revision : null;
 	}
 
+	/** The draft under review; importing keeps at most one. */
+	public function draftRevision(ApiConnection $connection): ?ApiSpecRevision {
+		return $this->revisions->findDrafts($connection->getId())[0] ?? null;
+	}
+
 	public function hasCredential(ApiConnection $connection): bool {
 		return $connection->getCredential() !== null && $connection->getCredential() !== '';
 	}
@@ -437,6 +470,12 @@ class ApiConnectionService {
 	/** @return array{mode:string,header:?string} */
 	public static function authSnapshot(ApiConnection $connection): array {
 		return ['mode' => $connection->getAuthMode(), 'header' => $connection->getAuthHeader()];
+	}
+
+	public static function approvalCurrent(ApiSpecRevision $revision, ApiConnection $connection): bool {
+		return $revision->getApprovedBaseUrl() !== null
+			&& $revision->getApprovedBaseUrl() === $connection->getBaseUrl()
+			&& $revision->getApprovedAuthArray() === self::authSnapshot($connection);
 	}
 
 	/** @return array<string,array<string,mixed>> */
@@ -471,9 +510,7 @@ class ApiConnectionService {
 			'assign_groups' => $connection->getAssignGroupList(),
 			'bot_visibilities' => $connection->getBotVisibilityList(),
 			'active_revision_id' => $active?->getId(),
-			'approval_current' => $active !== null
-				&& $active->getApprovedBaseUrl() === $connection->getBaseUrl()
-				&& $active->getApprovedAuthArray() === self::authSnapshot($connection),
+			'approval_current' => $active !== null && self::approvalCurrent($active, $connection),
 			'last_check' => $connection->getLastCheckAt() === null ? null : [
 				'at' => $connection->getLastCheckAt(),
 				'status' => $connection->getLastCheckStatus(),

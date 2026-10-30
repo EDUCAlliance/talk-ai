@@ -1271,6 +1271,27 @@ class BotServiceTest extends TestCase {
 		$this->assertNull($contexts[1]);
 	}
 
+	public function testStoredToolsKeepTheirLabelEvenWhenNoLongerOffered(): void {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->with(7)->willReturn($this->createApprovedBot());
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('isAdmin')->willReturn(false);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([
+			['name' => 'api_3_9', 'config' => []],
+			['name' => 'api_4_1', 'config' => []],
+		]);
+		$providers = $this->createMock(ToolProviderRegistry::class);
+		$providers->method('getToolMetadata')->willReturnCallback(static fn (string $name): ?array => $name === 'api_3_9' ? ['label' => 'Courses: Search courses'] : null);
+		$service = $this->createBotService($botMapper, $permissions, toolRegistry: $toolRegistry, toolProviderRegistry: $providers);
+
+		$tools = $service->getBotTools(7, 'owner');
+
+		$this->assertSame(['Courses: Search courses', null], array_column($tools, 'label'));
+		$this->assertSame(['api_3_9', 'api_4_1'], array_column($tools, 'builtin_name'));
+	}
+
 	public function testApiToolsAreCheckedBeforeANewBotIsStored(): void {
 		$botMapper = $this->createMock(BotMapper::class);
 		$botMapper->method('findByMentionName')->willThrowException(new DoesNotExistException('free'));

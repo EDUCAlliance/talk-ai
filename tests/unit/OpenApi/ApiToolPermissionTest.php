@@ -69,6 +69,23 @@ final class ApiToolPermissionTest extends TestCase {
 		self::assertSame([], $this->harness->client->requests);
 	}
 
+	public function testToolPickersListOnlyCallableToolsTheUserMayAssign(): void {
+		$this->harness->memberships = ['bob' => ['teachers']];
+		self::assertSame([], $this->harness->access->assignableTools('bob'));
+		self::assertSame([], $this->harness->access->assignableTools(''));
+		self::assertSame([$this->tool => ['connection' => 'Courses', 'bot_visibilities' => ApiConnection::BOT_VISIBILITIES]], $this->harness->access->assignableTools(OpenApiHarness::ADMIN));
+
+		$this->configure(['assign_policy' => ApiConnection::ASSIGN_GROUPS, 'assign_groups' => ['teachers'], 'bot_visibilities' => ['personal']]);
+		$this->harness->catalog->reset();
+		self::assertSame([$this->tool => ['connection' => 'Courses', 'bot_visibilities' => ['personal']]], $this->harness->access->assignableTools('bob'));
+		self::assertSame([], $this->harness->access->assignableTools('carol'));
+
+		$this->harness->service->setEnabled($this->connection->getId(), false, OpenApiHarness::ADMIN);
+		$this->harness->catalog->reset();
+		self::assertSame([], $this->harness->access->assignableTools('bob'));
+		self::assertSame([], $this->harness->client->requests);
+	}
+
 	public function testNewToolsMustBeAvailableAndFitTheBotVisibility(): void {
 		$this->configure(['assign_policy' => ApiConnection::ASSIGN_ALL_USERS, 'bot_visibilities' => ['personal', 'groups']]);
 		$draftOnly = OpenApiToolCatalog::toolName($this->connection->getId(), $this->harness->operationId($this->harness->service->getRevision($this->revisionId), 'GET /courses/{courseId}'));

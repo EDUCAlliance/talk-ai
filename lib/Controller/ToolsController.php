@@ -7,6 +7,8 @@ namespace OCA\EducAI\Controller;
 use Exception;
 use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\OpenApi\ApiToolAccess;
+use OCA\EducAI\OpenApi\OpenApiToolCatalog;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\CatalogueClient;
 use OCA\EducAI\Service\ConnectionCheckStore;
@@ -40,6 +42,7 @@ class ToolsController extends Controller {
     private BuiltInToolUiService $builtInToolUiService;
     private CatalogueClient $catalogueClient;
     private ?ConnectionCheckStore $connectionChecks;
+    private ?ApiToolAccess $apiToolAccess;
 
     public function __construct(
         string $appName,
@@ -59,6 +62,7 @@ class ToolsController extends Controller {
         BuiltInToolUiService $builtInToolUiService,
         CatalogueClient $catalogueClient,
         ?ConnectionCheckStore $connectionChecks = null,
+        ?ApiToolAccess $apiToolAccess = null,
     ) {
         parent::__construct($appName, $request);
         $this->toolMapper = $toolMapper;
@@ -76,6 +80,7 @@ class ToolsController extends Controller {
         $this->builtInToolUiService = $builtInToolUiService;
         $this->catalogueClient = $catalogueClient;
         $this->connectionChecks = $connectionChecks;
+        $this->apiToolAccess = $apiToolAccess;
     }
 
     /**
@@ -102,7 +107,15 @@ class ToolsController extends Controller {
 
             // Get available built-in tools
             $builtInTools = $this->toolProviderRegistry->getAvailableTools();
+            $assignableApiTools = $this->apiToolAccess?->assignableTools((string)$this->userId) ?? [];
             foreach ($builtInTools as $builtIn) {
+                $apiTool = null;
+                if (OpenApiToolCatalog::parseToolName((string)$builtIn['name']) !== null) {
+                    $apiTool = $assignableApiTools[$builtIn['name']] ?? null;
+                    if ($apiTool === null) {
+                        continue;
+                    }
+                }
                 $fallbackLabel = isset($builtIn['label']) && is_string($builtIn['label']) && $builtIn['label'] !== ''
                     ? $builtIn['label']
                     : null;
@@ -119,7 +132,7 @@ class ToolsController extends Controller {
                         is_array($builtIn['aliases'] ?? null) ? $builtIn['aliases'] : [],
                         static fn ($alias): bool => is_string($alias) && $alias !== '',
                     )),
-                ];
+                ] + ($apiTool === null ? [] : ['api' => $apiTool]);
             }
 
             return new DataResponse(['tools' => $tools]);

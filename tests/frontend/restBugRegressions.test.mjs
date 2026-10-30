@@ -6,6 +6,7 @@ import { nextTick } from 'vue'
 import { mountState } from './helpers/vueState.mjs'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
 import { normalizeToolSelectionAliases } from '../../src/utils/toolAliases.js'
+import { apiToolBlockReason, unavailableSelections } from '../../src/utils/apiConnections.js'
 import * as modelSelection from '../../src/utils/modelSelection.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
 
@@ -31,7 +32,7 @@ function component(ctx, path, axios, props = {}, globals = {}) {
 		axios, APP_DISPLAY_NAME: 'Talk AI', WIKI_ROOT_FOLDER: 'Talk AI',
 		BotCard: {}, BotForm: {}, ModelSelector: {}, NcProgressBar: {},
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage,
-		modelSelection, normalizeToolSelectionAliases,
+		modelSelection, normalizeToolSelectionAliases, apiToolBlockReason, unavailableSelections,
 		showError: value => errors.push(value), showSuccess: value => successes.push(value),
 		console: { error() {}, log() {}, warn() {} },
 		setInterval: () => 1, clearInterval() {}, ...globals,
@@ -582,4 +583,58 @@ test('closing the form invalidates tool, collective and source requests without 
 	assert.equal(state.rag.sources.length, 0)
 	assert.equal(state.rag.pollingInterval, null)
 	assert.equal(errors.length, 0)
+})
+
+test('stored tools that are no longer offered stay visible with their label and can be removed', async ctx => {
+	const api = { connection: 'Courses', bot_visibilities: ['personal'] }
+	const offered = [
+		{ is_builtin: true, builtin_name: 'api_1_2', name: 'Courses: Search', api },
+		{ is_builtin: true, builtin_name: 'api_1_3', name: 'Courses: Details', api },
+		{ is_builtin: true, builtin_name: 'rag_search_documents', name: 'Documents' },
+	]
+	const stored = [
+		{ is_builtin: true, builtin_name: 'api_1_2', label: 'Courses: Search' },
+		{ is_builtin: true, builtin_name: 'api_4_1', label: null },
+		{ is_builtin: true, builtin_name: 'catalogue_search', label: 'Course catalogue' },
+		{ is_builtin: true, builtin_name: 'rag_search_documents', label: 'Documents' },
+	]
+	const { state, emitted } = form(ctx, { get: async url => url === '/apps/educai/api/v1/tools'
+		? { data: { tools: offered } }
+		: { data: url.endsWith('/tools') ? { tools: stored } : {} } }, bot(1, { visibility: 'global' }))
+	state.formData.visibility = 'global'
+	await Promise.all([state.loadAvailableTools(), state.loadBotTools()])
+	await settle()
+
+	assert.deepEqual(plain(state.unavailableSelectedTools), [
+		{ key: 'builtin:api_4_1', label: 'Removed API tool' },
+		{ key: 'builtin:catalogue_search', label: 'Course catalogue' },
+	])
+	const [search, details] = state.visibleTools
+	assert.match(state.toolVisibilityBlock(search), /Only for bots with visibility: Personal/)
+	assert.equal(state.isToolDisabled(search), false, 'A selected tool can still be unticked')
+	assert.equal(state.isToolDisabled(details), true)
+
+	state.removeSelectedTool('builtin:api_4_1')
+	assert.deepEqual(plain(state.unavailableSelectedTools).map(tool => tool.key), ['builtin:catalogue_search'])
+	assert(!state.formData.selectedTools.includes('builtin:api_4_1'))
+
+	state.formData.visibility = 'personal'
+	await settle()
+	assert.equal(state.toolVisibilityBlock(details), null)
+	assert.equal(state.isToolDisabled(details), false)
+	state.submitForm()
+	const names = emitted.at(-1)[1].tools.map(entry => entry.builtin_name)
+	assert(names.includes('catalogue_search'), 'Unavailable tools are kept until removed')
+	assert(!names.includes('api_4_1'))
+})
+
+test('a failed tool list does not mark stored tools as unavailable', async ctx => {
+	const { state } = form(ctx, { get: async url => {
+		if (url === '/apps/educai/api/v1/tools') throw new Error('Offline')
+		return { data: url.endsWith('/tools') ? { tools: [{ is_builtin: true, builtin_name: 'api_1_2', label: 'Courses: Search' }] } : {} }
+	} })
+	await Promise.all([state.loadAvailableTools(), state.loadBotTools()])
+	await settle()
+	assert.deepEqual(plain(state.formData.selectedTools), ['builtin:api_1_2'])
+	assert.deepEqual(plain(state.unavailableSelectedTools), [])
 })
