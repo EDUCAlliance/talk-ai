@@ -180,12 +180,23 @@ final class ApiConnectionServiceTest extends TestCase {
 		}));
 
 		self::assertSame($search, $this->harness->operationId($renamed, 'GET /courses'));
-		self::assertFalse($renamed->getOpConfigArray()[(string)$search]['enabled'], 'A changed definition needs a new review');
+		$approved = $this->harness->service->getRevision($first->getId())->getOpConfigArray()[(string)$search];
+		$carried = $renamed->getOpConfigArray()[(string)$search];
+		self::assertTrue($carried['enabled'], 'An offered tool is not silently dropped by a changed definition');
+		self::assertFalse($carried['read_confirmed'], 'A changed definition needs a new confirmation');
+		self::assertSame([$approved['mapping'], $approved['auth'], $approved['fixed']], [$carried['mapping'], $carried['auth'], $carried['fixed']]);
 		$diff = $this->harness->service->diff($renamed, $this->harness->connections->findById($connection->getId()));
 		$change = array_values(array_filter($diff['changed'], static fn (array $c): bool => $c['id'] === $search))[0];
 		self::assertContains('summary', $change['aspects']);
 		self::assertSame(['before' => 'Search courses', 'after' => 'Find courses'], $change['changes']['summary']);
-		self::assertSame(['before' => true, 'after' => false], $change['changes']['review_enabled']);
+		self::assertSame(['before' => true, 'after' => false], $change['changes']['review_read_confirmed']);
+		self::assertArrayNotHasKey('review_mapping', $change['changes']);
+		self::assertSame(['read_not_confirmed'], $this->harness->service->approvalProblems($renamed, $this->harness->connections->findById($connection->getId()))[$search]);
+		$this->expectConnectionError('operations_not_approvable', fn () => $this->harness->service->approve($renamed->getId(), OpenApiHarness::ADMIN));
+
+		$this->harness->service->updateDraftOperations($renamed->getId(), [$search => ['read_confirmed' => true]], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($renamed->getId(), OpenApiHarness::ADMIN);
+		self::assertContains(OpenApiToolCatalog::toolName($connection->getId(), $search), $this->exposedNames());
 	}
 
 	public function testRemovedOperationsAreTombstonedAndNeverRevived(): void {

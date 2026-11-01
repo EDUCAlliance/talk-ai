@@ -176,9 +176,8 @@ class ApiConnectionService {
 				$operation['id'] = $identity->getId();
 				$previous = $activeOperations[$identity->getId()] ?? null;
 				$previousConfig = $activeConfig[(string)$identity->getId()] ?? null;
-				$config[(string)$identity->getId()] = $previous !== null && $previousConfig !== null
-					&& $previous['fingerprint'] === $operation['fingerprint'] && !isset($previousConfig['revoked_at'])
-					? $previousConfig
+				$config[(string)$identity->getId()] = $previous !== null && $previousConfig !== null && !isset($previousConfig['revoked_at'])
+					? ($previous['fingerprint'] === $operation['fingerprint'] ? $previousConfig : self::reconfirm($previousConfig))
 					: ApiOperationReview::defaults($operation);
 				if (isset($previousConfig['revoked_at'])) {
 					$config[(string)$identity->getId()]['revoked_at'] = $previousConfig['revoked_at'];
@@ -508,6 +507,20 @@ class ApiConnectionService {
 	}
 
 	/** @return array{mode:string,header:?string} */
+	/**
+	 * A changed operation keeps its reviewed settings, so an offered tool is not
+	 * silently dropped and its mapping is not lost. It cannot be approved again
+	 * until an admin confirms the new definition; settings that no longer fit
+	 * the operation show up as review problems.
+	 *
+	 * @param array<string,mixed> $config
+	 * @return array<string,mixed>
+	 */
+	private static function reconfirm(array $config): array {
+		unset($config['confirmed_by'], $config['confirmed_at']);
+		return array_merge($config, ['read_confirmed' => false]);
+	}
+
 	public static function authSnapshot(ApiConnection $connection): array {
 		return ['mode' => $connection->getAuthMode(), 'header' => $connection->getAuthHeader()];
 	}
