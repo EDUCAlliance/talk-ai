@@ -1744,6 +1744,26 @@
 	align-items: center;
 }
 
+.educai-admin .ta-api-presets {
+	display: grid;
+	gap: 8px;
+	margin-bottom: 16px;
+	padding: 12px;
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large);
+	background: var(--color-background-hover);
+}
+
+.educai-admin .ta-catalogue-source {
+	display: grid;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.educai-admin .ta-catalogue-source .ta-choice small {
+	display: block;
+}
+
 .educai-admin .ta-api-import {
 	display: flex;
 	flex-wrap: wrap;

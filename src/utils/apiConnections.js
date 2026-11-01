@@ -3,6 +3,8 @@ import { getApiErrorMessage } from './apiError.js'
 
 export const CONNECTIONS_URL = '/apps/educai/api/v1/admin/api-connections'
 export const REVISIONS_URL = '/apps/educai/api/v1/admin/api-revisions'
+export const PRESETS_URL = '/apps/educai/api/v1/admin/api-presets'
+export const CATALOGUE_SOURCE_URL = '/apps/educai/api/v1/admin/api-catalogue-source'
 export const DATA_VISIBILITY = 'shared_for_bot_audience'
 export const BOT_VISIBILITIES = ['personal', 'groups', 'teams', 'global']
 export const PAGING_KEYS = ['has_more', 'next_cursor', 'next_offset', 'total']
@@ -58,6 +60,14 @@ const CODE_TEXTS = () => ({
 	assign_groups_invalid: t('educai', 'The group selection is invalid.'),
 	bot_visibilities_invalid: t('educai', 'Choose at least one bot visibility this API may be used with.'),
 	connection_not_found: t('educai', 'The API connection no longer exists. Reload the page.'),
+	connection_disabled: t('educai', 'The API connection is disabled.'),
+	// Presets and the course catalogue source
+	preset_not_found: t('educai', 'This preset does not exist.'),
+	preset_invalid: t('educai', 'The preset shipped with the app is damaged. Reinstall the app.'),
+	catalogue_source_unavailable: t('educai', 'The connection cannot serve the course list yet: approve its course list operation and enable the connection first.'),
+	catalogue_source_in_use: t('educai', 'The course catalogue reads through this connection. Switch the catalogue source first.'),
+	operation_missing: t('educai', 'The approved document does not contain this operation.'),
+	operation_removed: t('educai', 'The operation was removed from the document.'),
 	// Import
 	document_missing: t('educai', 'Choose a document file or enter its address.'),
 	document_fetch_failed: t('educai', 'The document could not be downloaded.'),

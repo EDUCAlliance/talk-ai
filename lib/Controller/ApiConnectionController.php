@@ -9,6 +9,8 @@ use OCA\EducAI\Db\ApiSpecRevision;
 use OCA\EducAI\OpenApi\ApiConnectionException;
 use OCA\EducAI\OpenApi\ApiConnectionService;
 use OCA\EducAI\OpenApi\ApiOperationTester;
+use OCA\EducAI\OpenApi\ApiPresetService;
+use OCA\EducAI\OpenApi\CatalogueApiSource;
 use OCA\EducAI\OpenApi\OpenApiImportException;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\DataResponse;
@@ -31,6 +33,8 @@ class ApiConnectionController extends Controller {
 		IRequest $request,
 		private ApiConnectionService $service,
 		private ApiOperationTester $tester,
+		private ApiPresetService $presets,
+		private CatalogueApiSource $catalogueSource,
 		private IL10N $l10n,
 		private LoggerInterface $logger,
 		private ?string $userId,
@@ -47,6 +51,7 @@ class ApiConnectionController extends Controller {
 				$connections[] = $this->service->presentConnection($connection) + [
 					'draft_revision_id' => $draft?->getId(),
 					'approved_operations' => $this->approvedOperationCount($this->service->activeRevision($connection)),
+					'catalogue_source' => $this->catalogueSource->selectedConnectionId() === $connection->getId(),
 				];
 			}
 			return new DataResponse(['connections' => $connections]);
@@ -83,6 +88,9 @@ class ApiConnectionController extends Controller {
 	/** @AdminRequired */
 	public function destroy(int $id): DataResponse {
 		return $this->guard(function () use ($id): DataResponse {
+			if ($this->catalogueSource->selectedConnectionId() === $id) {
+				throw new ApiConnectionException('catalogue_source_in_use', 'The course catalogue reads through this connection. Switch the catalogue source first.', 409);
+			}
 			$this->service->deleteConnection($id);
 			return new DataResponse(['deleted' => true]);
 		});
@@ -170,6 +178,81 @@ class ApiConnectionController extends Controller {
 		});
 	}
 
+	/** @AdminRequired */
+	public function presets(): DataResponse {
+		return $this->guard(fn (): DataResponse => new DataResponse(['presets' => $this->presets->listPresets()]));
+	}
+
+	/**
+	 * Creates a disabled connection with a draft from a shipped preset.
+	 *
+	 * @AdminRequired
+	 */
+	public function createFromPreset(string $presetId): DataResponse {
+		return $this->guard(function () use ($presetId): DataResponse {
+			$created = $this->presets->create($presetId, (string)$this->userId);
+			return new DataResponse($this->detail($this->service->getConnection($created['connection']->getId())), 201);
+		});
+	}
+
+	/**
+	 * Which source the course catalogue reads from, and which connections
+	 * could serve it.
+	 *
+	 * @AdminRequired
+	 */
+	public function catalogueSource(): DataResponse {
+		return $this->guard(function (): DataResponse {
+			$selected = $this->catalogueSource->selectedConnectionId();
+			$candidates = [];
+			foreach ($this->service->listConnections() as $connection) {
+				$operations = $this->catalogueOperations($connection);
+				if ($operations === [] && $connection->getId() !== $selected) {
+					continue;
+				}
+				$candidates[] = [
+					'id' => $connection->getId(),
+					'name' => $connection->getName(),
+					'enabled' => $connection->isEnabled(),
+					'operations' => (object)($operations === [] ? [] : $this->catalogueSource->operationStatus($connection->getId())),
+				];
+			}
+			return new DataResponse([
+				'connection_id' => $selected,
+				'selected_found' => $selected === null || in_array($selected, array_column($candidates, 'id'), true),
+				'candidates' => $candidates,
+			]);
+		});
+	}
+
+	/**
+	 * Switches the catalogue reads; null selects the legacy endpoint. The
+	 * existing index is kept and nothing is reindexed.
+	 *
+	 * @AdminRequired
+	 */
+	public function setCatalogueSource(?int $connectionId = null): DataResponse {
+		return $this->guard(function () use ($connectionId): DataResponse {
+			$this->catalogueSource->select($connectionId !== null && $connectionId > 0 ? $connectionId : null);
+			return $this->catalogueSource();
+		});
+	}
+
+	/**
+	 * Match keys of the catalogue operations in the active or draft document.
+	 *
+	 * @return list<string>
+	 */
+	private function catalogueOperations(ApiConnection $connection): array {
+		$keys = [];
+		foreach ([$this->service->activeRevision($connection), $this->service->draftRevision($connection)] as $revision) {
+			foreach ($revision?->getManifestArray()['operations'] ?? [] as $operation) {
+				$keys[] = (string)($operation['match_key'] ?? '');
+			}
+		}
+		return in_array(CatalogueApiSource::LIST_OPERATION, $keys, true) ? CatalogueApiSource::OPERATIONS : [];
+	}
+
 	/** @return array<string,mixed> */
 	private function connectionInput(): array {
 		$params = $this->request->getParams();
@@ -184,6 +267,7 @@ class ApiConnectionController extends Controller {
 			'connection' => $this->service->presentConnection($connection) + [
 				'draft_revision_id' => $draft?->getId(),
 				'approved_operations' => $this->approvedOperationCount($active),
+				'catalogue_source' => $this->catalogueSource->selectedConnectionId() === $connection->getId(),
 			],
 			'active' => $active === null ? null : $this->service->presentRevision($active, $connection),
 			'draft' => $draft === null ? null : $this->service->presentRevision($draft, $connection) + [

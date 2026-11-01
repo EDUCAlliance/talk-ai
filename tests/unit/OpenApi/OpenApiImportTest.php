@@ -167,6 +167,25 @@ final class OpenApiImportTest extends TestCase {
 		self::assertContains('operation_id_duplicate', self::noteCodes($compiled['operations']['GET /things/b']));
 	}
 
+	public function testMutationHintsCoverPrefixedVerbsWithoutFlaggingPlainReads(): void {
+		$get = static fn (string $summary): array => ['get' => ['summary' => $summary, 'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => ['schema' => ['type' => 'object']]]]]]];
+		$loaded = (new OpenApiDocumentLoader())->load(self::document(['paths' => [
+			'/application/unapply' => $get('Removes the application'),
+			'/mail/resend' => $get('Mail again'),
+			'/courses' => $get('Read and review open courses'),
+			'/records/{id}' => $get('Returns one record'),
+		]]));
+		$notes = [];
+		foreach ((new OpenApiCompiler())->compile($loaded['document'], $loaded['version'], null)['operations'] as $operation) {
+			$notes[$operation['match_key']] = array_column(array_filter($operation['notes'], static fn (array $note): bool => $note['code'] === 'possibly_mutating'), 'detail');
+		}
+
+		self::assertSame(['unapply'], $notes['GET /application/unapply']);
+		self::assertSame(['resend'], $notes['GET /mail/resend']);
+		self::assertSame([], $notes['GET /courses']);
+		self::assertSame([], $notes['GET /records/{id}']);
+	}
+
 	public function testMarksPossiblyMutatingReadsAndServerOverrides(): void {
 		$operations = self::compileFixture('courses-api.json')['operations'];
 

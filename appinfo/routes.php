@@ -78,6 +78,10 @@ return [
 		['name' => 'api_connection#discard', 'url' => '/api/v1/admin/api-revisions/{revisionId}', 'verb' => 'DELETE'],
 		['name' => 'api_connection#revoke', 'url' => '/api/v1/admin/api-revisions/{revisionId}/operations/{operationId}/revoke', 'verb' => 'POST'],
 		['name' => 'api_connection#test', 'url' => '/api/v1/admin/api-revisions/{revisionId}/operations/{operationId}/test', 'verb' => 'POST'],
+		['name' => 'api_connection#presets', 'url' => '/api/v1/admin/api-presets', 'verb' => 'GET'],
+		['name' => 'api_connection#createFromPreset', 'url' => '/api/v1/admin/api-presets/{presetId}/connections', 'verb' => 'POST'],
+		['name' => 'api_connection#catalogueSource', 'url' => '/api/v1/admin/api-catalogue-source', 'verb' => 'GET'],
+		['name' => 'api_connection#setCatalogueSource', 'url' => '/api/v1/admin/api-catalogue-source', 'verb' => 'PUT'],
 
 		['name' => 'settings#embeddingStatus', 'url' => '/api/v1/admin/embeddings/status', 'verb' => 'GET'],
 		['name' => 'settings#catalogueStatus', 'url' => '/api/v1/admin/catalogue/status', 'verb' => 'GET'],

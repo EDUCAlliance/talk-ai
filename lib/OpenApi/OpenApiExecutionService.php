@@ -66,13 +66,35 @@ class OpenApiExecutionService {
 	 * @throws ApiExecutionException
 	 */
 	public function call(array $resolved, array $arguments, float $timeout, array $logContext = []): array {
+		$config = $resolved['config'];
+		try {
+			$mapping = ApiResultProjector::normalizeMapping(is_array($config['mapping'] ?? null) ? $config['mapping'] : []);
+		} catch (\InvalidArgumentException $e) {
+			throw new ApiExecutionException('tool_not_available', 'This API tool is currently not available.', ['reason' => $e->getMessage()]);
+		}
+		$data = $this->fetch($resolved, $arguments, $timeout, $logContext);
+		return $this->projector->project($data, $mapping, [
+			'api' => $resolved['connection']->getName(),
+			'operation' => (string)($config['label'] ?? ''),
+		], time());
+	}
+
+	/**
+	 * The validated, authenticated request of call() without the projection,
+	 * for app-internal consumers that interpret the decoded JSON themselves.
+	 *
+	 * @param array{connection:ApiConnection,revision:\OCA\EducAI\Db\ApiSpecRevision,operation:array<string,mixed>,config:array<string,mixed>} $resolved
+	 * @param array<string,mixed> $arguments
+	 * @param array<string,scalar|null> $logContext
+	 * @throws ApiExecutionException
+	 */
+	public function fetch(array $resolved, array $arguments, float $timeout, array $logContext = [], int $maxBytes = ApiHttpTransport::MAX_RESPONSE_BYTES): mixed {
 		$connection = $resolved['connection'];
 		$operation = $resolved['operation'];
 		$config = $resolved['config'];
 
 		try {
 			$fixed = ApiOperationReview::normalizeFixed($config['fixed'] ?? [], $operation);
-			$mapping = ApiResultProjector::normalizeMapping(is_array($config['mapping'] ?? null) ? $config['mapping'] : []);
 		} catch (\InvalidArgumentException $e) {
 			throw new ApiExecutionException('tool_not_available', 'This API tool is currently not available.', ['reason' => $e->getMessage()]);
 		}
@@ -81,11 +103,7 @@ class OpenApiExecutionService {
 		$url = $this->requestBuilder->build($base, $operation, $values);
 		$headers = $this->authHeaders($connection, $operation, $config);
 
-		$response = $this->transport->getJson($url, $base, $headers, $timeout, $logContext + ['path_template' => mb_substr($operation['path'], 0, 200)]);
-		return $this->projector->project($response['data'], $mapping, [
-			'api' => $connection->getName(),
-			'operation' => (string)($config['label'] ?? ''),
-		], time());
+		return $this->transport->getJson($url, $base, $headers, $timeout, $logContext + ['path_template' => mb_substr($operation['path'], 0, 200)], $maxBytes)['data'];
 	}
 
 	/**

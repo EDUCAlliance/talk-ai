@@ -39,10 +39,10 @@ class ApiHttpTransport {
 	 * @return array{status:int,data:mixed,bytes:int,duration_ms:int}
 	 * @throws ApiExecutionException
 	 */
-	public function getJson(string $url, string $approvedBase, array $headers, float $timeout, array $logContext = []): array {
+	public function getJson(string $url, string $approvedBase, array $headers, float $timeout, array $logContext = [], int $maxBytes = self::MAX_RESPONSE_BYTES): array {
 		$this->assertBelowBase($url, $approvedBase);
 		$start = microtime(true);
-		[$status, $body] = $this->send($url, ['Accept' => 'application/json'] + $headers, $timeout, self::MAX_RESPONSE_BYTES, true, $logContext, $start);
+		[$status, $body] = $this->send($url, ['Accept' => 'application/json'] + $headers, $timeout, $maxBytes, true, $logContext, $start);
 		try {
 			$data = json_decode($body, true, self::MAX_RESPONSE_DEPTH, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
 		} catch (\JsonException $e) {

@@ -315,6 +315,7 @@
 				<p class="ta-hint">
 					{{ t('educai', 'The test contacts the address above without saving. Catalogue indexing runs together with the knowledge index.') }}
 				</p>
+				<CatalogueSourceSwitch />
 
 				<h4 id="educai-admin-catalogue-links" class="ta-subheading">
 					{{ t('educai', 'Course links') }}
@@ -435,6 +436,7 @@ import { t, n, getCanonicalLocale } from '../../l10n.js'
 import { CATALOGUE_DEFAULT_LINK_FIELD, RATE_LIMIT_PRESETS, endpointHost, linkTemplateOrigin, parseOriginList, rateLimitPreset } from '../../utils/adminSettings.js'
 import { doclingAuthLabel, doclingProfileLabel } from '../../utils/adminOverview.js'
 import AdminSection from './AdminSection.vue'
+import CatalogueSourceSwitch from './CatalogueSourceSwitch.vue'
 import RateLimitFields from './RateLimitFields.vue'
 import SecretField from './SecretField.vue'
 import ServiceSource from './ServiceSource.vue'
@@ -444,7 +446,7 @@ import EmbeddingMaintenance from '../EmbeddingMaintenance.vue'
 
 export default {
 	name: 'KnowledgeTab',
-	components: { AdminSection, EmbeddingMaintenance, RateLimitFields, SecretField, ServiceSource, TestAction, ToggleSwitch },
+	components: { AdminSection, CatalogueSourceSwitch, EmbeddingMaintenance, RateLimitFields, SecretField, ServiceSource, TestAction, ToggleSwitch },
 	inject: ['admin'],
 	data() {
 		return { customEmbeddingLimits: false, presets: RATE_LIMIT_PRESETS, defaultLinkField: CATALOGUE_DEFAULT_LINK_FIELD }

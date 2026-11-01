@@ -28,10 +28,11 @@ final class OpenApiCompiler {
 		'proxy-authorization', 'proxy-connection', 'forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto',
 	];
 	private const MUTATION_HINTS = [
-		'activate', 'add', 'apply', 'approve', 'book', 'cancel', 'checkout', 'create', 'deactivate', 'delete', 'disable',
-		'enable', 'favorite', 'favourite', 'follow', 'join', 'leave', 'like', 'login', 'logout', 'mark', 'order', 'pay',
-		'register', 'reject', 'remove', 'reserve', 'reset', 'save', 'send', 'set', 'signin', 'signout', 'subscribe',
-		'toggle', 'unsubscribe', 'update', 'upload', 'vote',
+		'accept', 'activate', 'add', 'apply', 'approve', 'archive', 'assign', 'book', 'cancel', 'checkout', 'create',
+		'deactivate', 'decline', 'delete', 'disable', 'enable', 'enrol', 'enroll', 'favorite', 'favourite', 'follow',
+		'invite', 'join', 'leave', 'like', 'login', 'logout', 'mark', 'order', 'pay', 'publish', 'register', 'reject',
+		'remove', 'reserve', 'reset', 'revoke', 'save', 'send', 'set', 'signin', 'signout', 'submit', 'subscribe',
+		'toggle', 'update', 'upload', 'vote', 'withdraw',
 	];
 
 	/**
@@ -195,7 +196,7 @@ final class OpenApiCompiler {
 		$entry['input_schema'] = self::inputSchema($entry['parameters']);
 		$this->analyzeResponses($operation['responses'] ?? null, $refs, $entry);
 
-		$hints = array_values(array_intersect(self::MUTATION_HINTS, self::words($path . ' ' . ($entry['operation_id'] ?? '') . ' ' . $entry['summary'])));
+		$hints = self::mutationHints(self::words($path . ' ' . ($entry['operation_id'] ?? '') . ' ' . $entry['summary']));
 		if ($hints !== []) {
 			$entry['notes'][] = ['code' => 'possibly_mutating', 'detail' => implode(', ', array_slice($hints, 0, 5))];
 		}
@@ -632,6 +633,19 @@ final class OpenApiCompiler {
 				$entry['notes'][] = ['code' => 'response_schema_unreadable', 'detail' => $e->getErrorCode()];
 			}
 		}
+	}
+
+	/** @return list<string> */
+	/**
+	 * Words that name a mutating verb, also behind an un-/re- prefix such as
+	 * "unapply" or "resend".
+	 *
+	 * @param list<string> $words
+	 * @return list<string>
+	 */
+	private static function mutationHints(array $words): array {
+		return array_values(array_filter($words, static fn (string $word): bool => in_array($word, self::MUTATION_HINTS, true)
+			|| (preg_match('/^(?:un|re)([a-z]{3,})$/', $word, $match) === 1 && in_array($match[1], self::MUTATION_HINTS, true))));
 	}
 
 	/** @return list<string> */

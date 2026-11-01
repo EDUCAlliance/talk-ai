@@ -5,6 +5,13 @@
 		<template #actions>
 			<button v-if="!detail"
 				type="button"
+				class="ta-btn"
+				:aria-expanded="String(presetsOpen)"
+				@click="togglePresets">
+				{{ t('educai', 'Add from preset') }}
+			</button>
+			<button v-if="!detail"
+				type="button"
 				class="ta-btn ta-btn--primary"
 				@click="openDialog(null)">
 				{{ t('educai', 'Add API connection') }}
@@ -15,6 +22,40 @@
 			<p v-if="actionError" class="ta-note ta-note--error" role="alert">
 				{{ actionError }}
 			</p>
+			<div v-if="presetsOpen" class="ta-api-presets">
+				<p v-if="presets === null" class="ta-hint">
+					{{ t('educai', 'Loading presets…') }}
+				</p>
+				<template v-else>
+					<p class="ta-hint">
+						{{ t('educai', 'A preset creates a disabled connection with a curated document and suggested review values. Nothing is sent to the API; you confirm every operation, the data visibility and the approval yourself.') }}
+					</p>
+					<div v-for="preset in presets" :key="preset.id" class="ta-list__row">
+						<div class="ta-list__main">
+							<p class="ta-list__title">
+								{{ preset.name }}
+							</p>
+							<p class="ta-list__meta">
+								{{ preset.description }}
+							</p>
+							<p class="ta-list__meta">
+								<code class="ta-code">{{ preset.base_url }}</code>
+								· {{ authModeLabel(preset.auth_mode) }}
+								· {{ n('educai', '{count} read operation', '{count} read operations', preset.operations.length, { count: preset.operations.length }) }}
+								· {{ t('educai', 'Based on upstream version {version} of {date}', { version: preset.upstream.version, date: preset.upstream.retrieved_at }) }}
+							</p>
+						</div>
+						<div class="ta-list__actions">
+							<button type="button"
+								class="ta-btn ta-btn--primary"
+								:disabled="busy !== ''"
+								@click="createFromPreset(preset)">
+								{{ busy === 'preset' ? t('educai', 'Creating…') : t('educai', 'Create connection') }}
+							</button>
+						</div>
+					</div>
+				</template>
+			</div>
 			<p v-if="loading" class="ta-hint">
 				{{ t('educai', 'Loading API connections…') }}
 			</p>
@@ -327,7 +368,7 @@ import { showSuccess } from '@nextcloud/dialogs'
 import { generateUrl } from '@nextcloud/router'
 import { n, t } from '../../l10n.js'
 import { formatWhen } from '../../utils/adminOverview.js'
-import { CONNECTIONS_URL, DATA_VISIBILITY, REVISIONS_URL, authModeLabel, codeText, diffEntries, errorText, reviewChanged, reviewEdit, reviewState } from '../../utils/apiConnections.js'
+import { CONNECTIONS_URL, DATA_VISIBILITY, PRESETS_URL, REVISIONS_URL, authModeLabel, codeText, diffEntries, errorText, reviewChanged, reviewEdit, reviewState } from '../../utils/apiConnections.js'
 import AdminSection from './AdminSection.vue'
 import ApiConnectionDialog from './ApiConnectionDialog.vue'
 import ApiOperationReview from './ApiOperationReview.vue'
@@ -354,6 +395,8 @@ export default {
 			busy: '',
 			actionError: '',
 			importUrl: '',
+			presetsOpen: false,
+			presets: null,
 		}
 	},
 	computed: {
@@ -459,6 +502,9 @@ export default {
 			}
 			if (connection.data_visibility !== DATA_VISIBILITY) {
 				chips.push({ label: t('educai', 'Data visibility not confirmed'), class: 'ta-chip--warn' })
+			}
+			if (connection.catalogue_source) {
+				chips.push({ label: t('educai', 'Course catalogue source'), class: 'ta-chip--info' })
 			}
 			return chips
 		},
@@ -607,6 +653,29 @@ export default {
 				const response = await axios.put(generateUrl(`${CONNECTIONS_URL}/${this.selectedId}`), { base_url: url })
 				this.mergeConnection(response.data)
 			}, t('educai', 'Could not save the API connection.'))
+		},
+		async togglePresets() {
+			this.presetsOpen = !this.presetsOpen
+			if (!this.presetsOpen || this.presets !== null) {
+				return
+			}
+			try {
+				const response = await axios.get(generateUrl(PRESETS_URL))
+				this.presets = response.data.presets ?? []
+			} catch (error) {
+				this.presetsOpen = false
+				this.actionError = errorText(error, t('educai', 'Could not load the presets.'))
+			}
+		},
+		async createFromPreset(preset) {
+			await this.run('preset', async () => {
+				const response = await axios.post(generateUrl(`${PRESETS_URL}/${encodeURIComponent(preset.id)}/connections`))
+				this.presetsOpen = false
+				this.importUrl = ''
+				showSuccess(t('educai', 'Connection "{name}" created. Review its operations before enabling it.', { name: response.data.connection.name }))
+				this.selectedId = response.data.connection.id
+				this.applyDetail(response.data)
+			}, t('educai', 'Could not create the connection from the preset.'))
 		},
 		async remove(connection) {
 			if (!confirm(t('educai', 'Delete API connection "{name}"? Bots that use its tools lose access immediately.', { name: connection.name }))) {

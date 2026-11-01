@@ -10,6 +10,7 @@ use OCA\EducAI\Controller\ApiConnectionController;
 use OCA\EducAI\Db\ApiConnection;
 use OCA\EducAI\OpenApi\ApiConnectionService;
 use OCA\EducAI\OpenApi\ApiOperationTester;
+use OCA\EducAI\OpenApi\ApiPresetService;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\Fixture;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\OpenApiHarness;
 use OCP\AppFramework\Http\DataResponse;
@@ -35,7 +36,7 @@ final class ApiConnectionControllerTest extends TestCase {
 			static fn (\ReflectionMethod $method): bool => $method->getDeclaringClass()->getName() === ApiConnectionController::class && !$method->isConstructor(),
 		);
 
-		self::assertCount(13, $actions);
+		self::assertCount(17, $actions);
 		foreach ($actions as $method) {
 			$doc = (string)$method->getDocComment();
 			self::assertStringContainsString('@AdminRequired', $doc, $method->getName());
@@ -46,7 +47,7 @@ final class ApiConnectionControllerTest extends TestCase {
 		}
 		foreach ($routes as $route) {
 			if (str_starts_with($route['name'], 'api_connection#')) {
-				self::assertMatchesRegularExpression('#^/api/v1/admin/api-(connections|revisions)(/|$)#', $route['url']);
+				self::assertMatchesRegularExpression('#^/api/v1/admin/api-(connections|revisions|presets|catalogue-source)(/|$)#', $route['url']);
 			}
 		}
 	}
@@ -212,6 +213,45 @@ final class ApiConnectionControllerTest extends TestCase {
 		self::assertCount(2, $this->harness->client->requests);
 	}
 
+	public function testPresetAndCatalogueSourceRoutes(): void {
+		$controller = $this->controller();
+		$presets = $this->ok($controller->presets())['presets'];
+		self::assertSame(['educ-catalogue'], array_column($presets, 'id'));
+		self::assertSame('3.0.2', $presets[0]['upstream']['version']);
+		$this->error($controller->createFromPreset('unknown'), 404, 'preset_not_found');
+
+		$created = $this->ok($controller->createFromPreset('educ-catalogue'), 201);
+		$id = $created['connection']['id'];
+		self::assertFalse($created['connection']['enabled']);
+		self::assertFalse($created['connection']['catalogue_source']);
+		self::assertNull($created['active']);
+		self::assertSame('preset', $created['draft']['source_kind']);
+		self::assertSame([], $this->harness->client->requests);
+
+		$source = $this->ok($controller->catalogueSource());
+		self::assertNull($source['connection_id']);
+		self::assertSame($id, $source['candidates'][0]['id']);
+		self::assertSame(['GET /course/list' => 'no_approved_revision', 'GET /version' => 'no_approved_revision'], (array)$source['candidates'][0]['operations']);
+		$this->error($controller->setCatalogueSource($id), 409, 'catalogue_source_unavailable');
+
+		$revisionId = $created['draft']['id'];
+		$this->harness->service->updateDraftOperations($revisionId, array_fill_keys(array_column($created['draft']['operations'], 'id'), ['read_confirmed' => true]), OpenApiHarness::ADMIN);
+		$this->harness->service->updateConnection($id, ['data_visibility' => ApiConnection::VISIBILITY_SHARED_FOR_BOT_AUDIENCE], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($revisionId, OpenApiHarness::ADMIN);
+		$this->error($controller->setCatalogueSource($id), 409, 'catalogue_source_unavailable');
+		$this->harness->service->setEnabled($id, true, OpenApiHarness::ADMIN);
+
+		$selected = $this->ok($controller->setCatalogueSource($id));
+		self::assertSame($id, $selected['connection_id']);
+		self::assertSame(['GET /course/list' => null, 'GET /version' => null], (array)$selected['candidates'][0]['operations']);
+		self::assertTrue($this->ok($controller->show($id))['connection']['catalogue_source']);
+		$this->error($controller->destroy($id), 409, 'catalogue_source_in_use');
+
+		self::assertNull($this->ok($controller->setCatalogueSource(null))['connection_id']);
+		self::assertTrue($this->ok($controller->destroy($id))['deleted']);
+		self::assertSame([], $this->harness->client->requests);
+	}
+
 	public function testUnexpectedFailuresStayGenericAndLogNoTrace(): void {
 		$service = $this->createMock(ApiConnectionService::class);
 		$service->method('listConnections')->willThrowException(new \RuntimeException('SQL failed with ' . OpenApiHarness::SECRET));
@@ -244,6 +284,8 @@ final class ApiConnectionControllerTest extends TestCase {
 			$request,
 			$service,
 			new ApiOperationTester($service, $this->harness->execution, $this->harness->connections),
+			new ApiPresetService($service),
+			$this->harness->catalogueSource,
 			$l10n,
 			$logger ?? $this->createMock(LoggerInterface::class),
 			OpenApiHarness::ADMIN,

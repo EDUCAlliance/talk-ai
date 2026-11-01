@@ -391,3 +391,105 @@ test('rendered section blocks approval until the data audience is confirmed', as
 	assert.match(container.textContent, /Confirm who may see the API data/)
 	assert.equal(button(container, 'Approve revision').disabled, true)
 })
+
+test('rendered section creates a disabled connection from a preset and opens its review', async ctx => {
+	const preset = {
+		id: 'educ-catalogue', revision: 1, name: 'EDUC course catalogue', description: 'Public courses.',
+		base_url: 'https://catalogue.educalliance.eu/api', auth_mode: 'none', operations: ['GET /course/list', 'GET /course/view', 'GET /version'],
+		upstream: { url: 'https://catalogue.educalliance.eu/api/', version: '3.0.2', sha256: 'b'.repeat(64), retrieved_at: '2026-10-30' },
+	}
+	const created = detail({
+		connection: connection({ id: 1, name: 'EDUC course catalogue', auth_mode: 'none', credential_set: false, data_visibility: null }),
+		draft: { ...revision(10, [operation(1, { config: config({ enabled: true }) })], { source_kind: 'preset' }), diff: { base_revision_id: null, added: [], removed: [], changed: [], unchanged: 0 }, approval_problems: { 1: ['read_not_confirmed'] } },
+	})
+	const { component, calls, successes } = section({
+		[LIST]: { connections: [] },
+		[`GET ${api.PRESETS_URL}`]: { presets: [preset] },
+		[`POST ${api.PRESETS_URL}/educ-catalogue/connections`]: created,
+	})
+	const { container } = mountDom(ctx, component)
+	await settle()
+
+	await click(button(container, 'Add from preset'))
+	assert.match(container.textContent, /Nothing is sent to the API/)
+	assert.match(container.textContent, /3 read operations/)
+	assert.match(container.textContent, /upstream version 3\.0\.2 of 2026-10-30/)
+	await click(button(container, 'Create connection'))
+
+	assert.deepEqual(calls.map(([method, url]) => `${method} ${url}`), [LIST, `GET ${api.PRESETS_URL}`, `POST ${api.PRESETS_URL}/educ-catalogue/connections`])
+	assert.match(successes.at(-1), /Review its operations before enabling it/)
+	assert.match(container.textContent, /All API connections/)
+	assert.equal(container.querySelector('#api-op-1-enabled').checked, true)
+	assert.equal(container.querySelector('.ta-api-op__confirm input').checked, false, 'The read confirmation stays with the admin')
+	assert.equal(button(container, 'Approve revision').disabled, true)
+})
+
+test('rendered catalogue source switch only offers ready connections and saves the choice separately', async ctx => {
+	const calls = []
+	const successes = []
+	let state = {
+		connection_id: null,
+		selected_found: true,
+		candidates: [
+			{ id: 3, name: 'EDUC course catalogue', enabled: true, operations: { 'GET /course/list': null, 'GET /version': 'operation_not_enabled' } },
+			{ id: 4, name: 'Draft copy', enabled: false, operations: { 'GET /course/list': 'no_approved_revision', 'GET /version': 'no_approved_revision' } },
+		],
+	}
+	const axios = {
+		get: async url => {
+			calls.push(['GET', url])
+			return { data: state }
+		},
+		put: async (url, body) => {
+			calls.push(['PUT', url, plain(body)])
+			state = { ...state, connection_id: body.connectionId }
+			return { data: state }
+		},
+	}
+	const component = compileSfc('components/admin/CatalogueSourceSwitch', { ...api, t, axios, generateUrl: url => url, showSuccess: message => successes.push(message) })
+	const { container } = mountDom(ctx, component)
+	await settle()
+
+	const radios = [...container.querySelectorAll('input[name="catalogue-source"]')]
+	assert.equal(radios.length, 3)
+	assert.equal(radios[0].checked, true, 'The legacy endpoint is the default')
+	assert.equal(radios[1].disabled, false)
+	assert.equal(radios[2].disabled, true, 'A connection without an approved course list cannot be chosen')
+	assert.match(container.textContent, /Course list: ready/)
+	assert.match(container.textContent, /Version check \(optional\): Not offered\./)
+	assert.match(container.textContent, /Course list: Approve a document revision/)
+	assert.equal(button(container, 'Use this source').disabled, true)
+	assert.doesNotMatch(container.textContent, /independent of the bot and group restrictions/)
+
+	await change(radios[1], true)
+	assert.match(container.textContent, /independent of the bot and group restrictions/)
+	await click(button(container, 'Use this source'))
+	assert.deepEqual(calls.at(-1), ['PUT', api.CATALOGUE_SOURCE_URL, { connectionId: 3 }])
+	assert.match(successes.at(-1), /through the API connection/)
+	assert.equal(button(container, 'Use this source').disabled, true)
+
+	state = { ...state, candidates: [{ ...state.candidates[0], operations: { 'GET /course/list': 'connection_disabled', 'GET /version': null } }] }
+	await click(container.querySelector('input[name="catalogue-source"]'))
+	await settle()
+	await click(button(container, 'Use this source'))
+	assert.deepEqual(calls.at(-1), ['PUT', api.CATALOGUE_SOURCE_URL, { connectionId: null }])
+	assert.match(successes.at(-1), /from its API endpoint again/)
+})
+
+test('rendered catalogue source switch warns when the selected connection stopped working', async ctx => {
+	const state = {
+		connection_id: 3,
+		selected_found: true,
+		candidates: [{ id: 3, name: 'EDUC course catalogue', enabled: false, operations: { 'GET /course/list': 'connection_disabled', 'GET /version': 'connection_disabled' } }],
+	}
+	const axios = { get: async () => ({ data: state }), put: async () => ({ data: state }) }
+	const component = compileSfc('components/admin/CatalogueSourceSwitch', { ...api, t, axios, generateUrl: url => url, showSuccess: () => {} })
+	const { container } = mountDom(ctx, component)
+	await settle()
+
+	const radios = [...container.querySelectorAll('input[name="catalogue-source"]')]
+	assert.equal(radios[1].checked, true)
+	assert.equal(radios[1].disabled, false, 'The current choice stays visible even when it is unusable')
+	assert.match(container.textContent, /Course list: The API connection is disabled\./)
+	assert.match(container.textContent, /keeps the existing index until the connection works again/)
+})
