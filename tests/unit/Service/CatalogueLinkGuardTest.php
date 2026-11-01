@@ -127,6 +127,65 @@ class CatalogueLinkGuardTest extends TestCase {
 		$this->assertSame(CatalogueLinkGuard::OUTCOME_REPLACED, $httpVariant['outcome']);
 	}
 
+	public function testCourseIdentityIsRecognizedBeforeUnsafeOrNoncanonicalUrlValidation(): void {
+		$this->verify(777, 'AI Basics', 'https://apply.partner.example/777?campaign=verified');
+		foreach ([
+			'https://catalogue.test.educ.example/Opportunity/777?utm_source=chat',
+			'https://catalogue.test.educ.example/Opportunity/777?utm_source=chat#details',
+			'https://user@catalogue.test.educ.example/Opportunity/777',
+			'https://user:password@catalogue.test.educ.example/Opportunity/777?utm_source=chat',
+			'//catalogue.test.educ.example/Opportunity/777',
+			'//user@catalogue.test.educ.example/Opportunity/777?utm_source=chat',
+			self::LIVE . '/Opportunity/777?utm_source=chat',
+		] as $url) {
+			$result = $this->guard->enforce('See [course](' . $url . ').', $this->l10n);
+			$this->assertSame(CatalogueLinkGuard::OUTCOME_REPLACED, $result['outcome'], $url);
+			$this->assertStringNotContainsString($url, $result['text']);
+			$this->assertStringContainsString('Course page: ' . self::LIVE . '/Opportunity/777', $result['text']);
+		}
+		$answer = 'Apply: https://apply.partner.example/777?campaign=verified; other: //other.example/about?utm_source=chat';
+		$this->assertSame($answer, $this->guard->enforce($answer, $this->l10n)['text']);
+		$this->assertNull(CanonicalLinkResolver::canonicalize('https://user@catalogue.educ.example/Opportunity/777'));
+	}
+
+	public function testEveryDistinctUrlIsCheckedWithoutChangingUnrelatedLongAnswers(): void {
+		$this->verify(777, 'AI Basics', 'https://apply.partner.example/777');
+		foreach ([49, 50, 51, 150] as $count) {
+			$prefix = implode("\n", array_map(static fn (int $i): string => 'https://unrelated.example/source/' . $i, range(1, $count))) . "\n";
+			$bad = $this->guard->enforce($prefix . 'https://catalogue.test.educ.example/Opportunity/777', $this->l10n);
+			$this->assertSame(CatalogueLinkGuard::OUTCOME_REPLACED, $bad['outcome'], (string)$count);
+			$good = $prefix . self::LIVE . '/Opportunity/777 https://apply.partner.example/777';
+			$this->assertSame($good, $this->guard->enforce($good, $this->l10n)['text']);
+			$this->assertSame($prefix, $this->guard->enforce($prefix, $this->l10n)['text']);
+		}
+	}
+
+	public function testDerivedPermalinkRouteStillIdentifiesCourseWithTrackingQuery(): void {
+		$this->verify(5, 'Permalink course', null, 'https://courses.educ.example/course/5');
+		$result = $this->guard->enforce('See //user@courses.test.educ.example/course/5?utm_source=chat', $this->l10n);
+		$this->assertSame(CatalogueLinkGuard::OUTCOME_REPLACED, $result['outcome']);
+		$this->assertStringContainsString('https://courses.educ.example/course/5', $result['text']);
+	}
+
+	public function testQueryIdentityTemplateRecognizesExtraAndReorderedParameters(): void {
+		$resolver = CanonicalLinkResolver::fromConfig(null, 'https://catalogue.educ.example/view?lang=en&course={id}', []);
+		$links = $this->createMock(CatalogueLinkService::class);
+		$links->method('resolver')->willReturn($resolver);
+		$catalogue = $this->createMock(CatalogueEmbeddingService::class);
+		$catalogue->method('isEnabled')->willReturn(true);
+		$guard = new CatalogueLinkGuard($this->ledger, $links, $catalogue, $this->createMock(LoggerInterface::class));
+		$this->verify(777, 'AI Basics', null, 'https://catalogue.educ.example/view?lang=en&course=777');
+		foreach ([
+			'https://catalogue.test.educ.example/view?lang=en&course=777&utm_source=chat',
+			'//user@catalogue.test.educ.example/view?course=777&lang=en',
+			'https://catalogue.educ.example/view?lang=de&course=777',
+		] as $url) {
+			$this->assertSame(CatalogueLinkGuard::OUTCOME_REPLACED, $guard->enforce($url, $this->l10n)['outcome'], $url);
+		}
+		$canonical = 'https://catalogue.educ.example/view?lang=en&course=777';
+		$this->assertSame($canonical, $guard->enforce($canonical, $this->l10n)['text']);
+	}
+
 	public function testUnknownIdOnCatalogueHostIsUnverifiable(): void {
 		$this->verify(777, 'AI Basics');
 

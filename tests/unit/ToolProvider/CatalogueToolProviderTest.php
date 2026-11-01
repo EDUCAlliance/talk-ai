@@ -170,4 +170,48 @@ class CatalogueToolProviderTest extends TestCase {
 		$this->assertStringContainsString('section(s) omitted', $text);
 		$this->assertStringContainsString('{{course:ID}}', $text);
 	}
+	public function testOversizedIndivisibleDetailIsAnErrorNotAClippedUrlOrShownReference(): void {
+		$canonical = 'https://catalogue.educ.example/Opportunity/777?x=';
+		$canonical .= str_repeat('a', CanonicalLinkResolver::MAX_URL_LENGTH - strlen($canonical));
+		$application = 'https://apply.partner.example/form?x=';
+		$application .= str_repeat('b', CanonicalLinkResolver::MAX_URL_LENGTH - strlen($application));
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('getCourseFromEmbeddings')->willReturn([
+			'id' => 777, 'title' => str_repeat('T', 200), 'code' => str_repeat('C', 100),
+			'permalink' => $canonical, 'application_link' => $application,
+			'summary' => str_repeat('Description ', 1000),
+		]);
+		[$provider, $ledger] = $this->linkedProvider($embeddings);
+
+		$result = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777]);
+		$this->assertTrue($result['isError']);
+		$this->assertSame('result_record_too_large', $result['error']['code']);
+		$this->assertSame([], $ledger->records());
+		$text = $result['content'][0]['text'];
+		$this->assertLessThanOrEqual(AgentExecutor::TOOL_OUTPUT_LIMIT, mb_strlen($text, 'UTF-8'));
+		$executor = (new \ReflectionClass(AgentExecutor::class))->newInstanceWithoutConstructor();
+		$this->assertSame($text, (new \ReflectionMethod(AgentExecutor::class, 'sanitizeOutput'))->invoke($executor, $result));
+	}
+
+	public function testLongButFittingDetailLinksRemainWholeAfterAgentSanitizer(): void {
+		$canonical = 'https://catalogue.educ.example/Opportunity/777?x=' . str_repeat('a', 1400);
+		$application = 'https://apply.partner.example/form?x=' . str_repeat('b', 1400);
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('getCourseFromEmbeddings')->willReturn([
+			'id' => 777, 'title' => 'Long links', 'permalink' => $canonical,
+			'application_link' => $application, 'description' => str_repeat('Description ', 1000),
+		]);
+		[$provider, $ledger] = $this->linkedProvider($embeddings);
+		$result = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777]);
+		$this->assertFalse($result['isError']);
+		$executor = (new \ReflectionClass(AgentExecutor::class))->newInstanceWithoutConstructor();
+		$text = (new \ReflectionMethod(AgentExecutor::class, 'sanitizeOutput'))->invoke($executor, $result);
+		$this->assertSame($result['content'][0]['text'], $text);
+		$this->assertStringContainsString($canonical, $text);
+		$this->assertStringContainsString($application, $text);
+		$this->assertArrayHasKey('777', $ledger->records());
+	}
+
 }

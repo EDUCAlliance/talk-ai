@@ -26,7 +26,6 @@ final class ApiResultProjector {
 
 	/** Successively stricter text limits used to fit the output budget. */
 	private const TEXT_LIMITS = [500, 240, 100, 40];
-	private const ID_LIMIT = 128;
 	private const KEY_PATTERN = '/^[a-z][a-z0-9_]{0,39}$/D';
 
 	/**
@@ -209,7 +208,12 @@ final class ApiResultProjector {
 		if ($mapping['id'] !== null) {
 			$rawId = $this->scalar($item, $mapping['id'], $where);
 			if ($rawId !== null) {
-				$record['id'] = is_string($rawId) ? ParameterSchemaCompiler::text($rawId, self::ID_LIMIT) : $rawId;
+				// Identity is data, not display text: normalization or truncation
+				// would merge distinct records. JSON must preserve it exactly.
+				if (is_string($rawId) && !mb_check_encoding($rawId, 'UTF-8')) {
+					throw self::shapeError('result_field_type', 'A record identity is not valid UTF-8.', $where . $mapping['id']);
+				}
+				$record['id'] = $rawId;
 			}
 		}
 		if ($mapping['title'] !== null) {

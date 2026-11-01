@@ -20,7 +20,6 @@ use Psr\Log\LoggerInterface;
  */
 class CatalogueLinkGuard {
 	public const MAX_FALLBACK_ITEMS = 10;
-	public const MAX_CHECKED_URLS = 50;
 	public const MAX_INDEX_LOOKUPS = 20;
 
 	public const OUTCOME_UNCHANGED = 'unchanged';
@@ -28,7 +27,7 @@ class CatalogueLinkGuard {
 	public const OUTCOME_REPLACED = 'replaced';
 
 	private const MARKER_PATTERN = '/\{\{\s*course\s*:\s*([^\s{}]{1,128})\s*\}\}/i';
-	private const URL_PATTERN = '~https?://[^\s<>"\'`()\[\]{}|\\\\^]+~i';
+	private const URL_PATTERN = '~(?<![A-Za-z0-9:/])(?:https?:)?//[^\s<>"\'`()\[\]{}|\\\\^]+~i';
 
 	/** @var array<string,CatalogueReference|null> */
 	private array $indexCache = [];
@@ -79,10 +78,10 @@ class CatalogueLinkGuard {
 		}, $answer) ?? $answer;
 
 		preg_match_all(self::URL_PATTERN, $text, $matches);
-		$urls = array_slice(array_values(array_unique(array_map(
+		$urls = array_values(array_unique(array_map(
 			static fn (string $url): string => rtrim($url, '.,;:!?*_~'),
 			$matches[0],
-		))), 0, self::MAX_CHECKED_URLS);
+		)));
 		$derivedRoutes = $this->derivedRoutes($known);
 		foreach ($urls as $url) {
 			$reason = $this->classifyUrl($url, $known, $resolver, $derivedRoutes, $referenced);
@@ -112,16 +111,21 @@ class CatalogueLinkGuard {
 	 */
 	private function classifyUrl(string $url, array &$known, CanonicalLinkResolver $resolver, array $derivedRoutes, array &$referenced): ?string {
 		$canonical = CanonicalLinkResolver::canonicalize($url);
-		$origin = CanonicalLinkResolver::originOf($url);
-		if ($canonical === null || $origin === null) {
+		// Candidate identification is deliberately broader than trusted URL
+		// validation; unsafe userinfo or a missing scheme must not hide a course.
+		$parts = parse_url($url);
+		$origin = is_array($parts) && isset($parts['host'])
+			? CanonicalLinkResolver::originOf(($parts['scheme'] ?? 'https') . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : ''))
+			: null;
+		if ($origin === null) {
 			return null;
 		}
 		foreach ($known as $id => $reference) {
-			if ($reference['canonical_url'] === $canonical) {
+			if ($canonical !== null && $reference['canonical_url'] === $canonical) {
 				$referenced[(string)$id] = true;
 				return null;
 			}
-			if ($reference['application_url'] === $canonical) {
+			if ($canonical !== null && $reference['application_url'] === $canonical) {
 				return null;
 			}
 		}
@@ -132,15 +136,15 @@ class CatalogueLinkGuard {
 			if ($reference !== null) {
 				$known[$routeId] ??= $reference;
 				$referenced[$routeId] = true;
-				return $reference['canonical_url'] === $canonical ? null : 'link_mismatch';
+				return $canonical !== null && $reference['canonical_url'] === $canonical ? null : 'link_mismatch';
 			}
 			return $this->isCatalogueHost($origin, $resolver, $known) ? 'unverified_link' : null;
 		}
 
-		$tail = CanonicalLinkResolver::pathAndQuery($url);
+		$tail = parse_url($url, PHP_URL_PATH);
 		foreach ($known as $id => $reference) {
 			if ($reference['canonical_url'] !== null
-				&& CanonicalLinkResolver::pathAndQuery($reference['canonical_url']) === $tail
+				&& parse_url($reference['canonical_url'], PHP_URL_PATH) === $tail
 				&& CanonicalLinkResolver::originOf($reference['canonical_url']) !== $origin) {
 				$referenced[(string)$id] = true;
 				return 'link_host_mismatch';
@@ -158,9 +162,9 @@ class CatalogueLinkGuard {
 	private function derivedRoutes(array $known): array {
 		$routes = [];
 		foreach ($known as $id => $reference) {
-			$tail = $reference['canonical_url'] !== null ? CanonicalLinkResolver::pathAndQuery($reference['canonical_url']) : null;
+			$tail = $reference['canonical_url'] !== null ? parse_url($reference['canonical_url'], PHP_URL_PATH) : null;
 			$segment = '/' . rawurlencode((string)$id);
-			if ($tail === null || !str_ends_with($tail, $segment) || str_contains($tail, '?')) {
+			if (!is_string($tail) || !str_ends_with($tail, $segment)) {
 				continue;
 			}
 			$routes['~^' . preg_quote(substr($tail, 0, -strlen($segment)), '~') . '/([^/?#&]+)$~D'] = true;
@@ -170,8 +174,8 @@ class CatalogueLinkGuard {
 
 	/** @param list<string> $routes */
 	private function matchDerivedRoute(string $url, array $routes): ?string {
-		$tail = CanonicalLinkResolver::pathAndQuery($url);
-		if ($tail === null) {
+		$tail = parse_url($url, PHP_URL_PATH);
+		if (!is_string($tail)) {
 			return null;
 		}
 		foreach ($routes as $route) {

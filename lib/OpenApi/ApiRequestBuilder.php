@@ -85,13 +85,6 @@ final class ApiRequestBuilder {
 	}
 
 	private static function number(float $value): string {
-		if (floor($value) === $value) {
-			return number_format($value, 0, '.', '');
-		}
-		$shortest = json_encode($value, JSON_THROW_ON_ERROR);
-		if (stripos($shortest, 'e') === false) {
-			return $shortest;
-		}
-		return rtrim(rtrim(sprintf('%.20F', $value), '0'), '.');
+		return DecimalNumber::format($value);
 	}
 }

@@ -190,13 +190,15 @@ final class ArgumentValidator {
 		}
 		if (isset($schema['minimum'])) {
 			$exclusive = ($schema['exclusiveMinimum'] ?? false) === true;
-			if ($exclusive ? $value <= $schema['minimum'] : $value < $schema['minimum']) {
+			$comparison = DecimalNumber::compare($value, $schema['minimum']);
+			if ($exclusive ? $comparison <= 0 : $comparison < 0) {
 				$errors[] = $pointer . ': minimum';
 			}
 		}
 		if (isset($schema['maximum'])) {
 			$exclusive = ($schema['exclusiveMaximum'] ?? false) === true;
-			if ($exclusive ? $value >= $schema['maximum'] : $value > $schema['maximum']) {
+			$comparison = DecimalNumber::compare($value, $schema['maximum']);
+			if ($exclusive ? $comparison >= 0 : $comparison > 0) {
 				$errors[] = $pointer . ': maximum';
 			}
 		}
@@ -221,7 +223,7 @@ final class ArgumentValidator {
 			'number' => match (true) {
 				is_int($value) => $value,
 				is_float($value) && is_finite($value) => $value,
-				is_string($value) && preg_match('/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/D', $value) === 1 && is_finite((float)$value) => (float)$value,
+				is_string($value) => DecimalNumber::fromString($value),
 				default => null,
 			},
 			default => null,
@@ -231,7 +233,7 @@ final class ArgumentValidator {
 	/** @param list<mixed> $enum */
 	private static function inEnum(string|int|float|bool $value, array $enum, string $type): bool {
 		foreach ($enum as $candidate) {
-			if ($type === 'number' && (is_int($candidate) || is_float($candidate)) && (float)$candidate === (float)$value) {
+			if ($type === 'number' && (is_int($candidate) || is_float($candidate)) && DecimalNumber::format($candidate) === DecimalNumber::format($value)) {
 				return true;
 			}
 			if ($candidate === $value) {

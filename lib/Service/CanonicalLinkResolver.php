@@ -44,7 +44,6 @@ final class CanonicalLinkResolver {
 		private string $linkField,
 		private ?string $template,
 		private ?string $templateOrigin,
-		private ?string $routePattern,
 		private array $origins,
 	) {
 	}
@@ -82,14 +81,14 @@ final class CanonicalLinkResolver {
 
 		$template = trim((string)$template);
 		if ($template === '') {
-			return new self($field, null, null, null, array_keys($normalizedOrigins));
+			return new self($field, null, null, array_keys($normalizedOrigins));
 		}
-		[$normalizedTemplate, $templateOrigin, $routePattern] = self::compileTemplate($template);
-		return new self($field, $normalizedTemplate, $templateOrigin, $routePattern, array_keys($normalizedOrigins));
+		[$normalizedTemplate, $templateOrigin] = self::compileTemplate($template);
+		return new self($field, $normalizedTemplate, $templateOrigin, array_keys($normalizedOrigins));
 	}
 
 	public static function unconfigured(): self {
-		return new self(self::DEFAULT_LINK_FIELD, null, null, null, []);
+		return new self(self::DEFAULT_LINK_FIELD, null, null, []);
 	}
 
 	public function linkField(): string {
@@ -160,17 +159,50 @@ final class CanonicalLinkResolver {
 	}
 
 	/**
-	 * The record ID addressed by a URL on the configured course route, on any host.
+	 * Identify a course route independently from whether its URL is trusted.
+	 * Userinfo and network-path URLs may identify a conflicting link; they are
+	 * still rejected by canonicalize(). Tracking queries do not hide path IDs.
 	 */
 	public function matchCourseRoute(string $url): ?string {
-		if ($this->routePattern === null) {
+		if ($this->template === null) {
 			return null;
 		}
-		$tail = self::pathAndQuery($url);
-		if ($tail === null || !preg_match($this->routePattern, $tail, $matches)) {
+		$template = parse_url(str_replace(self::PLACEHOLDER, self::SENTINEL, $this->template));
+		$candidate = parse_url($url);
+		if ($template === false || $candidate === false || !isset($candidate['host'])) {
 			return null;
 		}
-		return self::normalizeId(rawurldecode($matches[1]));
+		$templatePath = $template['path'] ?? '/';
+		$candidatePath = $candidate['path'] ?? '/';
+		if (str_contains($templatePath, self::SENTINEL)) {
+			return self::matchRouteValue($templatePath, $candidatePath);
+		}
+		if ($templatePath !== $candidatePath) {
+			return null;
+		}
+		// Match the identity-bearing query component, not the entire query
+		// string: added/reordered tracking parameters must not bypass checking.
+		foreach (explode('&', $template['query'] ?? '') as $pair) {
+			[$key, $value] = array_pad(explode('=', $pair, 2), 2, '');
+			if (!str_contains($value, self::SENTINEL)) {
+				continue;
+			}
+			foreach (explode('&', $candidate['query'] ?? '') as $candidatePair) {
+				[$candidateKey, $candidateValue] = array_pad(explode('=', $candidatePair, 2), 2, '');
+				if (rawurldecode($key) === rawurldecode($candidateKey)) {
+					$id = self::matchRouteValue($value, $candidateValue);
+					if ($id !== null) {
+						return $id;
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	private static function matchRouteValue(string $template, string $value): ?string {
+		$pattern = '~^' . str_replace(preg_quote(self::SENTINEL, '~'), '([^/?#&]+)', preg_quote($template, '~')) . '$~D';
+		return preg_match($pattern, $value, $matches) === 1 ? self::normalizeId(rawurldecode($matches[1])) : null;
 	}
 
 	/** Normalized absolute HTTP(S) URL, or null when it is unsafe or not absolute. */
@@ -244,7 +276,7 @@ final class CanonicalLinkResolver {
 	}
 
 	/**
-	 * @return array{0:string,1:string,2:string} Normalized template, its origin and the route pattern
+	 * @return array{0:string,1:string} Normalized template and its origin
 	 * @throws CatalogueLinkConfigurationException
 	 */
 	private static function compileTemplate(string $template): array {
@@ -279,10 +311,7 @@ final class CanonicalLinkResolver {
 		}
 
 		$normalized = self::build($parsed);
-		$tail = self::markdownSafe(($parsed['path'] === '' ? '/' : $parsed['path'])
-			. ($parsed['query'] !== null ? '?' . $parsed['query'] : ''));
-		$route = '~^' . str_replace(preg_quote(self::SENTINEL, '~'), '([^/?#&]+)', preg_quote($tail, '~')) . '$~D';
-		return [str_replace(self::SENTINEL, self::PLACEHOLDER, $normalized), $parsed['origin'], $route];
+		return [str_replace(self::SENTINEL, self::PLACEHOLDER, $normalized), $parsed['origin']];
 	}
 
 	/**

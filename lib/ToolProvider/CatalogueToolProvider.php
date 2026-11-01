@@ -679,11 +679,20 @@ class CatalogueToolProvider implements IToolProvider {
 				];
 			}
 
+			$detail = $this->buildCourseDetailText($course);
+			if ($detail === null) {
+				$message = 'This opportunity cannot fit into the tool result without shortening its identity or links. No details were returned.';
+				return [
+					'content' => [['type' => 'text', 'text' => $message]],
+					'isError' => true,
+					'error' => ['code' => 'result_record_too_large', 'message' => $message, 'details' => []],
+				];
+			}
 			return [
 				'content' => [
 					[
 						'type' => 'text',
-						'text' => $this->buildCourseDetailText($course),
+						'text' => $detail,
 					],
 				],
 				'isError' => false,
@@ -708,7 +717,7 @@ class CatalogueToolProvider implements IToolProvider {
 	 *
 	 * @param array<string,mixed> $course
 	 */
-	private function buildCourseDetailText(array $course): string {
+	private function buildCourseDetailText(array $course): ?string {
 		$resolved = $this->resolveLinks($course);
 		$isPast = (bool)($course['is_past'] ?? false);
 		$title = $this->truncateText($this->stringField($course, 'title') ?? 'Untitled Course', self::TITLE_LENGTH);
@@ -724,6 +733,9 @@ class CatalogueToolProvider implements IToolProvider {
 		}
 		$head .= $this->linkLines($resolved, '');
 		$footer = "\n" . self::LINK_INSTRUCTIONS;
+		if (mb_strlen($head . $footer, 'UTF-8') > self::OUTPUT_LIMIT) {
+			return null;
+		}
 
 		$infoItems = [
 			'Discipline' => $this->nestedName($course, 'discipline'),
@@ -800,6 +812,9 @@ class CatalogueToolProvider implements IToolProvider {
 			$body .= "\n($omitted section(s) omitted to stay within the tool output limit.)\n";
 		}
 
+		if (mb_strlen($head . $body . $footer, 'UTF-8') > self::OUTPUT_LIMIT) {
+			return null;
+		}
 		$this->recordReference($course, $resolved, $isPast);
 		return $head . $body . $footer;
 	}
