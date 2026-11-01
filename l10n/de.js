@@ -1656,6 +1656,7 @@ OC.L10N.register(
     "reviewed label" : "geprüfte Bezeichnung",
     "reviewed description" : "geprüfte Beschreibung",
     "Approved value" : "Freigegebener Wert",
-    "Draft value" : "Entwurfswert"
+    "Draft value" : "Entwurfswert",
+    "Address and authentication" : "Adresse und Authentifizierung"
 },
 "nplurals=2; plural=(n != 1);");

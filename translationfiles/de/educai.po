@@ -5852,3 +5852,7 @@ msgstr "Freigegebener Wert"
 #: src/utils/apiConnections.js
 msgid "Draft value"
 msgstr "Entwurfswert"
+
+#: src/components/admin/ApiConnectionsSection.vue
+msgid "Address and authentication"
+msgstr "Adresse und Authentifizierung"

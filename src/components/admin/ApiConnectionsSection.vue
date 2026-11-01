@@ -201,11 +201,11 @@
 					</li>
 				</ul>
 
-				<template v-if="draft">
-					<h4 class="ta-subheading">
-						{{ t('educai', '2 · Address and authentication') }}
-					</h4>
-					<dl class="ta-api-facts">
+				<h4 class="ta-subheading">
+					{{ draft ? t('educai', '2 · Address and authentication') : t('educai', 'Address and authentication') }}
+				</h4>
+				<dl class="ta-api-facts">
+					<template v-if="draft">
 						<dt>{{ t('educai', 'Servers in the document') }}</dt>
 						<dd>
 							<ul v-if="draft.servers.length" class="ta-api-servers">
@@ -223,30 +223,32 @@
 							</ul>
 							<span v-else>{{ t('educai', 'none declared') }}</span>
 						</dd>
-						<dt>{{ t('educai', 'Address actually used') }}</dt>
-						<dd>
-							<code v-if="detail.connection.base_url" class="ta-code">{{ detail.connection.base_url }}</code>
-							<span v-else class="ta-value--warn">{{ t('educai', 'not set') }}</span>
-						</dd>
-						<dt>{{ t('educai', 'Authentication') }}</dt>
-						<dd>
-							{{ authModeLabel(detail.connection.auth_mode) }}
-							<template v-if="detail.connection.auth_mode !== 'none'">
-								· {{ detail.connection.credential_set ? t('educai', 'credential stored') : t('educai', 'no credential stored') }}
-							</template>
-						</dd>
-						<dt>{{ t('educai', 'Data visibility') }}</dt>
-						<dd :class="{ 'ta-value--warn': !visibilityConfirmed }">
-							{{ visibilityConfirmed ? t('educai', 'Confirmed for everyone who reads bot answers') : t('educai', 'not confirmed') }}
-						</dd>
-					</dl>
-					<p v-if="serverMismatch" class="ta-note ta-note--warn" role="status">
-						{{ t('educai', 'The address used is not one of the servers in the document. Requests still only go to the address used.') }}
-					</p>
-					<button type="button" class="ta-btn" @click="openDialog(detail.connection)">
-						{{ t('educai', 'Edit connection settings') }}
-					</button>
+					</template>
+					<dt>{{ t('educai', 'Address actually used') }}</dt>
+					<dd>
+						<code v-if="detail.connection.base_url" class="ta-code">{{ detail.connection.base_url }}</code>
+						<span v-else class="ta-value--warn">{{ t('educai', 'not set') }}</span>
+					</dd>
+					<dt>{{ t('educai', 'Authentication') }}</dt>
+					<dd>
+						{{ authModeLabel(detail.connection.auth_mode) }}
+						<template v-if="detail.connection.auth_mode !== 'none'">
+							· {{ detail.connection.credential_set ? t('educai', 'credential stored') : t('educai', 'no credential stored') }}
+						</template>
+					</dd>
+					<dt>{{ t('educai', 'Data visibility') }}</dt>
+					<dd :class="{ 'ta-value--warn': !visibilityConfirmed }">
+						{{ visibilityConfirmed ? t('educai', 'Confirmed for everyone who reads bot answers') : t('educai', 'not confirmed') }}
+					</dd>
+				</dl>
+				<p v-if="draft && serverMismatch" class="ta-note ta-note--warn" role="status">
+					{{ t('educai', 'The address used is not one of the servers in the document. Requests still only go to the address used.') }}
+				</p>
+				<button type="button" class="ta-btn" @click="openDialog(detail.connection)">
+					{{ t('educai', 'Edit connection settings') }}
+				</button>
 
+				<template v-if="draft">
 					<h4 class="ta-subheading">
 						{{ t('educai', '3 · Operations') }}
 					</h4>

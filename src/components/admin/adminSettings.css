@@ -1642,6 +1642,10 @@
 	box-shadow: 0 12px 40px rgb(0 0 0 / 30%);
 }
 
+.educai-admin-dialog__box:focus:not(:focus-visible) {
+	outline: none;
+}
+
 .educai-admin-dialog__box h3 {
 	margin: 0 0 16px;
 	font-size: 18px;

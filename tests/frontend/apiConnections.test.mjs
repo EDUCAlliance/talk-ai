@@ -395,6 +395,22 @@ test('rendered section shows changes against the approved revision and lets a pa
 	assert.equal(button(container, 'Approve revision').disabled, false)
 })
 
+test('rendered section offers the settings of an approved connection without a draft', async ctx => {
+	const active = revision(9, [operation(1, { config: config({ enabled: true, read_confirmed: true, auth: 'scheme:bearerAuth', label: 'Search courses' }) })], { status: 'approved', approved_by: 'admin', approved_at: 1_790_000_000 })
+	const approved = detail({ connection: connection({ active_revision_id: 9, draft_revision_id: null, enabled: true }), active, draft: null })
+	const { component } = section({ [LIST]: { connections: [approved.connection] }, [DETAIL]: approved, 'GET /apps/educai/api/v1/groups': { groups: [] } })
+	const { container } = mountDom(ctx, component)
+	await settle()
+	await click(button(container, 'Open'))
+	assert.match(container.textContent, /Address and authentication/)
+	assert.match(container.textContent, /credential stored/)
+	await click(button(container, 'Edit connection settings'))
+	const dialog = container.querySelector('[role="dialog"]')
+	assert.ok(dialog, 'The settings dialog opens without importing a new document')
+	assert.equal(dialog.querySelector('input#api-connection-credential'), null)
+	assert.match(dialog.textContent, /Stored/)
+})
+
 test('rendered semantic diff shows approved and unsaved draft values before activation', async ctx => {
 	const offered = config({ enabled: true, read_confirmed: true, auth: 'scheme:bearerAuth' })
 	const active = revision(9, [operation(1, { config: offered })], { status: 'approved', approved_by: 'admin', approved_at: 1_790_000_000 })
