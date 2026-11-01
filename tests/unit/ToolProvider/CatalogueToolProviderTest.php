@@ -11,6 +11,7 @@ use OCA\EducAI\Service\CatalogueLinkService;
 use OCA\EducAI\Service\CatalogueReferenceLedger;
 use OCA\EducAI\Service\ToolExecutionPolicyService;
 use OCA\EducAI\ToolProvider\CatalogueToolProvider;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -118,6 +119,46 @@ class CatalogueToolProviderTest extends TestCase {
 		$text = $provider->executeTool('catalogue_search', ['query' => 'x'])['content'][0]['text'];
 
 		$this->assertStringContainsString('Course page: not available (no verified course link)', $text);
+	}
+
+	/** @return iterable<string,array{array<string,mixed>,?string}> */
+	public static function unavailableCourseLinks(): iterable {
+		foreach (['absent' => [], 'null' => ['id' => null]] as $case => $identity) {
+			yield $case . ' ID with template' => [$identity, 'https://catalogue.educ.example/Opportunity/{id}'];
+			yield $case . ' ID without template' => [$identity, null];
+		}
+		yield 'ID without template' => [['id' => 777], null];
+	}
+
+	#[DataProvider('unavailableCourseLinks')]
+	public function testMissingIdOrTemplateKeepsTheTitleWithoutInventingACourseLink(array $identity, ?string $template): void {
+		$record = $identity + ['title' => 'Preserved course title'];
+		$embeddings = $this->createMock(CatalogueEmbeddingService::class);
+		$embeddings->method('isEnabled')->willReturn(true);
+		$embeddings->method('search')->willReturn(['courses' => [$record], 'total' => 1]);
+		$embeddings->method('searchPast')->willReturn(['courses' => [$record], 'total' => 1]);
+		$embeddings->method('getCourseFromEmbeddings')->with(777, false)->willReturn($record);
+		[$provider, $ledger] = $this->linkedProvider($embeddings, $template);
+
+		foreach ([
+			'catalogue_search' => ['query' => 'preserved'],
+			'catalogue_past_search' => ['query' => 'preserved'],
+			'catalogue_get_opportunity' => ['opportunity_id' => 777],
+		] as $tool => $arguments) {
+			$result = $provider->executeTool($tool, $arguments);
+			$this->assertFalse($result['isError']);
+			$text = $result['content'][0]['text'];
+			$this->assertStringContainsString('Preserved course title', $text);
+			$this->assertStringContainsString('Course page: not available (no verified course link)', $text);
+			$this->assertStringNotContainsString('https://', $text);
+			if (!isset($identity['id'])) {
+				$this->assertStringNotContainsString('ID:', $text);
+				$this->assertStringNotContainsString('**ID:**', $text);
+			}
+		}
+		if (!isset($identity['id'])) {
+			$this->assertSame([], $ledger->records(), 'The lookup argument must not become a fabricated record identity');
+		}
 	}
 
 	public function testSearchKeepsWholeEntriesWithinTheToolBudget(): void {

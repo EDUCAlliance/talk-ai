@@ -9,8 +9,11 @@ use OCA\EducAI\Db\CatalogueEmbeddingMapper;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Service\CatalogueClient;
 use OCA\EducAI\Service\CatalogueEmbeddingService;
+use OCA\EducAI\Service\CatalogueLinkService;
 use OCA\EducAI\Service\EmbeddingClient;
 use OCA\EducAI\Service\SettingsService;
+use OCA\EducAI\Service\ToolExecutionPolicyService;
+use OCA\EducAI\ToolProvider\CatalogueToolProvider;
 use OCP\IConfig;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -283,6 +286,82 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 		$this->assertSame([$text->invoke($this->service, $courses[10]), $text->invoke($this->service, $courses[11])], $sent);
 		$this->assertSame('[0.5,0.5]', $vectors[1]);
 		$this->assertSame('[1,0]', $vectors[12]);
+	}
+
+	public function testMetadataOnlyRefreshPresentsNewLinksWithoutRegeneratingVectors(): void {
+		$old = ['id' => 777, 'title' => 'Physics', 'summary' => 'A lab course',
+			'permalink' => 'https://courses.example/old/777', 'application_link' => 'https://apply.example/old'];
+		$fresh = array_replace($old, ['permalink' => 'https://courses.example/new/777', 'application_link' => 'https://apply.example/new']);
+		$stored = new CatalogueEmbedding();
+		$stored->setCourseId(777);
+		$stored->setSearchableText((new \ReflectionMethod($this->service, 'buildSearchableText'))->invoke($this->service, $old));
+		$stored->setEmbedding('[0.5,0.5]');
+		$stored->setCourseData(json_encode($old));
+		$this->mapper->method('findAllCurrentByModel')->with('embedding-v2')->willReturn([$stored]);
+		$this->mapper->method('findAllPastByModel')->willReturn([]);
+		$this->mapper->method('findByCourseIdAndPast')->with(777, false)->willReturnCallback(static fn (): CatalogueEmbedding => $stored);
+		$this->mapper->expects($this->once())->method('upsert')->willReturnCallback(static function (CatalogueEmbedding $entity) use ($stored): CatalogueEmbedding {
+			$stored->setCourseData($entity->getCourseData());
+			$stored->setEmbedding($entity->getEmbedding());
+			return $entity;
+		});
+		$this->mapper->method('count')->willReturn(1);
+		$this->client->method('searchCourses')->willReturn(['courses' => [$fresh], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => 1]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => 0]]);
+		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
+		$this->embeddings->expects($this->never())->method('embedTexts');
+		$this->embeddings->expects($this->never())->method('embedQuery');
+		$this->settingsService->method('getCatalogueLinkConfig')->willReturn(['link_field' => '/permalink', 'link_template' => null, 'link_origins' => ['https://courses.example']]);
+		$provider = $this->catalogueProvider();
+		$before = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777]);
+		$this->assertStringContainsString($old['permalink'], $before['content'][0]['text']);
+		$this->assertStringContainsString($old['application_link'], $before['content'][0]['text']);
+
+		$this->assertTrue($this->service->reindex()['success']);
+
+		$after = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777]);
+		$this->assertFalse($after['isError']);
+		$this->assertSame($fresh, $stored->getCourseDataArray());
+		$this->assertSame('[0.5,0.5]', $stored->getEmbedding());
+		$this->assertStringContainsString($fresh['permalink'], $after['content'][0]['text']);
+		$this->assertStringContainsString($fresh['application_link'], $after['content'][0]['text']);
+		$this->assertStringNotContainsString('/old', $after['content'][0]['text']);
+	}
+
+	public function testTemplateOnlyChangePresentsNewUrlWithoutTouchingTheIndexOrEmbeddingProvider(): void {
+		$stored = new CatalogueEmbedding();
+		$stored->setCourseData('{"id":777,"title":"Physics"}');
+		$stored->setEmbedding('[0.5,0.5]');
+		$this->mapper->method('findByCourseIdAndPast')->with(777, false)->willReturn($stored);
+		$this->mapper->expects($this->never())->method('upsert');
+		$this->mapper->expects($this->never())->method('deleteStale');
+		$this->client->expects($this->never())->method('searchCourses');
+		$this->client->expects($this->never())->method('getPastCourses');
+		$this->embeddings->expects($this->never())->method('embedTexts');
+		$this->embeddings->expects($this->never())->method('embedQuery');
+		$this->settings->setCatalogueLinkTemplate('https://courses.example/old/{id}');
+		$this->settingsService->method('getCatalogueLinkConfig')->willReturnCallback(fn (): array => [
+			'link_field' => '/permalink', 'link_template' => $this->settings->getCatalogueLinkTemplate(), 'link_origins' => [],
+		]);
+		$links = new CatalogueLinkService($this->settingsService, $this->createMock(LoggerInterface::class));
+		$provider = $this->catalogueProvider($links);
+		$before = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777]);
+		$this->assertStringContainsString('Course page: https://courses.example/old/777', $before['content'][0]['text']);
+
+		$this->settings->setCatalogueLinkTemplate('https://courses.example/new/{id}');
+		$links->reset();
+		$after = $provider->executeTool('catalogue_get_opportunity', ['opportunity_id' => 777]);
+
+		$this->assertFalse($after['isError']);
+		$this->assertStringContainsString('Course page: https://courses.example/new/777', $after['content'][0]['text']);
+		$this->assertStringNotContainsString('/old/', $after['content'][0]['text']);
+		$this->assertSame('[0.5,0.5]', $stored->getEmbedding());
+		$this->assertSame(['id' => 777, 'title' => 'Physics'], $stored->getCourseDataArray());
+	}
+
+	private function catalogueProvider(?CatalogueLinkService $links = null): CatalogueToolProvider {
+		return new CatalogueToolProvider($this->service, new ToolExecutionPolicyService(), $this->createMock(LoggerInterface::class),
+			$links ?? new CatalogueLinkService($this->settingsService, $this->createMock(LoggerInterface::class)));
 	}
 
 	public function testRequestedPauseIsKeptAndTheRefreshWaitsForIt(): void {

@@ -19,6 +19,8 @@ use OCP\Http\Client\IResponse;
 trait InMemoryRows {
 	/** @var array<int,object> */
 	public array $rows = [];
+	/** @var \Closure(object):void|null Failure injection after a row was written. */
+	public ?\Closure $afterUpdate = null;
 	private int $nextId = 1;
 
 	public function insert($entity) {
@@ -29,6 +31,9 @@ trait InMemoryRows {
 
 	public function update($entity) {
 		$this->rows[$entity->getId()] = clone $entity;
+		if ($this->afterUpdate !== null) {
+			($this->afterUpdate)($entity);
+		}
 		return $entity;
 	}
 

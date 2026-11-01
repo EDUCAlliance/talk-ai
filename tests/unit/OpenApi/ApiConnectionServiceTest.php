@@ -168,6 +168,107 @@ final class ApiConnectionServiceTest extends TestCase {
 		})));
 	}
 
+	/** @return iterable<string,array{string}> */
+	public static function activationFailures(): iterable {
+		foreach (['previous revision', 'draft revision', 'active pointer', 'identity tombstone'] as $stage) {
+			yield $stage => [$stage];
+		}
+	}
+
+	#[DataProvider('activationFailures')]
+	public function testApprovalMapperFailureRollsBackAllWritesAndKeepsTheOldRevisionCallable(string $stage): void {
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->approveCourseSearch($connection, $first);
+		$removed = $this->harness->operationId($first, 'GET /open-data');
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			unset($document['paths']['/open-data']);
+			return $document;
+		}));
+		$this->harness->service->updateDraftOperations($draft->getId(), [$id => ['label' => 'Draft-only label']], OpenApiHarness::ADMIN);
+		$before = [];
+		foreach (['connections', 'revisions', 'operations'] as $table) {
+			$before[$table] = $this->harness->{$table}->rows;
+		}
+		$fail = static function (): void { throw new \RuntimeException('injected write failure'); };
+		if ($stage === 'previous revision' || $stage === 'draft revision') {
+			$this->harness->revisions->afterUpdate = static function (ApiSpecRevision $row) use ($stage, $first, $draft, $fail): void {
+				if (($stage === 'previous revision' && $row->getId() === $first->getId() && $row->getStatus() === ApiSpecRevision::STATUS_SUPERSEDED)
+					|| ($stage === 'draft revision' && $row->getId() === $draft->getId() && $row->isApproved())) {
+					$fail();
+				}
+			};
+		} elseif ($stage === 'active pointer') {
+			$this->harness->connections->afterUpdate = static function (ApiConnection $row) use ($draft, $fail): void {
+				if ($row->getActiveRevisionId() === $draft->getId()) {
+					$fail();
+				}
+			};
+		} else {
+			$this->harness->operations->afterUpdate = static function (\OCA\EducAI\Db\ApiOperation $row) use ($removed, $fail): void {
+				if ($row->getId() === $removed && $row->isTombstoned()) {
+					$fail();
+				}
+			};
+		}
+
+		try {
+			$this->harness->service->approve($draft->getId(), OpenApiHarness::ADMIN);
+			self::fail('Expected the mapper to fail after writing ' . $stage);
+		} catch (\RuntimeException $e) {
+			self::assertSame('injected write failure', $e->getMessage());
+		}
+
+		self::assertSame(['begin', 'rollback'], array_slice($this->harness->transactions, -2));
+		foreach ($before as $table => $rows) {
+			self::assertEquals($rows, $this->harness->{$table}->rows, $table . ' must roll back with the active pointer');
+		}
+		self::assertSame($first->getId(), $this->harness->connections->findById($connection->getId())->getActiveRevisionId());
+		self::assertTrue($this->harness->revisions->findById($first->getId())->isApproved());
+		self::assertTrue($this->harness->revisions->findById($draft->getId())->isDraft());
+		self::assertFalse($this->harness->operations->findById($removed)->isTombstoned());
+		$this->harness->respondJson(['data' => [['id' => 777, 'title' => 'Still active', 'summary' => 'Old mapping works']]]);
+		$this->harness->enterRun();
+		$result = $this->harness->provider->executeTool(OpenApiToolCatalog::toolName($connection->getId(), $id), ['query' => ['q' => 'Algebra']]);
+		self::assertFalse($result['isError']);
+		$output = json_decode($result['content'][0]['text'], true, 512, JSON_THROW_ON_ERROR);
+		self::assertSame('Search courses', $output['source']['operation']);
+		self::assertSame('Old mapping works', $output['records'][0]['summary']);
+		self::assertCount(1, $this->harness->client->requests);
+	}
+
+	public function testAnAlreadyResolvedToolUsesTheNewRevisionWhenExecutedAfterActivation(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->approveCourseSearch($connection, $first);
+		$tool = OpenApiToolCatalog::toolName($connection->getId(), $id);
+		$this->harness->enterRun();
+		self::assertSame([$tool], array_column($this->harness->provider->getTools(), 'name'));
+		$resolvedBefore = $this->harness->catalog->resolve($connection->getId(), $id);
+		self::assertSame($first->getId(), $resolvedBefore['revision']->getId());
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['info']['version'] = '2';
+			return $document;
+		}));
+		$mapping = $resolvedBefore['config']['mapping'];
+		$mapping['fields'] = [['key' => 'summary', 'pointer' => '/abstract']];
+		$this->harness->service->updateDraftOperations($draft->getId(), [$id => [
+			'label' => 'New review', 'fixed' => ['query' => ['state' => 'CLOSED']], 'mapping' => $mapping,
+		]], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($draft->getId(), OpenApiHarness::ADMIN);
+		$this->harness->respondJson(['data' => [['id' => 777, 'title' => 'Algebra', 'summary' => 'Stale mapping', 'abstract' => 'Fresh mapping']]]);
+
+		$result = $this->harness->provider->executeTool($tool, ['query' => ['q' => 'Algebra']]);
+
+		self::assertFalse($result['isError']);
+		$output = json_decode($result['content'][0]['text'], true, 512, JSON_THROW_ON_ERROR);
+		self::assertSame('New review', $output['source']['operation']);
+		self::assertSame('Fresh mapping', $output['records'][0]['summary']);
+		self::assertSame('https://api.courses.example/v1/courses?q=Algebra&state=CLOSED', $this->harness->client->requests[0]['uri']);
+		self::assertSame($draft->getId(), $this->harness->catalog->resolve($connection->getId(), $id)['revision']->getId());
+		self::assertSame($first->getId(), $resolvedBefore['revision']->getId(), 'The old snapshot still exists but must not be used for execution');
+	}
+
 	public function testOperationIdentityIsMethodAndPathAndSurvivesOperationIdOrLabelChanges(): void {
 		$connection = $this->harness->createCoursesConnection();
 		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
@@ -216,6 +317,71 @@ final class ApiConnectionServiceTest extends TestCase {
 		self::assertContains('operation_id', $diff['changed'][0]['aspects']);
 		self::assertSame(['before' => 'listCourses', 'after' => 'browseCourses'], $diff['changed'][0]['changes']['operation_id']);
 		self::assertArrayNotHasKey('summary', $diff['changed'][0]['changes']);
+	}
+
+	/** @return iterable<string,array{string,string,string}> */
+	public static function identityRenames(): iterable {
+		yield 'method' => ['post', '/courses/{courseId}', 'courseId'];
+		yield 'path' => ['get', '/classes/{courseId}', 'courseId'];
+		yield 'parameter template' => ['get', '/courses/{id}', 'id'];
+	}
+
+	#[DataProvider('identityRenames')]
+	public function testRenamedOperationsCannotInheritAnOldBotGrant(string $method, string $path, string $parameter): void {
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$oldId = $this->harness->operationId($first, 'GET /courses/{courseId}');
+		$this->harness->service->updateDraftOperations($first->getId(), [$oldId => [
+			'enabled' => true, 'read_confirmed' => true, 'auth' => 'scheme:bearerAuth',
+		]], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($first->getId(), OpenApiHarness::ADMIN);
+		$this->harness->service->setEnabled($connection->getId(), true, OpenApiHarness::ADMIN);
+		$oldGrant = OpenApiToolCatalog::toolName($connection->getId(), $oldId);
+		self::assertSame([$oldGrant], $this->exposedNames());
+		$this->harness->enterRun();
+
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document) use ($method, $path, $parameter): array {
+			$item = $document['paths']['/courses/{courseId}'];
+			$item['parameters'][0]['name'] = $parameter;
+			$item[$method] = $item['get'];
+			if ($method !== 'get') {
+				unset($item['get']);
+			}
+			unset($item['delete'], $document['paths']['/courses/{courseId}']);
+			$document['paths'][$path] = $item;
+			return $document;
+		}));
+		$newId = $this->harness->operationId($draft, strtoupper($method) . ' ' . $path);
+		self::assertNotSame($oldId, $newId);
+		self::assertFalse($draft->getOpConfigArray()[$newId]['enabled']);
+		self::assertFalse($draft->getOpConfigArray()[$newId]['read_confirmed']);
+		$diff = $this->harness->service->diff($draft, $this->harness->connections->findById($connection->getId()));
+		self::assertContains($newId, $diff['added']);
+		self::assertContains(['id' => $oldId, 'match_key' => 'GET /courses/{courseId}'], $diff['removed']);
+
+		if ($method === 'get') {
+			$this->harness->service->updateDraftOperations($draft->getId(), [$newId => [
+				'enabled' => true, 'read_confirmed' => true, 'auth' => 'scheme:bearerAuth',
+			]], OpenApiHarness::ADMIN);
+			$this->harness->service->approve($draft->getId(), OpenApiHarness::ADMIN);
+		} else {
+			$this->expectConnectionError('operation_not_supported', fn () => $this->harness->service->updateDraftOperations($draft->getId(), [$newId => ['enabled' => true]], OpenApiHarness::ADMIN));
+			$this->harness->approveCourseSearch($connection, $draft);
+		}
+		self::assertTrue($this->harness->operations->findById($oldId)->isTombstoned());
+		self::assertNotContains($oldGrant, $this->exposedNames());
+		$result = $this->harness->provider->executeTool($oldGrant, ['path' => ['courseId' => 777]]);
+		self::assertSame('tool_not_available', $result['error']['code']);
+		self::assertFalse($result['error']['details']['request_sent']);
+		self::assertSame([], $this->harness->client->requests);
+
+		if ($method === 'get') {
+			$this->harness->respondJson(['id' => 777, 'title' => 'Replacement']);
+			$newTool = OpenApiToolCatalog::toolName($connection->getId(), $newId);
+			self::assertNotSame($oldGrant, $newTool);
+			self::assertFalse($this->harness->provider->executeTool($newTool, ['path' => [$parameter => 777]])['isError']);
+			self::assertSame('https://api.courses.example/v1' . str_replace('{' . $parameter . '}', '777', $path), $this->harness->client->requests[0]['uri']);
+		}
 	}
 
 	public function testRemovedOperationsAreTombstonedAndNeverRevived(): void {
@@ -304,6 +470,9 @@ final class ApiConnectionServiceTest extends TestCase {
 		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
 		$id = $this->harness->approveCourseSearch($connection, $first);
 		$tool = OpenApiToolCatalog::toolName($connection->getId(), $id);
+		$this->harness->enterRun();
+		self::assertSame([$tool], array_column($this->harness->provider->getTools(), 'name'));
+		self::assertSame($first->getId(), $this->harness->catalog->resolve($connection->getId(), $id)['revision']->getId());
 		if ($revokeFirst) {
 			$this->harness->service->revokeOperation($first->getId(), $id, 'revoker');
 		}
@@ -324,8 +493,9 @@ final class ApiConnectionServiceTest extends TestCase {
 		self::assertContains('read_not_confirmed', $problems);
 		self::assertContains('operation_revoked', $problems);
 		$this->expectConnectionError('operations_not_approvable', fn () => $this->harness->service->approve($draft->getId(), 'activator'));
+		self::assertSame($first->getId(), $this->harness->connections->findById($connection->getId())->getActiveRevisionId());
+		self::assertTrue($this->harness->revisions->findById($draft->getId())->isDraft());
 		self::assertNotContains($tool, $this->exposedNames());
-		$this->harness->enterRun();
 		$result = $this->harness->provider->executeTool($tool, ['query' => ['q' => 'Algebra']]);
 		self::assertSame('tool_not_available', $result['error']['code']);
 		self::assertFalse($result['error']['details']['request_sent']);

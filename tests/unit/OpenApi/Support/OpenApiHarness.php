@@ -75,14 +75,24 @@ final class OpenApiHarness {
 		});
 
 		$db = (new MockFactory($test))->mock(IDBConnection::class, ['beginTransaction', 'commit', 'rollBack']);
-		$db->method('beginTransaction')->willReturnCallback(function (): void {
+		$snapshot = null;
+		$db->method('beginTransaction')->willReturnCallback(function () use (&$snapshot): void {
 			$this->transactions[] = 'begin';
+			$snapshot = [];
+			foreach (['connections', 'revisions', 'operations'] as $table) {
+				$snapshot[$table] = array_map(static fn (object $row): object => clone $row, $this->{$table}->rows);
+			}
 		});
-		$db->method('commit')->willReturnCallback(function (): void {
+		$db->method('commit')->willReturnCallback(function () use (&$snapshot): void {
 			$this->transactions[] = 'commit';
+			$snapshot = null;
 		});
-		$db->method('rollBack')->willReturnCallback(function (): void {
+		$db->method('rollBack')->willReturnCallback(function () use (&$snapshot): void {
 			$this->transactions[] = 'rollback';
+			foreach ($snapshot ?? [] as $table => $rows) {
+				$this->{$table}->rows = $rows;
+			}
+			$snapshot = null;
 		});
 
 		$credentials = (new MockFactory($test))->mock(CredentialService::class, []);

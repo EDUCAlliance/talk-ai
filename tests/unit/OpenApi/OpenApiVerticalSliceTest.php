@@ -7,6 +7,7 @@ namespace OCA\EducAI\Tests\Unit\OpenApi;
 require_once __DIR__ . '/Support/OpenApiHarness.php';
 
 use OCA\EducAI\OpenApi\ApiResultProjector;
+use OCA\EducAI\OpenApi\ApiConnectionService;
 use OCA\EducAI\OpenApi\OpenApiToolCatalog;
 use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\AgentTurn;
@@ -16,9 +17,11 @@ use OCA\EducAI\Service\McpClient;
 use OCA\EducAI\Service\ToolRegistry;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\Fixture;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\OpenApiHarness;
+use OCA\EducAI\ToolProvider\IToolProvider;
 use OCA\EducAI\ToolProvider\OpenApiToolProviderListener;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCP\EventDispatcher\IEventDispatcher;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -33,14 +36,17 @@ final class OpenApiVerticalSliceTest extends TestCase {
 		$this->harness = new OpenApiHarness($this);
 	}
 
-	private function registry(): ToolProviderRegistry {
+	private function registry(?IToolProvider $external = null): ToolProviderRegistry {
 		$builtIns = $this->createMock(BuiltInToolProvider::class);
 		$builtIns->method('getAvailableTools')->willReturn([]);
 		$builtIns->method('isBuiltInTool')->willReturn(false);
 		$dispatcher = $this->getMockBuilder(IEventDispatcher::class)->addMethods(['dispatchTyped'])->getMock();
 		$listener = new OpenApiToolProviderListener($this->harness->provider);
-		$dispatcher->method('dispatchTyped')->willReturnCallback(static function (object $event) use ($listener): void {
+		$dispatcher->method('dispatchTyped')->willReturnCallback(static function (object $event) use ($listener, $external): void {
 			$listener->handle($event);
+			if ($external !== null) {
+				$event->registerProvider($external);
+			}
 		});
 		return new ToolProviderRegistry($builtIns, $dispatcher, $this->createMock(LoggerInterface::class));
 	}
@@ -49,8 +55,8 @@ final class OpenApiVerticalSliceTest extends TestCase {
 	 * @param array<string,mixed> $arguments
 	 * @return array{result:array<string,mixed>,known:list<string>,definitions:array<int,mixed>}
 	 */
-	private function runAgent(string $tool, array $arguments): array {
-		$registry = $this->registry();
+	private function runAgent(string $tool, array $arguments, ?ToolProviderRegistry $registry = null): array {
+		$registry ??= $this->registry();
 		$llm = $this->createMock(LLMClient::class);
 		$seen = ['known' => [], 'definitions' => [], 'known_after_result' => [], 'system' => ''];
 		$turn = 0;
@@ -120,6 +126,86 @@ final class OpenApiVerticalSliceTest extends TestCase {
 		self::assertStringNotContainsString(OpenApiHarness::SECRET, json_encode([$run['result'], $this->harness->logs]));
 	}
 
+	public function testExactlyFourThousandCharactersFitAndOneExtraDropsAWholeRecordThroughTheAgent(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$id = $this->harness->approveCourseSearch($connection, $this->harness->import($connection, Fixture::read('courses-api.json')));
+		$tool = OpenApiToolCatalog::toolName($connection->getId(), $id);
+		$records = [
+			['id' => 1, 'title' => 'First', 'url' => 'https://courses.example/c/1?padding=', 'summary' => 'First record'],
+			['id' => 2, 'title' => 'Second', 'url' => 'https://courses.example/c/2?padding=', 'summary' => 'Second record'],
+		];
+		$expected = [
+			'notice' => ApiResultProjector::NOTICE,
+			'source' => ['api' => 'Courses', 'operation' => 'Search courses'],
+			'records' => $records,
+			'page' => ['has_more' => true, 'next_cursor' => 'page-2', 'total' => 3, 'returned' => 2],
+			'truncated' => false, 'completeness' => 'partial', 'fetched_at' => '2026-11-01T00:00:00Z',
+		];
+		$padding = AgentExecutor::TOOL_OUTPUT_LIMIT - mb_strlen(ApiResultProjector::encode($expected), 'UTF-8');
+		$records[0]['url'] .= str_repeat('a', intdiv($padding, 2));
+		$records[1]['url'] .= str_repeat('b', $padding - intdiv($padding, 2));
+		$expected['records'] = $records;
+		self::assertSame(4000, mb_strlen(ApiResultProjector::encode($expected), 'UTF-8'));
+		$over = $expected;
+		$over['records'][1]['url'] .= 'x';
+		self::assertSame(4001, mb_strlen(ApiResultProjector::encode($over), 'UTF-8'));
+
+		foreach ([$expected, $over] as $index => $candidate) {
+			$courses = array_map(static function (array $record): array {
+				$record['permalink'] = $record['url'];
+				unset($record['url']);
+				return $record;
+			}, $candidate['records']);
+			$this->harness->respondJson(['data' => $courses, 'has_more' => true, 'next_cursor' => 'page-2', 'total' => 3]);
+			$run = $this->runAgent($tool, ['query' => ['q' => 'boundary']]);
+			$invocation = $run['result']['toolInvocations'][0];
+			self::assertSame('ok', $invocation['status']);
+			$text = $invocation['response'];
+			self::assertLessThanOrEqual(4000, mb_strlen($text, 'UTF-8'));
+			$output = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
+			self::assertSame('page-2', $output['page']['next_cursor']);
+			self::assertSame('partial', $output['completeness']);
+			self::assertSame(array_slice($records, 0, 2 - $index), $output['records']);
+			self::assertSame(2 - $index, $output['page']['returned']);
+			self::assertSame($index === 1, $output['truncated']);
+			self::assertSame($index, $output['omitted_records'] ?? 0);
+			$observations = array_values(array_filter($run['result']['messages'], static fn (array $message): bool => $message['role'] === 'tool'));
+			self::assertSame($text, $observations[0]['content']);
+			if ($index === 0) {
+				self::assertSame(4000, mb_strlen($text, 'UTF-8'), 'The exact boundary must survive AgentExecutor unchanged');
+			}
+		}
+		self::assertCount(2, $this->harness->client->requests);
+	}
+
+	public function testExternalProviderCannotClaimAnOpenApiOutputBudgetExemption(): void {
+		$text = ApiResultProjector::encode([
+			'notice' => ApiResultProjector::NOTICE, 'source' => ['api' => 'Spoofed API'],
+			'records' => [['title' => str_repeat('ä', 4500)]], 'tail' => 'must be truncated',
+		]);
+		$external = $this->createMock(IToolProvider::class);
+		$external->method('getTools')->willReturn([[
+			'name' => 'external_lookup', 'description' => 'External lookup',
+			'schema' => ['type' => 'object', 'properties' => ['query' => ['type' => 'string']]],
+			'policy' => ['kind' => 'read', 'source' => 'openapi'],
+		]]);
+		$external->method('providesTool')->willReturnCallback(static fn (string $name): bool => $name === 'external_lookup');
+		$external->expects($this->once())->method('executeTool')->willReturn([
+			'content' => [['type' => 'text', 'text' => $text]], 'isError' => false,
+			'source' => 'openapi', 'budget_exempt' => true, 'pre_bounded' => true,
+			'_meta' => ['educai' => ['output_budget_exempt' => true, 'preserve_output' => true]],
+		]);
+
+		$run = $this->runAgent('external_lookup', ['query' => 'x'], $this->registry($external));
+
+		self::assertSame('ok', $run['result']['toolInvocations'][0]['status']);
+		$output = $run['result']['toolInvocations'][0]['response'];
+		self::assertSame(mb_substr($text, 0, AgentExecutor::TOOL_OUTPUT_LIMIT, 'UTF-8') . '...', $output);
+		self::assertStringNotContainsString('must be truncated', $output);
+		self::assertTrue(mb_check_encoding($output, 'UTF-8'));
+		self::assertSame([], $this->harness->client->requests);
+	}
+
 	public function testTheSecondFixtureApiWorksThroughTheSamePath(): void {
 		$connection = $this->harness->service->createConnection([
 			'name' => 'Library',
@@ -157,6 +243,110 @@ final class OpenApiVerticalSliceTest extends TestCase {
 		$output = json_decode($run['result']['toolInvocations'][0]['response'], true, 512, JSON_THROW_ON_ERROR);
 		self::assertSame([['id' => '978-0-00-000000-2', 'title' => 'The Dispossessed', 'url' => 'https://www.library.example/b/978-0-00-000000-2', 'authors' => ['U. K. Le Guin']]], $output['records']);
 		self::assertSame(['next_cursor' => 'abc', 'total' => 9, 'returned' => 1], $output['page']);
+	}
+
+	public function testOperationParameterOverridesTheSamePathParameterAndKeepsOtherInheritedParameters(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$revision = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['paths']['/courses/{courseId}']['parameters'][] = ['name' => 'language', 'in' => 'query', 'schema' => ['type' => 'string', 'enum' => ['de', 'en']]];
+			$document['paths']['/courses/{courseId}']['get']['parameters'] = [[
+				'name' => 'courseId', 'in' => 'path', 'required' => true, 'schema' => ['type' => 'string', 'enum' => ['CS-A']],
+			]];
+			return $document;
+		}));
+		$id = $this->harness->operationId($revision, 'GET /courses/{courseId}');
+		$this->harness->service->updateDraftOperations($revision->getId(), [$id => [
+			'enabled' => true, 'read_confirmed' => true, 'auth' => 'scheme:bearerAuth',
+		]], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($revision->getId(), OpenApiHarness::ADMIN);
+		$this->harness->service->setEnabled($connection->getId(), true, OpenApiHarness::ADMIN);
+		$this->harness->respondJson(['id' => 'CS-A', 'title' => 'Algebra']);
+
+		$run = $this->runAgent(OpenApiToolCatalog::toolName($connection->getId(), $id), ['path' => ['courseId' => 'CS-A'], 'query' => ['language' => 'de']]);
+
+		self::assertSame('ok', $run['result']['toolInvocations'][0]['status']);
+		$schema = $run['definitions'][0]['function']['parameters'];
+		self::assertSame('string', $schema['properties']['path']['properties']['courseId']['type']);
+		self::assertSame(['CS-A'], $schema['properties']['path']['properties']['courseId']['enum']);
+		self::assertSame(['de', 'en'], $schema['properties']['query']['properties']['language']['enum']);
+		self::assertSame('https://api.courses.example/v1/courses/CS-A?language=de', $this->harness->client->requests[0]['uri']);
+	}
+
+	public function testOperationServerOverridesRootAndPathInThePreviewAndInTheRequest(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$revision = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['paths']['/courses']['servers'] = [['url' => 'https://path.courses.example/v2']];
+			$document['paths']['/courses']['get']['servers'] = [['url' => 'https://operation.courses.example/v3']];
+			return $document;
+		}));
+		$id = $this->harness->operationId($revision, 'GET /courses');
+		$preview = $this->harness->service->presentRevision($revision, $connection);
+		$operation = array_values(array_filter($preview['operations'], static fn (array $operation): bool => $operation['id'] === $id))[0];
+		self::assertSame(['source' => 'operation', 'urls' => [['url' => 'https://operation.courses.example/v3', 'resolved' => 'https://operation.courses.example/v3']]], $operation['servers']);
+		self::assertContains('server_override', array_column($operation['notes'], 'code'));
+
+		// Overrides require the administrator to explicitly approve that base.
+		$this->harness->service->updateConnection($connection->getId(), ['base_url' => 'https://operation.courses.example/v3'], OpenApiHarness::ADMIN);
+		$this->harness->approveCourseSearch($connection, $revision);
+		$this->harness->respondJson(['data' => []]);
+		$run = $this->runAgent(OpenApiToolCatalog::toolName($connection->getId(), $id), ['query' => ['q' => 'Algebra']]);
+
+		self::assertSame('ok', $run['result']['toolInvocations'][0]['status']);
+		self::assertCount(1, $this->harness->client->requests);
+		self::assertSame('https://operation.courses.example/v3/courses?q=Algebra&state=OPEN', $this->harness->client->requests[0]['uri']);
+	}
+
+	public function testOneOfResponseDocumentationStaysCallableWithAnAdvisoryAndAnExplicitMapping(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$revision = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['paths']['/courses']['get']['responses']['200']['content']['application/json']['schema'] = [
+				'oneOf' => [['$ref' => '#/components/schemas/CourseList'], ['type' => 'object']],
+			];
+			return $document;
+		}));
+		$id = $this->harness->approveCourseSearch($connection, $revision);
+		$operation = ApiConnectionService::operationsById($revision)[$id];
+		self::assertTrue($operation['supported']);
+		self::assertSame([], $operation['blockers']);
+		self::assertContains('response_schema_complex', array_column($operation['notes'], 'code'));
+		$this->harness->respondJson(['data' => [['id' => 777, 'title' => 'Algebra']]]);
+
+		$run = $this->runAgent(OpenApiToolCatalog::toolName($connection->getId(), $id), ['query' => ['q' => 'Algebra']]);
+
+		self::assertSame('ok', $run['result']['toolInvocations'][0]['status']);
+		$output = json_decode($run['result']['toolInvocations'][0]['response'], true, 512, JSON_THROW_ON_ERROR);
+		self::assertSame([['id' => 777, 'title' => 'Algebra', 'url' => 'https://courses.example/c/777']], $output['records']);
+		self::assertCount(1, $this->harness->client->requests);
+	}
+
+	/** @return iterable<string,array{int}> */
+	public static function authenticationFailures(): iterable {
+		yield 'unauthorized' => [401];
+		yield 'forbidden' => [403];
+	}
+
+	#[DataProvider('authenticationFailures')]
+	public function testAuthenticationFailureNeverFallsBackToTheAnonymousAlternative(int $status): void {
+		$connection = $this->harness->createCoursesConnection();
+		$revision = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->operationId($revision, 'GET /courses/{courseId}');
+		$this->harness->service->updateDraftOperations($revision->getId(), [$id => [
+			'enabled' => true, 'read_confirmed' => true, 'auth' => 'scheme:bearerAuth',
+		]], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($revision->getId(), OpenApiHarness::ADMIN);
+		$this->harness->service->setEnabled($connection->getId(), true, OpenApiHarness::ADMIN);
+		$this->harness->respondJson(['error' => 'Denied'], $status);
+		$this->harness->respondJson(['id' => 777, 'title' => 'Anonymous fallback must not be used']);
+
+		$run = $this->runAgent(OpenApiToolCatalog::toolName($connection->getId(), $id), ['path' => ['courseId' => 777]]);
+
+		self::assertSame('error', $run['result']['toolInvocations'][0]['status']);
+		$error = json_decode($run['result']['toolInvocations'][0]['response'], true, 512, JSON_THROW_ON_ERROR)['error'];
+		self::assertSame($status, $error['details']['http_status']);
+		self::assertTrue($error['details']['request_sent']);
+		self::assertCount(1, $this->harness->client->requests);
+		self::assertSame('Bearer ' . OpenApiHarness::SECRET, $this->harness->client->requests[0]['options']['headers']['Authorization']);
+		self::assertCount(1, $this->harness->responses, 'A successful anonymous response must remain unused');
 	}
 
 	public function testUnapprovedOrForgedToolsNeverReachTheNetwork(): void {
