@@ -14,13 +14,16 @@ final class OpenApiDocumentLoader {
 	public const MAX_NODES = 200_000;
 
 	/**
-	 * @return array{document: array<string,mixed>, version: string, sha256: string}
+	 * @return array{document: array<string,mixed>, version: string, sha256: string, bytes: string}
 	 * @throws OpenApiImportException
 	 */
 	public function load(string $bytes): array {
 		if (strlen($bytes) > self::MAX_BYTES) {
 			throw new OpenApiImportException('document_too_large', 'The document is larger than the import limit.', ['limit_bytes' => self::MAX_BYTES]);
 		}
+		// Preserve and hash the original UTF-8 bytes, including an optional BOM.
+		// Only the parser input has its leading BOM removed.
+		$originalBytes = $bytes;
 		if (str_starts_with($bytes, "\xEF\xBB\xBF")) {
 			$bytes = substr($bytes, 3);
 		}
@@ -57,7 +60,7 @@ final class OpenApiDocumentLoader {
 			throw new OpenApiImportException('document_invalid', 'The document has no paths object.', ['field' => 'paths']);
 		}
 
-		return ['document' => $document, 'version' => $version, 'sha256' => hash('sha256', $bytes)];
+		return ['document' => $document, 'version' => $version, 'sha256' => hash('sha256', $originalBytes), 'bytes' => $originalBytes];
 	}
 
 	/** @param array<string,mixed> $document */

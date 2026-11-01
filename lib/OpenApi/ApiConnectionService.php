@@ -27,6 +27,7 @@ class ApiConnectionService {
 	public const MAX_DESCRIPTION = 1000;
 	public const MAX_CREDENTIAL = 4096;
 	public const MAX_ASSIGN_GROUPS = 50;
+	private const REVIEW_DIFF_ASPECTS = ['review_mapping' => 'mapping', 'review_auth' => 'auth', 'review_fixed' => 'fixed', 'review_enabled' => 'enabled', 'review_read_confirmed' => 'read_confirmed', 'review_label' => 'label', 'review_description' => 'description'];
 	private const DIFF_ASPECTS = ['parameters', 'security', 'servers', 'response', 'blockers', 'summary', 'description', 'deprecated'];
 
 	public function __construct(
@@ -150,7 +151,7 @@ class ApiConnectionService {
 	}
 
 	/**
-	 * @param array{document:array<string,mixed>,version:string,sha256:string} $loaded
+	 * @param array{document:array<string,mixed>,version:string,sha256:string,bytes:string} $loaded
 	 * @throws OpenApiImportException
 	 */
 	private function createDraft(ApiConnection $connection, ?ApiSpecRevision $active, array $loaded, string $sourceKind, ?string $sourceUrl, string $userId): ApiSpecRevision {
@@ -179,6 +180,10 @@ class ApiConnectionService {
 					&& $previous['fingerprint'] === $operation['fingerprint'] && !isset($previousConfig['revoked_at'])
 					? $previousConfig
 					: ApiOperationReview::defaults($operation);
+				if (isset($previousConfig['revoked_at'])) {
+					$config[(string)$identity->getId()]['revoked_at'] = $previousConfig['revoked_at'];
+					$config[(string)$identity->getId()]['revoked_by'] = $previousConfig['revoked_by'] ?? null;
+				}
 			}
 			unset($operation);
 
@@ -187,7 +192,7 @@ class ApiConnectionService {
 			$revision->setSha256($loaded['sha256']);
 			$revision->setSourceKind($sourceKind);
 			$revision->setSourceUrl($sourceUrl);
-			$revision->setDocument(json_encode($loaded['document'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+			$revision->setDocument($loaded['bytes']);
 			$revision->setOasVersion($loaded['version']);
 			$revision->setManifestArray($manifest);
 			$revision->setOpConfigArray($config);
@@ -231,7 +236,6 @@ class ApiConnectionService {
 			throw new ApiConnectionException('document_unchanged', 'This document is identical to the approved revision.', 409);
 		}
 		$loaded = $this->loader->load($active->getDocument());
-		$loaded['sha256'] = $active->getSha256();
 		return $this->createDraft($connection, $active, $loaded, $active->getSourceKind(), $active->getSourceUrl(), $userId);
 	}
 
@@ -339,6 +343,7 @@ class ApiConnectionService {
 		return $this->transactional(function () use ($revision, $connection, $userId, $config, $manifestOperations, $identities): ApiSpecRevision {
 			$now = time();
 			$previous = $this->activeRevision($connection);
+			$previousConfig = $previous?->getOpConfigArray() ?? [];
 			if ($previous !== null && $previous->getId() !== $revision->getId()) {
 				$previous->setStatus(ApiSpecRevision::STATUS_SUPERSEDED);
 				$previous->setUpdatedBy($userId);
@@ -374,6 +379,11 @@ class ApiConnectionService {
 					}
 				}
 			}
+			foreach ($config as $id => $entry) {
+				if (isset($previousConfig[$id]['revoked_at']) && ($entry['enabled'] ?? false) === true && !isset($entry['revoked_at'])) {
+					$this->logger->info('API operation re-released', ['app' => 'educai', 'connection_id' => $connection->getId(), 'revision_id' => $revision->getId(), 'operation_id' => (int)$id, 'actor_id' => $userId]);
+				}
+			}
 			return $revision;
 		});
 	}
@@ -393,15 +403,24 @@ class ApiConnectionService {
 		if (!isset($config[$key]) || ($config[$key]['enabled'] ?? false) !== true) {
 			throw new ApiConnectionException('operation_unknown', 'The operation is not approved in this revision.', 404);
 		}
-		if (!isset($config[$key]['revoked_at'])) {
-			$config[$key]['revoked_at'] = time();
-			$config[$key]['revoked_by'] = $userId;
-			$revision->setOpConfigArray($config);
-			$revision->setUpdatedBy($userId);
-			$revision->setUpdatedAt(time());
-			$revision = $this->revisions->update($revision);
-		}
-		return $revision;
+		return $this->transactional(function () use ($revision, $key, $userId): ApiSpecRevision {
+			$now = time();
+			// Invalidate confirmations in drafts imported before the revocation too.
+			foreach ([$revision, ...$this->revisions->findDrafts($revision->getConnectionId())] as $affected) {
+				$config = $affected->getOpConfigArray();
+				if (!isset($config[$key])) {
+					continue;
+				}
+				$config[$key]['read_confirmed'] = false;
+				$config[$key]['revoked_at'] = $now;
+				$config[$key]['revoked_by'] = $userId;
+				$affected->setOpConfigArray($config);
+				$affected->setUpdatedBy($userId);
+				$affected->setUpdatedAt($now);
+				$this->revisions->update($affected);
+			}
+			return $revision;
+		});
 	}
 
 	/** @throws ApiConnectionException */
@@ -419,22 +438,43 @@ class ApiConnectionService {
 	/**
 	 * Semantic difference between a draft and the approved revision.
 	 *
-	 * @return array{base_revision_id:?int,added:list<int>,removed:list<array{id:int,match_key:string}>,changed:list<array{id:int,match_key:string,aspects:list<string>}>,unchanged:int}
+	 * @return array{base_revision_id:?int,added:list<int>,removed:list<array{id:int,match_key:string}>,changed:list<array{id:int,match_key:string,aspects:list<string>,changes:array<string,array{before:mixed,after:mixed}>}>,unchanged:int}
 	 */
 	public function diff(ApiSpecRevision $revision, ApiConnection $connection): array {
 		$active = $this->activeRevision($connection);
 		$before = $active !== null && $active->getId() !== $revision->getId() ? self::operationsById($active) : [];
 		$after = self::operationsById($revision);
+		$beforeConfig = $active?->getOpConfigArray() ?? [];
+		$afterConfig = $revision->getOpConfigArray();
 		$result = ['base_revision_id' => $active?->getId(), 'added' => [], 'removed' => [], 'changed' => [], 'unchanged' => 0];
 		foreach ($after as $id => $operation) {
 			$old = $before[$id] ?? null;
 			if ($old === null) {
 				$result['added'][] = (int)$id;
-			} elseif ($old['fingerprint'] === $operation['fingerprint']) {
-				$result['unchanged']++;
 			} else {
-				$aspects = array_values(array_filter(self::DIFF_ASPECTS, static fn (string $aspect): bool => ($old[$aspect] ?? null) !== ($operation[$aspect] ?? null)));
-				$result['changed'][] = ['id' => (int)$id, 'match_key' => $operation['match_key'], 'aspects' => $aspects === [] ? ['other'] : $aspects];
+				$changes = [];
+				if ($old['fingerprint'] !== $operation['fingerprint']) {
+					foreach (self::DIFF_ASPECTS as $aspect) {
+						if (($old[$aspect] ?? null) !== ($operation[$aspect] ?? null)) {
+							$changes[$aspect] = ['before' => $old[$aspect] ?? null, 'after' => $operation[$aspect] ?? null];
+						}
+					}
+					if ($changes === []) {
+						$changes['other'] = ['before' => $old, 'after' => $operation];
+					}
+				}
+				foreach (self::REVIEW_DIFF_ASPECTS as $aspect => $key) {
+					$beforeValue = $beforeConfig[$id][$key] ?? null;
+					$afterValue = $afterConfig[$id][$key] ?? null;
+					if ($beforeValue !== $afterValue) {
+						$changes[$aspect] = ['before' => $beforeValue, 'after' => $afterValue];
+					}
+				}
+				if ($changes === []) {
+					$result['unchanged']++;
+				} else {
+					$result['changed'][] = ['id' => (int)$id, 'match_key' => $operation['match_key'], 'aspects' => array_keys($changes), 'changes' => $changes];
+				}
 			}
 		}
 		foreach ($before as $id => $operation) {

@@ -185,12 +185,31 @@ test('the semantic diff marks removed tools that bots use today', () => {
 	const active = revision(9, [operation(1, { config: config({ enabled: true, label: 'Search courses' }) }), operation(3, { match_key: 'GET /rooms' })], { status: 'approved' })
 	const entries = api.diffEntries({ base_revision_id: 9, added: [4], removed: [{ id: 1, match_key: 'GET /courses' }, { id: 3, match_key: 'GET /rooms' }], changed: [{ id: 5, match_key: 'GET /x', aspects: ['parameters', 'response'] }], unchanged: 2 }, active)
 	assert.deepEqual(plain(entries), [
-		{ kind: 'removed', id: 1, matchKey: 'GET /courses', label: 'Search courses', aspects: [], wasOffered: true },
-		{ kind: 'removed', id: 3, matchKey: 'GET /rooms', label: 'Search courses', aspects: [], wasOffered: false },
-		{ kind: 'changed', id: 5, matchKey: 'GET /x', label: 'GET /x', aspects: ['parameters', 'response'], wasOffered: false },
-		{ kind: 'added', id: 4, matchKey: '', label: '', aspects: [], wasOffered: false },
+		{ kind: 'removed', id: 1, matchKey: 'GET /courses', label: 'Search courses', aspects: [], changes: [], wasOffered: true },
+		{ kind: 'removed', id: 3, matchKey: 'GET /rooms', label: 'Search courses', aspects: [], changes: [], wasOffered: false },
+		{ kind: 'changed', id: 5, matchKey: 'GET /x', label: 'GET /x', aspects: ['parameters', 'response'], changes: [], wasOffered: false },
+		{ kind: 'added', id: 4, matchKey: '', label: '', aspects: [], changes: [], wasOffered: false },
 	])
 	assert.deepEqual(api.diffEntries({ base_revision_id: null, added: [1], removed: [], changed: [] }, null), [])
+})
+
+test('semantic review diff carries every changed reviewed value and no audit metadata', () => {
+	const before = config({ enabled: true, read_confirmed: true, auth: 'scheme:bearerAuth' })
+	const after = config({
+		enabled: false, read_confirmed: false, auth: 'anonymous', label: 'New label', description: 'New description',
+		fixed: { query: { state: 'CLOSED' } },
+		mapping: { records: '/private', id: '/key', title: '/name', fields: [{ key: 'language', pointer: '/lang' }], link: { field: '/url', template: 'https://example.test/{id}', origins: [] }, paging: { next_cursor: '/cursor' } },
+	})
+	const active = revision(9, [operation(1, { config: before })])
+	const diff = { base_revision_id: 9, changed: [], added: [], removed: [], unchanged: 1 }
+	const [entry] = api.diffEntries(diff, active, [operation(1, { config: after })])
+	assert.deepEqual(entry.aspects, ['result mapping', 'chosen authentication', 'fixed values', 'offered to bots', 'read confirmation', 'reviewed label', 'reviewed description'])
+	const mapping = entry.changes.find(value => value.aspect === 'review_mapping')
+	assert.equal(JSON.parse(mapping.before).records, '/data')
+	assert.deepEqual(JSON.parse(mapping.after), after.mapping)
+	assert.equal(entry.changes.find(value => value.aspect === 'review_enabled').before, 'true')
+	assert.equal(entry.changes.find(value => value.aspect === 'review_enabled').after, 'false')
+	assert.deepEqual(api.diffEntries(diff, active, [operation(1, { config: { ...before, confirmed_by: 'other', confirmed_at: 2 } })]), [])
 })
 
 test('bot forms learn why API tools are blocked and keep unavailable ones visible', () => {
@@ -374,6 +393,58 @@ test('rendered section shows changes against the approved revision and lets a pa
 	assert.match(container.textContent, /Removed\s*Rooms/)
 	assert.match(container.textContent, /bots that use it will see it as unavailable after approval/)
 	assert.equal(button(container, 'Approve revision').disabled, false)
+})
+
+test('rendered semantic diff shows approved and unsaved draft values before activation', async ctx => {
+	const offered = config({ enabled: true, read_confirmed: true, auth: 'scheme:bearerAuth' })
+	const active = revision(9, [operation(1, { config: offered })], { status: 'approved', approved_by: 'admin', approved_at: 1_790_000_000 })
+	const reviewed = detail({
+		connection: connection({ active_revision_id: 9, draft_revision_id: 11 }), active,
+		draft: { ...revision(11, [operation(1, { config: offered })]), diff: { base_revision_id: 9, added: [], removed: [], changed: [], unchanged: 1 }, approval_problems: {} },
+	})
+	const { component, calls } = section({ [LIST]: { connections: [reviewed.connection] }, [DETAIL]: reviewed })
+	const { container } = mountDom(ctx, component)
+	await settle()
+	await click(button(container, 'Review'))
+	const records = [...container.querySelectorAll('input')].find(element => element.value === '/data')
+	assert.ok(records, container.innerHTML)
+	await input(records, '/private')
+	const values = container.querySelector('.ta-api-diff__values')
+	assert.match(values.textContent, /result mapping/)
+	assert.match(values.textContent, /Approved value/)
+	assert.match(values.textContent, /Draft value/)
+	const rendered = values.querySelectorAll('pre')
+	assert.equal(JSON.parse(rendered[0].textContent).records, '/data')
+	assert.equal(JSON.parse(rendered[1].textContent).records, '/private')
+	assert.equal(calls.some(([method]) => method !== 'GET'), false, 'The values appear before any save or activation request')
+	assert.equal(button(container, 'Save and approve').disabled, false)
+	await input(records, '/data')
+	assert.equal(container.querySelector('.ta-api-diff__values'), null, 'Reverting local edits removes the review-only change')
+})
+
+test('revocation invalidates an unsaved draft confirmation while retaining its mapping edit', async ctx => {
+	const offered = config({ enabled: true, read_confirmed: true, auth: 'scheme:bearerAuth' })
+	const active = revision(9, [operation(1, { config: offered })], { status: 'approved', approved_by: 'admin', approved_at: 1_790_000_000 })
+	const reviewed = detail({
+		connection: connection({ active_revision_id: 9, draft_revision_id: 11 }), active,
+		draft: { ...revision(11, [operation(1, { config: offered })]), diff: { base_revision_id: 9, added: [], removed: [], changed: [], unchanged: 1 }, approval_problems: {} },
+	})
+	const revokedConfig = { ...offered, read_confirmed: false, revoked_at: 2, revoked_by: 'admin' }
+	const revoked = {
+		...reviewed, active: { ...active, operations: [operation(1, { config: revokedConfig })] },
+		draft: { ...reviewed.draft, operations: [operation(1, { config: revokedConfig })], approval_problems: { 1: ['operation_revoked', 'read_not_confirmed'] } },
+	}
+	const { component } = section({
+		[LIST]: { connections: [reviewed.connection] }, [DETAIL]: reviewed,
+		[`POST ${api.REVISIONS_URL}/9/operations/1/revoke`]: revoked,
+	})
+	const { container } = mountDom(ctx, component)
+	await settle()
+	await click(button(container, 'Review'))
+	await input(container.querySelector('#api-op-1-records'), '/private')
+	await click(button(container, 'Revoke'))
+	assert.equal(container.querySelector('#api-op-1-records').value, '/private')
+	assert.equal(container.querySelector('.ta-api-op__confirm input').checked, false)
 })
 
 test('rendered section blocks approval until the data audience is confirmed', async ctx => {

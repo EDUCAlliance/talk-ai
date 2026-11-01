@@ -276,6 +276,17 @@
 								<span v-if="entry.kind === 'removed' && entry.wasOffered" class="ta-value--warn">
 									· {{ t('educai', 'offered today; bots that use it will see it as unavailable after approval') }}
 								</span>
+								<dl v-if="entry.changes.length" class="ta-api-diff__values">
+									<template v-for="value in entry.changes" :key="value.aspect">
+										<dt>{{ value.label }}</dt>
+										<dd>
+											<strong>{{ t('educai', 'Approved value') }}</strong>
+											<pre class="ta-pre">{{ value.before }}</pre>
+											<strong>{{ t('educai', 'Draft value') }}</strong>
+											<pre class="ta-pre">{{ value.after }}</pre>
+										</dd>
+									</template>
+								</dl>
 								<span v-if="entry.kind === 'added'" class="ta-list__meta">
 									· {{ t('educai', 'new operations are not offered until you review them') }}
 								</span>
@@ -456,7 +467,13 @@ export default {
 			return blockers
 		},
 		diff() {
-			return this.draft ? diffEntries(this.draft.diff, this.detail.active) : []
+			if (!this.draft) {
+				return []
+			}
+			return diffEntries(this.draft.diff, this.detail.active, this.draftOperations.map(operation => ({
+				...operation,
+				config: this.states[operation.id] ? reviewEdit(this.states[operation.id]).edit : operation.config,
+			})))
 		},
 		activeOperations() {
 			return (this.detail?.active?.operations ?? []).filter(operation => operation.config?.enabled === true)
@@ -771,6 +788,10 @@ export default {
 			await this.run('revoke', async () => {
 				const response = await axios.post(generateUrl(`${REVISIONS_URL}/${this.detail.active.id}/operations/${operation.id}/revoke`))
 				this.mergeConnection(response.data)
+				if (this.states[operation.id]) {
+					// Keep unsaved mappings/text, but never the pre-revocation confirmation.
+					this.states[operation.id] = { ...this.states[operation.id], readConfirmed: false }
+				}
 			}, t('educai', 'Could not revoke the operation.'))
 		},
 		async runTest(revisionId, operationId, args) {

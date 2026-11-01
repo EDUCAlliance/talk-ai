@@ -10,8 +10,10 @@ use OCA\EducAI\Db\ApiConnection;
 use OCA\EducAI\Db\ApiSpecRevision;
 use OCA\EducAI\OpenApi\ApiConnectionException;
 use OCA\EducAI\OpenApi\OpenApiToolCatalog;
+use OCA\EducAI\Tests\Unit\OpenApi\Support\FakeResponse;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\Fixture;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\OpenApiHarness;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ApiConnectionServiceTest extends TestCase {
@@ -180,7 +182,10 @@ final class ApiConnectionServiceTest extends TestCase {
 		self::assertSame($search, $this->harness->operationId($renamed, 'GET /courses'));
 		self::assertFalse($renamed->getOpConfigArray()[(string)$search]['enabled'], 'A changed definition needs a new review');
 		$diff = $this->harness->service->diff($renamed, $this->harness->connections->findById($connection->getId()));
-		self::assertSame([['id' => $search, 'match_key' => 'GET /courses', 'aspects' => ['summary']]], array_values(array_filter($diff['changed'], static fn (array $c): bool => $c['id'] === $search)));
+		$change = array_values(array_filter($diff['changed'], static fn (array $c): bool => $c['id'] === $search))[0];
+		self::assertContains('summary', $change['aspects']);
+		self::assertSame(['before' => 'Search courses', 'after' => 'Find courses'], $change['changes']['summary']);
+		self::assertSame(['before' => true, 'after' => false], $change['changes']['review_enabled']);
 	}
 
 	public function testRemovedOperationsAreTombstonedAndNeverRevived(): void {
@@ -255,6 +260,122 @@ final class ApiConnectionServiceTest extends TestCase {
 			return $document;
 		}));
 		self::assertFalse($next->getOpConfigArray()[(string)$search]['enabled'], 'A revoked review is not carried over');
+	}
+
+	/** @return iterable<string,array{bool}> */
+	public static function revocationOrders(): iterable {
+		yield 'import then revoke' => [false];
+		yield 'revoke then import' => [true];
+	}
+
+	#[DataProvider('revocationOrders')]
+	public function testDraftActivationCannotUndoRevocationWithoutFreshConfirmation(bool $revokeFirst): void {
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->approveCourseSearch($connection, $first);
+		$tool = OpenApiToolCatalog::toolName($connection->getId(), $id);
+		if ($revokeFirst) {
+			$this->harness->service->revokeOperation($first->getId(), $id, 'revoker');
+		}
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['info']['version'] = '2';
+			return $document;
+		}));
+		if (!$revokeFirst) {
+			$this->harness->service->revokeOperation($first->getId(), $id, 'revoker');
+		} else {
+			// Enabling alone must not clear the revocation or reuse the old confirmation.
+			$this->harness->service->updateDraftOperations($draft->getId(), [$id => ['enabled' => true, 'auth' => 'scheme:bearerAuth']], 'reviewer');
+		}
+		$draft = $this->harness->service->getRevision($draft->getId());
+		self::assertFalse($draft->getOpConfigArray()[$id]['read_confirmed']);
+		self::assertSame('revoker', $draft->getOpConfigArray()[$id]['revoked_by']);
+		$problems = $this->harness->service->approvalProblems($draft, $connection)[$id];
+		self::assertContains('read_not_confirmed', $problems);
+		self::assertContains('operation_revoked', $problems);
+		$this->expectConnectionError('operations_not_approvable', fn () => $this->harness->service->approve($draft->getId(), 'activator'));
+		self::assertNotContains($tool, $this->exposedNames());
+		$this->harness->enterRun();
+		$result = $this->harness->provider->executeTool($tool, ['query' => ['q' => 'Algebra']]);
+		self::assertSame('tool_not_available', $result['error']['code']);
+		self::assertFalse($result['error']['details']['request_sent']);
+		self::assertSame([], $this->harness->client->requests);
+
+		$draft = $this->harness->service->updateDraftOperations($draft->getId(), [$id => ['read_confirmed' => true]], 'reviewer');
+		self::assertSame('reviewer', $draft->getOpConfigArray()[$id]['confirmed_by']);
+		self::assertArrayNotHasKey('revoked_at', $draft->getOpConfigArray()[$id]);
+		$this->harness->service->approve($draft->getId(), 'activator');
+		self::assertContains($tool, $this->exposedNames());
+		$this->harness->respondJson(['data' => []]);
+		$this->harness->enterRun();
+		self::assertFalse($this->harness->provider->executeTool($tool, ['query' => ['q' => 'Algebra']])['isError']);
+		self::assertCount(1, $this->harness->client->requests);
+		$logs = array_values(array_filter($this->harness->logs, static fn (array $log): bool => $log[1] === 'API operation re-released'));
+		self::assertCount(1, $logs);
+		self::assertSame('activator', $logs[0][2]['actor_id']);
+		self::assertSame($id, $logs[0][2]['operation_id']);
+	}
+
+	public function testSemanticDiffIncludesEveryReviewedConfigurationAspectWithOldAndNewValues(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->approveCourseSearch($connection, $first);
+		$before = $this->harness->service->getRevision($first->getId())->getOpConfigArray()[$id];
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['info']['version'] = '2';
+			return $document;
+		}));
+		foreach ([
+			['mapping', 'records', '/private'],
+			['mapping', 'id', '/private_id'],
+			['mapping', 'title', '/name'],
+			['mapping', 'fields', [['key' => 'language', 'pointer' => '/language']]],
+			['mapping', 'link', ['field' => null, 'template' => 'https://courses.example/new/{id}', 'origins' => []]],
+			['mapping', 'paging', ['next_offset' => '/offset']],
+			['auth', null, 'anonymous'],
+			['fixed', null, ['query' => ['state' => 'CLOSED']]],
+			['enabled', null, false],
+			['read_confirmed', null, false],
+			['label', null, 'Reviewed search'],
+			['description', null, 'Reviewed description'],
+		] as [$key, $mappingKey, $value]) {
+			$edit = $before;
+			if ($mappingKey === null) {
+				$edit[$key] = $value;
+			} else {
+				$edit[$key][$mappingKey] = $value;
+			}
+			$draft = $this->harness->service->updateDraftOperations($draft->getId(), [$id => $edit], 'reviewer');
+			$diff = $this->harness->service->diff($draft, $this->harness->service->getConnection($connection->getId()));
+			self::assertCount(1, $diff['changed'], $key . ':' . $mappingKey);
+			$aspect = 'review_' . $key;
+			self::assertSame([$aspect], $diff['changed'][0]['aspects']);
+			self::assertSame(['before' => $before[$key], 'after' => $draft->getOpConfigArray()[$id][$key]], $diff['changed'][0]['changes'][$aspect]);
+		}
+	}
+
+	public function testOriginalDocumentBytesAndHashSurviveImportAndReopening(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$document = Fixture::read('courses-api.json');
+		// The extension deliberately includes formatting and shapes lost by decoding/re-encoding.
+		$document = substr_replace($document, '"x-original": { "float": 1.00, "exponent": 1e+02, "object": {}, "list": [], "text": "\\u00e4" },', strpos($document, '{') + 1, 0);
+		foreach (['', "\xEF\xBB\xBF"] as $bom) {
+			$bytes = $bom . " \r\n" . $document . "\r\n  ";
+			$revision = $this->harness->import($connection, $bytes);
+			$stored = $this->harness->service->getRevision($revision->getId());
+			self::assertSame($bytes, $stored->getDocument());
+			self::assertSame(hash('sha256', $bytes), $stored->getSha256());
+		}
+		$this->harness->responses[] = new FakeResponse(200, ['Content-Type' => 'application/json'], $bytes);
+		$revision = $this->harness->service->importFromUrl($connection->getId(), 'https://api.courses.example/openapi.json', 'admin');
+		self::assertSame(ApiSpecRevision::SOURCE_URL, $revision->getSourceKind());
+		self::assertSame($bytes, $revision->getDocument());
+		self::assertSame(hash('sha256', $bytes), $revision->getSha256());
+		$this->harness->approveCourseSearch($connection, $revision);
+		$this->harness->service->updateConnection($connection->getId(), ['base_url' => 'https://api.courses.example/v2'], 'admin');
+		$reopened = $this->harness->service->reopenActive($connection->getId(), 'admin');
+		self::assertSame($bytes, $reopened->getDocument());
+		self::assertSame(hash('sha256', $reopened->getDocument()), $reopened->getSha256());
 	}
 
 	public function testChangingBaseOrAuthenticationSuspendsTheApproval(): void {

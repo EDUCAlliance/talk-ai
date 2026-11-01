@@ -42,6 +42,8 @@ final class ApiOperationReview {
 			if ($confirmed && ($previous['read_confirmed'] ?? false) !== true) {
 				$config['confirmed_by'] = $userId;
 				$config['confirmed_at'] = $now;
+				// Re-release requires an explicit fresh confirmation after revocation.
+				unset($config['revoked_at'], $config['revoked_by']);
 			}
 			$config['read_confirmed'] = $confirmed;
 		}
@@ -110,11 +112,11 @@ final class ApiOperationReview {
 		if (($config['enabled'] ?? false) !== true) {
 			$problems[] = 'operation_not_enabled';
 		}
-		if (($config['read_confirmed'] ?? false) !== true) {
-			$problems[] = 'read_not_confirmed';
-		}
 		if (isset($config['revoked_at'])) {
 			$problems[] = 'operation_revoked';
+		}
+		if (($config['read_confirmed'] ?? false) !== true) {
+			$problems[] = 'read_not_confirmed';
 		}
 		if (!is_string($config['label'] ?? null) || trim($config['label']) === '') {
 			$problems[] = 'label_missing';

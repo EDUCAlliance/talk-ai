@@ -141,7 +141,9 @@ final class ApiConnectionControllerTest extends TestCase {
 		self::assertSame($first->getId(), $detail['active']['id']);
 		$diff = $detail['draft']['diff'];
 		self::assertSame($first->getId(), $diff['base_revision_id']);
-		self::assertContains(['id' => $search, 'match_key' => 'GET /courses', 'aspects' => ['summary']], $diff['changed']);
+		$change = array_values(array_filter($diff['changed'], static fn (array $entry): bool => $entry['id'] === $search))[0];
+		self::assertContains('summary', $change['aspects']);
+		self::assertSame(['before' => 'Search courses', 'after' => 'Find courses'], $change['changes']['summary']);
 		self::assertContains('GET /legacy', array_column($diff['removed'], 'match_key'));
 		$rooms = $this->harness->operationId($this->harness->revisions->findById($detail['draft']['id']), 'GET /rooms');
 		self::assertContains($rooms, $diff['added']);
@@ -153,6 +155,25 @@ final class ApiConnectionControllerTest extends TestCase {
 		$discarded = $this->ok($controller->discard($detail['draft']['id']));
 		self::assertNull($discarded['draft']);
 		self::assertSame($first->getId(), $discarded['active']['id']);
+	}
+
+	public function testReviewOnlyChangesExposeOldAndNewValuesInTheControllerDiff(): void {
+		$controller = $this->controller();
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->approveCourseSearch($connection, $first);
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['info']['version'] = '2';
+			return $document;
+		}));
+		$mapping = $draft->getOpConfigArray()[$id]['mapping'];
+		$mapping['records'] = '/private';
+		$detail = $this->ok($controller->updateOperations($draft->getId(), [$id => ['mapping' => $mapping]]));
+		$change = $detail['draft']['diff']['changed'][0];
+		self::assertSame(['review_mapping'], $change['aspects']);
+		self::assertSame('/data', $change['changes']['review_mapping']['before']['records']);
+		self::assertSame('/private', $change['changes']['review_mapping']['after']['records']);
+		self::assertSame($first->getId(), $detail['active']['id']);
 	}
 
 	public function testImportFailuresAreStructuredAndCreateNoDraft(): void {

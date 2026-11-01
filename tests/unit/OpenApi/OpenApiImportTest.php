@@ -58,8 +58,18 @@ final class OpenApiImportTest extends TestCase {
 		$loaded = (new OpenApiDocumentLoader())->load("\xEF\xBB\xBF" . $bytes);
 
 		self::assertSame('3.0.3', $loaded['version']);
-		self::assertSame(hash('sha256', $bytes), $loaded['sha256']);
+		self::assertSame("\xEF\xBB\xBF" . $bytes, $loaded['bytes']);
+		self::assertSame(hash('sha256', "\xEF\xBB\xBF" . $bytes), $loaded['sha256']);
 		self::assertSame('3.0.1', (new OpenApiDocumentLoader())->load(Fixture::read('library-api.json'))['version']);
+	}
+
+	public function testTheByteLimitIncludesThePreservedBomAndWhitespace(): void {
+		$bytes = "\xEF\xBB\xBF" . self::document();
+		$bytes = str_pad($bytes, OpenApiDocumentLoader::MAX_BYTES, ' ');
+		$loaded = (new OpenApiDocumentLoader())->load($bytes);
+		self::assertSame($bytes, $loaded['bytes']);
+		self::assertSame(hash('sha256', $bytes), $loaded['sha256']);
+		self::assertImportError('document_too_large', $bytes . ' ');
 	}
 
 	/** @return iterable<string,array{string,string}> */

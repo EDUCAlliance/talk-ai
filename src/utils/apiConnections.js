@@ -457,6 +457,8 @@ export function testArguments(fields, values) {
 	return { arguments: args, errors }
 }
 
+const REVIEW_DIFF_FIELDS = { review_mapping: 'mapping', review_auth: 'auth', review_fixed: 'fixed', review_enabled: 'enabled', review_read_confirmed: 'read_confirmed', review_label: 'label', review_description: 'description' }
+
 export function aspectLabel(aspect) {
 	return {
 		parameters: t('educai', 'parameters'),
@@ -468,6 +470,13 @@ export function aspectLabel(aspect) {
 		description: t('educai', 'description'),
 		deprecated: t('educai', 'deprecation'),
 		other: t('educai', 'other details'),
+		review_mapping: t('educai', 'result mapping'),
+		review_auth: t('educai', 'chosen authentication'),
+		review_fixed: t('educai', 'fixed values'),
+		review_enabled: t('educai', 'offered to bots'),
+		review_read_confirmed: t('educai', 'read confirmation'),
+		review_label: t('educai', 'reviewed label'),
+		review_description: t('educai', 'reviewed description'),
 	}[aspect] ?? aspect
 }
 
@@ -476,18 +485,47 @@ export function aspectLabel(aspect) {
  *
  * @param {object|null} diff Draft diff from the server
  * @param {object|null} active Presented active revision
- * @return {Array<{kind:string,id:number,matchKey:string,label:string,aspects:string[],wasOffered:boolean}>}
+ * @param {object[]|null} reviewedOperations Draft operations with current local edits
+ * @return {object[]}
  */
-export function diffEntries(diff, active) {
+export function diffEntries(diff, active, reviewedOperations = null) {
 	if (!diff || diff.base_revision_id === null) {
 		return []
 	}
 	const offered = new Map((active?.operations ?? []).map(operation => [operation.id, operation.config?.enabled === true && !operation.config?.revoked_at]))
+	// Include unsaved edits: Save and approve must not skip their comparison.
+	const changed = new Map((diff.changed ?? []).map(entry => [entry.id, { ...entry, aspects: [...entry.aspects], changes: { ...entry.changes } }]))
+	if (reviewedOperations !== null) {
+		for (const operation of reviewedOperations) {
+			const previous = (active?.operations ?? []).find(old => old.id === operation.id)
+			if (!previous) {
+				continue
+			}
+			const entry = changed.get(operation.id) ?? { id: operation.id, match_key: operation.match_key, aspects: [], changes: {} }
+			entry.aspects = entry.aspects.filter(aspect => !Object.hasOwn(REVIEW_DIFF_FIELDS, aspect))
+			for (const aspect of Object.keys(REVIEW_DIFF_FIELDS)) {
+				delete entry.changes[aspect]
+			}
+			const before = reviewEdit(reviewState(previous)).edit
+			const after = reviewEdit(reviewState(operation)).edit
+			for (const [aspect, key] of Object.entries(REVIEW_DIFF_FIELDS)) {
+				if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
+					entry.aspects.push(aspect)
+					entry.changes[aspect] = { before: before[key] ?? null, after: after[key] ?? null }
+				}
+			}
+			if (entry.aspects.length) {
+				changed.set(entry.id, entry)
+			} else {
+				changed.delete(entry.id)
+			}
+		}
+	}
 	const label = (id, matchKey) => (active?.operations ?? []).find(operation => operation.id === id)?.config?.label || matchKey
 	return [
-		...(diff.removed ?? []).map(entry => ({ kind: 'removed', id: entry.id, matchKey: entry.match_key, label: label(entry.id, entry.match_key), aspects: [], wasOffered: offered.get(entry.id) === true })),
-		...(diff.changed ?? []).map(entry => ({ kind: 'changed', id: entry.id, matchKey: entry.match_key, label: label(entry.id, entry.match_key), aspects: entry.aspects.map(aspectLabel), wasOffered: offered.get(entry.id) === true })),
-		...(diff.added ?? []).map(id => ({ kind: 'added', id, matchKey: '', label: '', aspects: [], wasOffered: false })),
+		...(diff.removed ?? []).map(entry => ({ kind: 'removed', id: entry.id, matchKey: entry.match_key, label: label(entry.id, entry.match_key), aspects: [], changes: [], wasOffered: offered.get(entry.id) === true })),
+		...[...changed.values()].map(entry => ({ kind: 'changed', id: entry.id, matchKey: entry.match_key, label: label(entry.id, entry.match_key), aspects: entry.aspects.map(aspectLabel), changes: Object.entries(entry.changes).map(([aspect, values]) => ({ aspect, label: aspectLabel(aspect), before: JSON.stringify(values.before, null, 2), after: JSON.stringify(values.after, null, 2) })), wasOffered: offered.get(entry.id) === true })),
+		...(diff.added ?? []).map(id => ({ kind: 'added', id, matchKey: '', label: '', aspects: [], changes: [], wasOffered: false })),
 	]
 }
 
