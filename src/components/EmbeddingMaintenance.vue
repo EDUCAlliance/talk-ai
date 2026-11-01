@@ -132,6 +132,7 @@ export default {
 		catalogueState() {
 			const labels = {
 				disabled: t('educai', 'Disabled'),
+				source_unavailable: t('educai', 'Source unavailable'),
 				idle: t('educai', 'Not yet indexed'),
 				queued: t('educai', 'Queued'),
 				running: t('educai', 'Processing'),

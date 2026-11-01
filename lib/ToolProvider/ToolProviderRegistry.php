@@ -50,8 +50,9 @@ class ToolProviderRegistry {
 
 	/**
 	 * All currently available tool definitions: core built-ins first, then
-	 * provider tools. Provider tools whose name collides with an existing
-	 * tool are skipped (with a warning) so core tools can never be shadowed.
+	 * provider tools. Core tools can never be shadowed; a name claimed by more
+	 * than one provider is withheld (with a warning) and refused on execution,
+	 * so listing and dispatch never disagree about who owns a tool.
 	 *
 	 * @return array<int,array<string,mixed>>
 	 */
@@ -85,6 +86,11 @@ class ToolProviderRegistry {
 						'tool' => $name,
 						'provider' => get_class($provider),
 					]);
+					continue;
+				}
+				if (count($this->providersFor($name)) > 1) {
+					$seen[$name] = true;
+					$this->logger->warning('Skipping tool claimed by several providers', ['tool' => $name]);
 					continue;
 				}
 				$seen[$name] = true;
@@ -125,13 +131,42 @@ class ToolProviderRegistry {
 			return $this->builtInToolProvider->executeTool($toolName, $arguments, $config);
 		}
 
-		foreach ($this->getProviders() as $provider) {
-			if ($provider->providesTool($toolName)) {
-				return $provider->executeTool($toolName, $arguments, $config);
-			}
+		$providers = $this->providersFor($toolName);
+		if (count($providers) > 1) {
+			$this->logger->error('Refusing to execute a tool claimed by several providers', [
+				'tool' => $toolName,
+				'providers' => array_map('get_class', $providers),
+			]);
+			$message = 'This tool is provided by more than one app, so it cannot be used safely. Ask an administrator to resolve the conflict.';
+			return [
+				'content' => [['type' => 'text', 'text' => $message]],
+				'isError' => true,
+				'error' => ['code' => 'tool_provider_conflict', 'message' => $message, 'details' => []],
+			];
+		}
+		if ($providers !== []) {
+			return $providers[0]->executeTool($toolName, $arguments, $config);
 		}
 
 		throw new \Exception("Unknown built-in tool: $toolName");
+	}
+
+	/** @return list<IToolProvider> */
+	private function providersFor(string $toolName): array {
+		$providers = [];
+		foreach ($this->getProviders() as $provider) {
+			try {
+				if ($provider->providesTool($toolName)) {
+					$providers[] = $provider;
+				}
+			} catch (\Throwable $e) {
+				$this->logger->error('Tool provider failed to report tool ownership', [
+					'provider' => get_class($provider),
+					'exception' => $e,
+				]);
+			}
+		}
+		return $providers;
 	}
 
 	/**

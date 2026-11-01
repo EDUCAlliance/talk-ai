@@ -7,6 +7,7 @@ namespace OCA\EducAI\Controller;
 use Exception;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
+use OCA\EducAI\OpenApi\ApiToolAssignmentException;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\PermissionService;
@@ -122,6 +123,8 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot, 201);
+		} catch (ApiToolAssignmentException $e) {
+			return $this->apiToolNotAssignableResponse($e);
 		} catch (ModelNotReleasedException $e) {
 			return $this->modelNotReleasedResponse($e);
 		} catch (Exception $e) {
@@ -171,6 +174,8 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot);
+		} catch (ApiToolAssignmentException $e) {
+			return $this->apiToolNotAssignableResponse($e);
 		} catch (ModelNotReleasedException $e) {
 			return $this->modelNotReleasedResponse($e);
 		} catch (AuthorizationException $e) {
@@ -288,6 +293,8 @@ class BotController extends Controller {
 				$this->request->getParam('testing_description')
 			);
 			return new DataResponse($bot);
+		} catch (ApiToolAssignmentException $e) {
+			return $this->apiToolNotAssignableResponse($e);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to submit bot for approval: ' . $e->getMessage());
 			return $this->errorResponse(
@@ -338,6 +345,8 @@ class BotController extends Controller {
 		try {
 			$bot = $this->botService->approveBot($id, $this->userId);
 			return new DataResponse($bot);
+		} catch (ApiToolAssignmentException $e) {
+			return $this->apiToolNotAssignableResponse($e);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to approve bot: ' . $e->getMessage());
 			return $this->errorResponse(
@@ -489,6 +498,8 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot);
+		} catch (ApiToolAssignmentException $e) {
+			return $this->apiToolNotAssignableResponse($e);
 		} catch (ModelNotReleasedException $e) {
 			return $this->modelNotReleasedResponse($e);
 		} catch (Exception $e) {
@@ -544,6 +555,21 @@ class BotController extends Controller {
 		unset($tool);
 
 		return $tools;
+	}
+
+	private function apiToolNotAssignableResponse(ApiToolAssignmentException $e): DataResponse {
+		$label = $e->getLabel() ?? $e->getToolName();
+		$message = match ($e->getReason()) {
+			ApiToolAssignmentException::NOT_PERMITTED => $this->l10n->t('You are not allowed to give the API tool "%s" to bots.', [$label]),
+			ApiToolAssignmentException::VISIBILITY_NOT_ALLOWED => $this->l10n->t('The API tool "%s" is not allowed for bots with this visibility.', [$label]),
+			default => $this->l10n->t('The API tool "%s" is not available. Remove it from the bot or ask an administrator to approve it.', [$label]),
+		};
+		return new DataResponse([
+			'error' => $message,
+			'errorCode' => 'api_tool_not_assignable',
+			'reason' => $e->getReason(),
+			'tool' => $e->getToolName(),
+		], 403);
 	}
 
 	private function modelNotReleasedResponse(ModelNotReleasedException $e): DataResponse {

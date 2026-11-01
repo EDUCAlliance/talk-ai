@@ -1672,6 +1672,39 @@ class AgentExecutorTest extends TestCase {
 		$this->assertStringNotContainsString('Searching...', $result['content']);
 	}
 
+	public function testToolProgressShowsTheProviderLabelAsPlainText(): void {
+		[$executor, $llmClient, , $toolProvider] = $this->createHarness([
+			['label' => 'E2E Library: Search books'] + $this->searchToolDefinition('api_5_19'),
+			['label' => "Evil *API* @all: [Read](https://evil.example)\n_Loans_ `x`"] + $this->searchToolDefinition('api_5_20'),
+			['label' => '@*_'] + $this->searchToolDefinition('api_5_21'),
+		]);
+		$toolProvider->method('executeTool')->willReturn(['text' => 'result']);
+		$this->expectSyncTurns($llmClient, [
+			$this->turn('', [
+				$this->toolCall('call-1', 'api_5_19', '{"query":"x"}'),
+				$this->toolCall('call-2', 'api_5_20', '{"query":"x"}'),
+				$this->toolCall('call-3', 'api_5_21', '{"query":"x"}'),
+			], 'tool_calls'),
+			$this->turn('Done', [], 'stop'),
+		]);
+		$observedToolProgress = [];
+
+		$executor->run(
+			'system',
+			[['role' => 'user', 'content' => 'Search']],
+			[],
+			$this->builtInOptions(['api_5_19', 'api_5_20', 'api_5_21']) + [
+				'on_tool_progress' => static function (string $progress) use (&$observedToolProgress): void {
+					$observedToolProgress[] = $progress;
+				},
+			]
+		);
+
+		$this->assertSame([
+			'🔧 _Using tools: E2E Library: Search books, Evil API all: Read(https:evilexample) Loans x, api_5_21..._',
+		], $observedToolProgress);
+	}
+
 	public function testToolOutputTruncationPreservesUtf8Boundary(): void {
 		[$executor, $llmClient, , $toolProvider] = $this->createHarness([$this->searchToolDefinition()]);
 		$toolProvider->expects($this->once())

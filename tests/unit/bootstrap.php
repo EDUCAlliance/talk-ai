@@ -22,6 +22,17 @@ interface LoggerInterface {
 PHP);
 }
 
+if (!interface_exists(\Psr\Http\Message\ResponseInterface::class)) {
+	eval(<<<'PHP'
+namespace Psr\Http\Message;
+
+interface ResponseInterface {
+	public function getStatusCode();
+	public function getHeaderLine(string $name);
+}
+PHP);
+}
+
 if (!class_exists(\GuzzleHttp\Cookie\CookieJar::class)) {
 	eval(<<<'PHP'
 namespace GuzzleHttp\Cookie;
@@ -191,10 +202,20 @@ PHP);
 namespace OCP\Http\Client;
 
 interface IResponse {
-	public function getBody(): string;
+	/** @return string|resource */
+	public function getBody();
 	public function getHeader(string $key): string;
 	public function getStatusCode(): int;
 }
+PHP);
+			return;
+	}
+
+	if ($class === 'OCP\\Http\\Client\\LocalServerException') {
+		eval(<<<'PHP'
+namespace OCP\Http\Client;
+
+class LocalServerException extends \RuntimeException {}
 PHP);
 			return;
 	}
@@ -615,7 +636,10 @@ PHP);
 namespace OCP\DB;
 
 class Types {
+	public const BIGINT = 'bigint';
+	public const BOOLEAN = 'boolean';
 	public const INTEGER = 'integer';
+	public const STRING = 'string';
 	public const TEXT = 'text';
 }
 PHP);
@@ -629,6 +653,8 @@ namespace OCP\DB;
 interface ISchemaWrapper {
 	public function getTable($tableName);
 	public function hasTable($tableName);
+	public function createTable($tableName);
+	public function dropTable($tableName);
 }
 PHP);
 			return;

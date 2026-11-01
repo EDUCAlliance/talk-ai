@@ -242,6 +242,9 @@ export default {
 				catalogueEnabled: false,
 				catalogueApiEndpoint: '',
 				catalogueReindexHours: 24,
+				catalogueLinkField: '',
+				catalogueLinkTemplate: '',
+				catalogueLinkOrigins: '',
 				doclingEnabled: false,
 				doclingApiEndpoint: '',
 				doclingApiKey: '',
@@ -329,6 +332,7 @@ export default {
 			indexSettingsBaseline: { ragEnabled: false, catalogueEnabled: false, catalogueApiEndpoint: '', ragChunkSize: 750, ragChunkOverlap: 50 },
 			catalogueTesting: false,
 			catalogueTestResult: null,
+			catalogueLinkPreview: { id: '', busy: false, result: null, error: '' },
 			embeddingConfigBaseline: {
 				apiProvider: 'custom',
 				apiEndpoint: '',
@@ -1078,6 +1082,9 @@ export default {
 				this.settings.catalogueEnabled = !!data.catalogue_enabled
 				this.settings.catalogueApiEndpoint = data.catalogue_api_endpoint || ''
 				this.settings.catalogueReindexHours = typeof data.catalogue_reindex_hours === 'number' ? data.catalogue_reindex_hours : 24
+				this.settings.catalogueLinkField = data.catalogue_link_field || ''
+				this.settings.catalogueLinkTemplate = data.catalogue_link_template || ''
+				this.settings.catalogueLinkOrigins = adminSettings.parseOriginList(data.catalogue_link_origins || []).join('\n')
 				this.captureIndexSettingsBaseline()
 				this.settings.doclingEnabled = !!data.docling_enabled
 				this.settings.doclingApiEndpoint = data.docling_api_endpoint || ''
@@ -1215,6 +1222,7 @@ export default {
 					catalogueEnabled: this.settings.catalogueEnabled,
 					catalogueApiEndpoint: (this.settings.catalogueApiEndpoint || '').trim(),
 					catalogueReindexHours: Number.isFinite(this.settings.catalogueReindexHours) ? Number(this.settings.catalogueReindexHours) : 24,
+					...this.catalogueLinkPayload(),
 					doclingEnabled: this.settings.doclingEnabled,
 					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
 					doclingApiKey: this.settings.doclingAuthMode !== 'none' ? this.settings.doclingApiKey || null : null,
@@ -1308,6 +1316,9 @@ export default {
 			} catch (error) {
 				console.error('Failed to save settings:', error)
 				showError(getApiErrorMessage(error, t('educai', 'Failed to save settings')))
+				if (error?.response?.data?.errorCode === 'catalogue_link_invalid') {
+					this.setTab('knowledge', 'educai-admin-catalogue-links')
+				}
 			} finally {
 				this.saving = false
 			}
@@ -1512,6 +1523,42 @@ export default {
 				this.catalogueTestResult = { success: false, message: getApiErrorMessage(error, t('educai', 'Catalogue connection failed')) }
 			} finally {
 				this.catalogueTesting = false
+			}
+		},
+		catalogueLinkPayload() {
+			return {
+				catalogueLinkField: String(this.settings.catalogueLinkField || '').trim(),
+				catalogueLinkTemplate: String(this.settings.catalogueLinkTemplate || '').trim(),
+				catalogueLinkOrigins: adminSettings.parseOriginList(this.settings.catalogueLinkOrigins),
+			}
+		},
+		applyCatalogueLinkPreset(name) {
+			const preset = adminSettings.CATALOGUE_LINK_PRESETS[name]
+			if (!preset) return
+			this.settings.catalogueLinkTemplate = preset.template
+			this.settings.catalogueLinkOrigins = adminSettings.parseOriginList([...adminSettings.parseOriginList(this.settings.catalogueLinkOrigins), ...preset.origins]).join('\n')
+			this.catalogueLinkPreview.result = null
+		},
+		async previewCatalogueLink() {
+			const preview = this.catalogueLinkPreview
+			const id = String(preview.id || '').trim()
+			if (!id) return
+			preview.busy = true
+			preview.result = null
+			preview.error = ''
+			try {
+				const { catalogueLinkField, catalogueLinkTemplate, catalogueLinkOrigins } = this.catalogueLinkPayload()
+				const { data } = await axios.post(generateUrl('/apps/educai/api/v1/admin/catalogue/link-preview'), {
+					id,
+					linkField: catalogueLinkField,
+					linkTemplate: catalogueLinkTemplate,
+					linkOrigins: catalogueLinkOrigins,
+				})
+				preview.result = data
+			} catch (error) {
+				preview.error = getApiErrorMessage(error, t('educai', 'The link preview failed.'))
+			} finally {
+				preview.busy = false
 			}
 		},
 		resolveEffectiveEmbeddingEndpoint(apiEndpoint, embeddingApiEndpoint) {

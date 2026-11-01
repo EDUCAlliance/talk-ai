@@ -6,6 +6,7 @@ Start with the root [README](../README.md) for the project overview.
 
 - [FEATURES.md](./FEATURES.md) — product surface and user-facing behavior
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — services, data model, and runtime flows
+- [adr/0001-openapi-connections.md](./adr/0001-openapi-connections.md) — data model and tool identity of OpenAPI connections
 
 ## Setup & Operations
 
@@ -19,6 +20,8 @@ Start with the root [README](../README.md) for the project overview.
 
 - [ONBOARDING.md](./ONBOARDING.md) — per-room onboarding and response modes
 - [RAG_TOOL_GUIDE.md](./RAG_TOOL_GUIDE.md) — document search tool
+- [OPENAPI_CONNECTIONS.md](./OPENAPI_CONNECTIONS.md) — API operation review, compatibility, limits and catalogue source
+- [CATALOGUE_LINKS.md](./CATALOGUE_LINKS.md) — verified course links from the catalogue
 - [SMART_PICKER_BOT_PROVIDER.md](./SMART_PICKER_BOT_PROVIDER.md) — "/" picker in Talk
 - [pseudo_streaming.md](./pseudo_streaming.md) — chunked replies in Talk
 

@@ -1,0 +1,78 @@
+{
+	"id": "educ-catalogue",
+	"revision": 1,
+	"name": "EDUC course catalogue",
+	"description": "Public read access to the learning opportunities of the EDUC Alliance course catalogue.",
+	"connection": {
+		"base_url": "https://catalogue.educalliance.eu/api",
+		"auth_mode": "none"
+	},
+	"document": "openapi.json",
+	"upstream": {
+		"file": "upstream-3.0.2.json",
+		"url": "https://catalogue.educalliance.eu/api/",
+		"version": "3.0.2",
+		"sha256": "9b681eecb571aef0138bff2c829188777ce277408317f73471ce8637377f8db3",
+		"retrieved_at": "2026-10-30"
+	},
+	"operations": {
+		"GET /course/list": {
+			"label": "Search EDUC courses",
+			"description": "Searches EDUC learning opportunities. Use state OPEN for current and CLOSED for archived opportunities; search takes free text. Results are paged with limit and offset; total is the number of matches.",
+			"auth": "none",
+			"mapping": {
+				"records": "/courses",
+				"id": "/id",
+				"title": "/title",
+				"fields": [
+					{ "key": "code", "pointer": "/code" },
+					{ "key": "summary", "pointer": "/summary" },
+					{ "key": "ects", "pointer": "/ects" },
+					{ "key": "language", "pointer": "/language/name" },
+					{ "key": "semester", "pointer": "/semester/name" },
+					{ "key": "university", "pointer": "/leadUniversity/name" },
+					{ "key": "discipline", "pointer": "/discipline/name" },
+					{ "key": "learning_type", "pointer": "/learningType/name" },
+					{ "key": "mobility_format", "pointer": "/mobilityFormat/name" },
+					{ "key": "application_deadline", "pointer": "/application_deadline" }
+				],
+				"link": { "template": "https://catalogue.educalliance.eu/Opportunity/{id}", "origins": [] },
+				"paging": { "total": "/count" }
+			}
+		},
+		"GET /course/view": {
+			"label": "Get EDUC course details",
+			"description": "Returns one EDUC learning opportunity by its numeric catalogue ID, including its full description and prerequisites.",
+			"auth": "none",
+			"mapping": {
+				"records": "/course",
+				"id": "/id",
+				"title": "/title",
+				"fields": [
+					{ "key": "code", "pointer": "/code" },
+					{ "key": "summary", "pointer": "/summary" },
+					{ "key": "description", "pointer": "/description" },
+					{ "key": "prerequisites", "pointer": "/prerequisites" },
+					{ "key": "ects", "pointer": "/ects" },
+					{ "key": "language", "pointer": "/language/name" },
+					{ "key": "semester", "pointer": "/semester/name" },
+					{ "key": "university", "pointer": "/leadUniversity/name" },
+					{ "key": "capacity", "pointer": "/capacity" },
+					{ "key": "application_deadline", "pointer": "/application_deadline" }
+				],
+				"link": { "template": "https://catalogue.educalliance.eu/Opportunity/{id}", "origins": [] }
+			}
+		},
+		"GET /version": {
+			"label": "EDUC catalogue version",
+			"description": "Returns the deployed version of the EDUC catalogue API.",
+			"auth": "none",
+			"mapping": {
+				"records": "",
+				"fields": [
+					{ "key": "version", "pointer": "/version" }
+				]
+			}
+		}
+	}
+}

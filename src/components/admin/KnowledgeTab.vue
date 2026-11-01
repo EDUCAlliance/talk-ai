@@ -315,6 +315,117 @@
 				<p class="ta-hint">
 					{{ t('educai', 'The test contacts the address above without saving. Catalogue indexing runs together with the knowledge index.') }}
 				</p>
+				<CatalogueSourceSwitch />
+
+				<h4 id="educai-admin-catalogue-links" class="ta-subheading">
+					{{ t('educai', 'Course links') }}
+				</h4>
+				<p class="ta-hint">
+					{{ t('educai', 'Bots only link a course with the address configured here. A link field of the record is used when it is an absolute HTTPS address on an accepted origin; otherwise the template is filled with the record ID. The API address is never used to guess a web address.') }}
+				</p>
+				<div v-if="!linkConfigured" class="ta-note ta-note--warn" role="status">
+					{{ t('educai', 'No course link source is configured. Bots will say that a course link is not available.') }}
+				</div>
+				<div class="ta-row">
+					<button type="button" class="ta-btn ta-btn--ghost ta-btn--small" @click="admin.applyCatalogueLinkPreset('educ')">
+						{{ t('educai', 'Use EDUC Alliance catalogue preset') }}
+					</button>
+					<span class="ta-hint">{{ t('educai', 'Fills in the template and origin below; nothing is saved until you save the settings.') }}</span>
+				</div>
+				<div class="ta-grid">
+					<div class="ta-field">
+						<label for="catalogue-link-template" class="ta-label">{{ t('educai', 'Course link template') }}</label>
+						<input id="catalogue-link-template"
+							v-model="admin.settings.catalogueLinkTemplate"
+							class="ta-input ta-input--mono"
+							type="url"
+							placeholder="https://catalogue.example.org/Opportunity/{id}"
+							autocomplete="off"
+							spellcheck="false"
+							:aria-invalid="templateHint ? 'true' : 'false'"
+							aria-describedby="catalogue-link-template-hint">
+						<p id="catalogue-link-template-hint" class="ta-hint">
+							{{ templateHint || t('educai', '{id} is replaced by the encoded record ID. The address must use HTTPS with a fixed host.', { id: '{id}' }) }}
+						</p>
+					</div>
+					<div class="ta-field">
+						<label for="catalogue-link-field" class="ta-label">{{ t('educai', 'Link field in the record') }}</label>
+						<input id="catalogue-link-field"
+							v-model="admin.settings.catalogueLinkField"
+							class="ta-input ta-input--mono"
+							type="text"
+							:placeholder="defaultLinkField"
+							autocomplete="off"
+							spellcheck="false"
+							aria-describedby="catalogue-link-field-hint">
+						<p id="catalogue-link-field-hint" class="ta-hint">
+							{{ t('educai', 'JSON pointer to a web address in each record. Empty uses {field}.', { field: defaultLinkField }) }}
+						</p>
+					</div>
+				</div>
+				<div class="ta-field ta-field--spaced">
+					<label for="catalogue-link-origins" class="ta-label">{{ t('educai', 'Accepted web origins for record links') }}</label>
+					<textarea id="catalogue-link-origins"
+						v-model="admin.settings.catalogueLinkOrigins"
+						class="ta-input ta-input--mono"
+						rows="2"
+						spellcheck="false"
+						placeholder="https://catalogue.example.org"
+						aria-describedby="catalogue-link-origins-hint" />
+					<p id="catalogue-link-origins-hint" class="ta-hint">
+						{{ t('educai', 'One HTTPS origin per line, without a path. Record links on other hosts are ignored.') }}
+						<template v-if="templateOrigin && !explicitOrigins.includes(templateOrigin)">
+							{{ t('educai', 'Also accepted: {origin} (from the template).', { origin: templateOrigin }) }}
+						</template>
+					</p>
+				</div>
+				<form class="ta-row" @submit.prevent="admin.previewCatalogueLink()">
+					<label for="catalogue-link-preview-id" class="ta-label">{{ t('educai', 'Preview for record ID') }}</label>
+					<input id="catalogue-link-preview-id"
+						v-model="admin.catalogueLinkPreview.id"
+						class="ta-input ta-input--mono"
+						type="text"
+						inputmode="numeric"
+						autocomplete="off"
+						:placeholder="t('educai', 'e.g. 292')">
+					<button type="submit"
+						class="ta-btn ta-btn--small"
+						:disabled="admin.catalogueLinkPreview.busy || !String(admin.catalogueLinkPreview.id || '').trim()">
+						{{ admin.catalogueLinkPreview.busy ? t('educai', 'Checking…') : t('educai', 'Preview link') }}
+					</button>
+				</form>
+				<div v-if="admin.catalogueLinkPreview.error" class="ta-note ta-note--error" role="alert">
+					{{ admin.catalogueLinkPreview.error }}
+				</div>
+				<div v-else-if="preview"
+					class="ta-note"
+					:class="preview.canonical_url ? 'ta-note--ok' : 'ta-note--warn'"
+					role="status"
+					aria-live="polite">
+					<strong>{{ preview.title || t('educai', 'Record {id} (not in the local index)', { id: preview.id }) }}</strong>
+					<p>
+						{{ t('educai', 'Course page') }}:
+						<a v-if="preview.canonical_url"
+							class="ta-link ta-input--mono"
+							:href="preview.canonical_url"
+							target="_blank"
+							rel="noopener noreferrer">{{ preview.canonical_url }}</a>
+						<template v-else>
+							{{ t('educai', 'Course link not available') }}
+						</template>
+						<span v-if="previewSource"> · {{ previewSource }}</span>
+					</p>
+					<p v-if="preview.application_url">
+						{{ t('educai', 'Application link (not the course page)') }}:
+						<span class="ta-input--mono">{{ preview.application_url }}</span>
+					</p>
+					<p v-for="issue in previewIssues" :key="issue">
+						{{ issue }}
+					</p>
+				</div>
+				<p class="ta-hint">
+					{{ t('educai', 'Changing course links takes effect immediately and does not require reindexing the catalogue.') }}
+				</p>
 			</template>
 		</AdminSection>
 	</div>
@@ -322,9 +433,10 @@
 
 <script>
 import { t, n, getCanonicalLocale } from '../../l10n.js'
-import { RATE_LIMIT_PRESETS, endpointHost, rateLimitPreset } from '../../utils/adminSettings.js'
+import { CATALOGUE_DEFAULT_LINK_FIELD, RATE_LIMIT_PRESETS, endpointHost, linkTemplateOrigin, parseOriginList, rateLimitPreset } from '../../utils/adminSettings.js'
 import { doclingAuthLabel, doclingProfileLabel } from '../../utils/adminOverview.js'
 import AdminSection from './AdminSection.vue'
+import CatalogueSourceSwitch from './CatalogueSourceSwitch.vue'
 import RateLimitFields from './RateLimitFields.vue'
 import SecretField from './SecretField.vue'
 import ServiceSource from './ServiceSource.vue'
@@ -334,12 +446,48 @@ import EmbeddingMaintenance from '../EmbeddingMaintenance.vue'
 
 export default {
 	name: 'KnowledgeTab',
-	components: { AdminSection, EmbeddingMaintenance, RateLimitFields, SecretField, ServiceSource, TestAction, ToggleSwitch },
+	components: { AdminSection, CatalogueSourceSwitch, EmbeddingMaintenance, RateLimitFields, SecretField, ServiceSource, TestAction, ToggleSwitch },
 	inject: ['admin'],
 	data() {
-		return { customEmbeddingLimits: false, presets: RATE_LIMIT_PRESETS }
+		return { customEmbeddingLimits: false, presets: RATE_LIMIT_PRESETS, defaultLinkField: CATALOGUE_DEFAULT_LINK_FIELD }
 	},
 	computed: {
+		explicitOrigins() {
+			return parseOriginList(this.admin.settings.catalogueLinkOrigins)
+		},
+		templateOrigin() {
+			return linkTemplateOrigin(this.admin.settings.catalogueLinkTemplate)
+		},
+		linkConfigured() {
+			return String(this.admin.settings.catalogueLinkTemplate || '').trim() !== '' || this.explicitOrigins.length > 0
+		},
+		templateHint() {
+			const template = String(this.admin.settings.catalogueLinkTemplate || '').trim()
+			if (template === '') return ''
+			if (!/^https:\/\//i.test(template)) return t('educai', 'The link template must start with https://.')
+			if (template.split('{id}').length !== 2) return t('educai', 'The link template must contain {id} exactly once.', { id: '{id}' })
+			return ''
+		},
+		preview() {
+			return this.admin.catalogueLinkPreview.result
+		},
+		previewSource() {
+			const source = this.preview?.source
+			if (source === 'record') return t('educai', 'from the record link field')
+			if (source === 'template') return t('educai', 'from the template')
+			return ''
+		},
+		previewIssues() {
+			const messages = {
+				record_link_relative: t('educai', 'The record link is relative and was ignored.'),
+				record_link_invalid: t('educai', 'The record link is not a safe absolute HTTPS address and was ignored.'),
+				record_link_origin_not_accepted: t('educai', 'The record link points to an origin that is not accepted and was ignored.'),
+				record_id_invalid: t('educai', 'The record ID cannot be used in a link.'),
+				link_template_missing: t('educai', 'No link template is configured.'),
+				application_link_invalid: t('educai', 'The application link is not a safe web address and is not shown.'),
+			}
+			return (this.preview?.issues || []).map(issue => messages[issue] || issue)
+		},
 		chunkOverlapInvalid() {
 			const { ragChunkSize, ragChunkOverlap } = this.admin.settings
 			return Number.isFinite(ragChunkSize) && Number.isFinite(ragChunkOverlap) && ragChunkOverlap >= ragChunkSize

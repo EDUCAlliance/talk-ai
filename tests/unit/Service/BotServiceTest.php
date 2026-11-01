@@ -19,9 +19,16 @@ use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
+use OCA\EducAI\OpenApi\ApiToolAccess;
+use OCA\EducAI\OpenApi\ApiToolAssignmentException;
 use OCA\EducAI\Service\AgentExecutor;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolProvider;
+use OCA\EducAI\Service\CanonicalLinkResolver;
+use OCA\EducAI\Service\CatalogueEmbeddingService;
+use OCA\EducAI\Service\CatalogueLinkGuard;
+use OCA\EducAI\Service\CatalogueLinkService;
+use OCA\EducAI\Service\CatalogueReferenceLedger;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RateLimitService;
@@ -647,6 +654,35 @@ class BotServiceTest extends TestCase {
 		$this->assertSame('Owner User', $result[0]['owner_name']);
 	}
 
+	public function testPendingApiToolsOfAPublishedBotWaitForApprovalEvenForOwnerAndTester(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setApprovalStatus('pending');
+		$bot->setTestingEnabledBy('reviewer');
+		$bot->setPendingChangesArray([
+			'tools' => [
+				['is_builtin' => true, 'builtin_name' => 'api_3_9'],
+				['is_builtin' => true, 'builtin_name' => 'api_3_4'],
+				['is_builtin' => true, 'builtin_name' => 'catalogue_search_courses'],
+			],
+		]);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getToolsForBot')->with(7)->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([['name' => 'api_3_4', 'config' => []]]);
+		$service = $this->createBotService($this->createMock(BotMapper::class), $this->createMock(PermissionService::class), null, null, null, $toolRegistry);
+		$method = new \ReflectionMethod(BotService::class, 'resolveEffectiveToolLoadout');
+
+		foreach (['owner', 'reviewer'] as $user) {
+			$names = array_column($method->invoke($service, $bot, $user)['built_in'], 'name');
+			// The live API tool and other pending changes run; the API tool the change adds does not yet.
+			$this->assertSame(['api_3_4', 'catalogue_search_courses'], $names, $user);
+		}
+		$this->assertSame(['api_3_4'], array_column($method->invoke($service, $bot, 'audience')['built_in'], 'name'));
+
+		// A bot that was never published has no wider audience yet: its owner tries the new tool.
+		$bot->setApprovedAt(null);
+		$this->assertSame(['api_3_9', 'api_3_4', 'catalogue_search_courses'], array_column($method->invoke($service, $bot, 'owner')['built_in'], 'name'));
+	}
+
 	public function testResolveEffectiveToolLoadoutUsesPendingBuiltInAssignmentsForTestingReviewer(): void {
 		$bot = $this->createApprovedBot();
 		$bot->setApprovalStatus('pending');
@@ -1258,7 +1294,152 @@ class BotServiceTest extends TestCase {
 		$this->assertCount(2, $contexts);
 		$this->assertIsArray($contexts[0]);
 		$this->assertSame(7, $contexts[0]['bot_id'] ?? null);
+		$this->assertSame('owner', $contexts[0]['actor_id'] ?? null);
+		$this->assertSame('personal', $contexts[0]['bot_visibility'] ?? null);
+		$this->assertEqualsWithDelta(microtime(true) + AgentExecutor::DEFAULT_MAX_WALL_CLOCK_SECONDS, $contexts[0]['deadline'] ?? 0.0, 5.0);
 		$this->assertNull($contexts[1]);
+	}
+
+	public function testStoredToolsKeepTheirLabelEvenWhenNoLongerOffered(): void {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->with(7)->willReturn($this->createApprovedBot());
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('isAdmin')->willReturn(false);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([
+			['name' => 'api_3_9', 'config' => []],
+			['name' => 'api_4_1', 'config' => []],
+		]);
+		$providers = $this->createMock(ToolProviderRegistry::class);
+		$providers->method('getToolMetadata')->willReturnCallback(static fn (string $name): ?array => $name === 'api_3_9' ? ['label' => 'Courses: Search courses'] : null);
+		$service = $this->createBotService($botMapper, $permissions, toolRegistry: $toolRegistry, toolProviderRegistry: $providers);
+
+		$tools = $service->getBotTools(7, 'owner');
+
+		$this->assertSame(['Courses: Search courses', null], array_column($tools, 'label'));
+		$this->assertSame(['api_3_9', 'api_4_1'], array_column($tools, 'builtin_name'));
+	}
+
+	public function testApiToolsAreCheckedBeforeANewBotIsStored(): void {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findByMentionName')->willThrowException(new DoesNotExistException('free'));
+		$botMapper->expects($this->never())->method('insert');
+		$access = $this->createMock(ApiToolAccess::class);
+		$access->expects($this->once())
+			->method('assertAssignable')
+			->with('owner', [], ['api_3_9', 'rag_search_documents'], null, 'personal')
+			->willThrowException(new ApiToolAssignmentException('api_3_9', ApiToolAssignmentException::NOT_PERMITTED));
+		$service = $this->createBotService($botMapper, $this->createMock(PermissionService::class), apiToolAccess: $access);
+
+		$this->expectException(ApiToolAssignmentException::class);
+		$service->createBot('owner', 'Bot', 'bot', 'Prompt', visibility: 'personal', tools: ['builtin:api_3_9', 'builtin:rag_search_documents']);
+	}
+
+	public function testEditsCompareTheEditableToolsAndVisibilityWithTheTarget(): void {
+		$bot = $this->createApprovedBot();
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->willReturn($bot);
+		$botMapper->expects($this->never())->method('update');
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([['name' => 'api_3_9', 'config' => []]]);
+		$calls = [];
+		$access = $this->createMock(ApiToolAccess::class);
+		$access->method('assertAssignable')->willReturnCallback(static function (...$arguments) use (&$calls): void {
+			$calls[] = $arguments;
+			throw new ApiToolAssignmentException('api_3_10', ApiToolAssignmentException::VISIBILITY_NOT_ALLOWED);
+		});
+		$service = $this->createBotService($botMapper, $permissions, toolRegistry: $toolRegistry, apiToolAccess: $access);
+
+		foreach ([[['builtin:api_3_9', 'builtin:api_3_10'], ['api_3_9', 'api_3_10']], [null, ['api_3_9']]] as [$tools, $expected]) {
+			try {
+				$service->updateBot(id: 7, userId: 'owner', botName: 'Live bot', systemPrompt: 'Prompt', visibility: 'global', tools: $tools);
+				$this->fail('The guard must stop the save');
+			} catch (ApiToolAssignmentException) {
+			}
+			$this->assertSame(['owner', ['api_3_9'], $expected, 'groups', 'global'], array_pop($calls));
+		}
+	}
+
+	public function testSubmittingADraftChecksItsApiToolsForTheOwner(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setApprovalStatus('draft');
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->willReturn($bot);
+		$botMapper->expects($this->never())->method('update');
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([['name' => 'api_3_9', 'config' => []]]);
+		$access = $this->createMock(ApiToolAccess::class);
+		$access->expects($this->once())
+			->method('assertAssignable')
+			->with('owner', [], ['api_3_9'], null, 'groups')
+			->willThrowException(new ApiToolAssignmentException('api_3_9', ApiToolAssignmentException::TOOL_NOT_AVAILABLE));
+		$service = $this->createBotService($botMapper, $this->createMock(PermissionService::class), toolRegistry: $toolRegistry, apiToolAccess: $access);
+
+		$this->expectException(ApiToolAssignmentException::class);
+		$service->submitForApproval(7, 'owner');
+	}
+
+	public function testPublishingChecksTheApproverAgainstTheLiveVersion(): void {
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([['name' => 'api_3_9', 'config' => []]]);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canApproveBot')->willReturn(true);
+
+		$update = $this->createApprovedBot();
+		$update->setApprovalStatus('pending');
+		$update->setPendingChangesArray(['visibility' => 'global', 'tools' => ['builtin:api_3_9', 'builtin:api_3_10']]);
+		$initial = $this->createApprovedBot();
+		$initial->setApprovalStatus('pending');
+		$initial->setApprovedAt(null);
+		$expectations = [
+			[$update, ['reviewer', ['api_3_9'], ['api_3_9', 'api_3_10'], 'groups', 'global']],
+			[$initial, ['reviewer', [], ['api_3_9'], null, 'groups']],
+		];
+		foreach ($expectations as [$bot, $expected]) {
+			$botMapper = $this->createMock(BotMapper::class);
+			$botMapper->method('findById')->willReturn($bot);
+			$botMapper->expects($this->never())->method('update');
+			$access = $this->createMock(ApiToolAccess::class);
+			$access->expects($this->once())
+				->method('assertAssignable')
+				->with(...$expected)
+				->willThrowException(new ApiToolAssignmentException('api_3_10', ApiToolAssignmentException::NOT_PERMITTED));
+			$service = $this->createBotService($botMapper, $permissions, toolRegistry: $toolRegistry, apiToolAccess: $access);
+			try {
+				$service->approveBot(7, 'reviewer');
+				$this->fail('Publishing must be refused');
+			} catch (ApiToolAssignmentException) {
+			}
+			$this->assertSame('pending', $bot->getApprovalStatus());
+		}
+	}
+
+	public function testWithoutTheAccessServiceNewApiToolsAreRefused(): void {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findByMentionName')->willThrowException(new DoesNotExistException('free'));
+		$botMapper->expects($this->never())->method('insert');
+		$service = $this->createBotService($botMapper, $this->createMock(PermissionService::class));
+
+		try {
+			$service->createBot('owner', 'Bot', 'bot', 'Prompt', visibility: 'personal', tools: ['builtin:api_3_9']);
+			$this->fail('API tools must not be assignable without the access check');
+		} catch (ApiToolAssignmentException $e) {
+			$this->assertSame(ApiToolAssignmentException::TOOL_NOT_AVAILABLE, $e->getReason());
+		}
+
+		$bot = $this->createPersonalBot();
+		$editMapper = $this->createMock(BotMapper::class);
+		$editMapper->method('findById')->willReturn($bot);
+		$editMapper->expects($this->once())->method('update')->willReturnArgument(0);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([['name' => 'api_3_9', 'config' => []]]);
+		$this->createBotService($editMapper, $permissions, toolRegistry: $toolRegistry)
+			->updateBot(id: 7, userId: 'owner', botName: 'Renamed', systemPrompt: 'Prompt');
 	}
 
 	public function testProcessMessageSanitizesReasoningBeforeProgressTracePersistenceAndFutureHistory(): void {
@@ -1366,6 +1547,128 @@ class BotServiceTest extends TestCase {
 		$serializedOutput = json_encode([$visiblePartials, $inserted[1]->getContent(), $traceEvents], JSON_THROW_ON_ERROR);
 		$this->assertStringNotContainsString('<think>', $serializedOutput);
 		$this->assertStringNotContainsString('new private reasoning', $serializedOutput);
+	}
+
+	public function testCatalogueAnswerWithContradictingLinkIsReplacedBeforeAnythingIsPublished(): void {
+		$bot = $this->createPersonalBot();
+		$conversationMapper = $this->createMock(ConversationMapper::class);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$agentExecutor = $this->createMock(AgentExecutor::class);
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$settingsService = $this->createMock(SettingsService::class);
+		$traceService = $this->createMock(TraceService::class);
+		$inserted = [];
+		$visiblePartials = [];
+		$traceEvents = [];
+		$streamMismatchCount = 0;
+
+		$rateLimitService->method('isEnabled')->willReturn(false);
+		$settingsService->method('getSettings')->willReturn(new Settings());
+		$settingsService->method('getDefaultTemperature')->willReturn(0.2);
+		$conversationMapper->method('insert')->willReturnCallback(static function (Conversation $conversation) use (&$inserted): Conversation {
+			$inserted[] = $conversation;
+			return $conversation;
+		});
+		$conversationMapper->method('findByBotRoomAndThread')->willReturn([$this->createConversation('user', 'Courses on AI?')]);
+		$toolRegistry->method('getToolsForBot')->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->willReturn([]);
+
+		$ledger = new CatalogueReferenceLedger();
+		$resolver = CanonicalLinkResolver::fromConfig(null, 'https://catalogue.educ.example/Opportunity/{id}', []);
+		$links = $this->createMock(CatalogueLinkService::class);
+		$links->method('resolver')->willReturn($resolver);
+		$catalogue = $this->createMock(CatalogueEmbeddingService::class);
+		$catalogue->method('isEnabled')->willReturn(true);
+		$guard = new CatalogueLinkGuard($ledger, $links, $catalogue, $this->createMock(LoggerInterface::class));
+
+		$wrongAnswer = 'Take [AI Basics](https://catalogue.test.educ.example/Opportunity/777).';
+		$agentExecutor->expects($this->once())->method('run')
+			->willReturnCallback(static function (string $systemPrompt, array $messages, array $toolLoadout, array $options) use ($ledger, $wrongAnswer): array {
+				$ledger->record([
+					'id' => '777',
+					'title' => 'AI Basics',
+					'canonical_url' => 'https://catalogue.educ.example/Opportunity/777',
+					'application_url' => null,
+					'is_past' => false,
+				]);
+				$options['on_partial_result']($wrongAnswer);
+				return [
+					'status' => 'completed',
+					'terminalReason' => 'final_response',
+					'content' => $wrongAnswer,
+					'messages' => [],
+					'toolInvocations' => [],
+					'rateLimitHeaders' => [],
+				];
+			});
+		$traceService->method('recordEvent')->willReturnCallback(static function (?int $runId, string $eventType, array $event = []) use (&$traceEvents): void {
+			$traceEvents[$eventType] = $event;
+		});
+
+		$factoryBuilder = $this->getMockBuilder(IFactory::class);
+		$missingMethods = array_values(array_filter(['getUserLanguage', 'get'], static fn (string $method): bool => !method_exists(IFactory::class, $method)));
+		if ($missingMethods !== []) {
+			$factoryBuilder->addMethods($missingMethods);
+		}
+		$l10nFactory = $factoryBuilder->getMock();
+		$l10nFactory->method('getUserLanguage')->willReturn('en');
+		$l10nBuilder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$l10nBuilder->addMethods(['t', 'n']);
+		}
+		$l10n = $l10nBuilder->getMock();
+		$l10n->method('t')->willReturnCallback(static fn (string $text): string => $text);
+		$l10nFactory->method('get')->willReturn($l10n);
+
+		$service = new BotService(
+			$this->createMock(BotMapper::class),
+			$conversationMapper,
+			$this->createMock(ChatRoomMapper::class),
+			$this->createMock(LoggerInterface::class),
+			$this->createMock(IGroupManager::class),
+			$this->createUserManagerMock(),
+			$this->createMock(IAppManager::class),
+			$this->createMock(BotSourceMapper::class),
+			$this->createMock(EmbeddingMapper::class),
+			$this->createMock(BotToolMapper::class),
+			$this->createMock(ToolMapper::class),
+			$toolRegistry,
+			$agentExecutor,
+			$this->createToolProviderRegistryMock(),
+			$this->createMock(WikiService::class),
+			$rateLimitService,
+			$this->createMock(PermissionService::class),
+			$settingsService,
+			$this->createMock(RoomDocumentIngestionService::class),
+			$this->createMock(RoomImageIngestionService::class),
+			$this->createMock(WikiRootRegistryService::class),
+			$this->createMock(WikiLocationService::class),
+			$traceService,
+			l10nFactory: $l10nFactory,
+			catalogueLinkGuard: $guard,
+		);
+
+		$response = $service->processMessage(
+			bot: $bot,
+			message: 'Courses on AI?',
+			roomToken: 'room-token',
+			userId: 'owner',
+			onProgress: static function (string $partial) use (&$visiblePartials): void {
+				$visiblePartials[] = $partial;
+			},
+			traceRunId: 64,
+			onStreamMismatch: static function () use (&$streamMismatchCount): void {
+				$streamMismatchCount++;
+			},
+		);
+
+		$this->assertStringContainsString('Course page: https://catalogue.educ.example/Opportunity/777', $response);
+		$this->assertSame([$response], $visiblePartials);
+		$this->assertStringNotContainsString('test.educ.example', json_encode([$visiblePartials, $inserted[1]->getContent()], JSON_THROW_ON_ERROR));
+		$this->assertSame($response, $inserted[1]->getContent());
+		$this->assertSame(0, $streamMismatchCount);
+		$this->assertSame('replaced', $traceEvents['catalogue_link_guard']['payload']['outcome']);
+		$this->assertSame(['link_mismatch'], $traceEvents['catalogue_link_guard']['payload']['reasons']);
 	}
 
 	public function testProcessMessageRejectsReasoningOnlyCompletionWithoutAssistantPersistence(): void {
@@ -2529,6 +2832,7 @@ class BotServiceTest extends TestCase {
 		?TraceService $traceService = null,
 		?IFactory $l10nFactory = null,
 		?LLMClient $llmClient = null,
+		?ApiToolAccess $apiToolAccess = null,
 	): BotService {
 		return new BotService(
 			$botMapper,
@@ -2556,6 +2860,7 @@ class BotServiceTest extends TestCase {
 			$traceService,
 			l10nFactory: $l10nFactory,
 			llmClient: $llmClient,
+			apiToolAccess: $apiToolAccess,
 		);
 	}
 

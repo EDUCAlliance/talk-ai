@@ -25,6 +25,7 @@ installations. Disabled providers offer no Catalogue tools and queued/periodic j
 make no Catalogue requests. Saved configuration, tool assignments and index rows remain.
 The connection-test button explicitly contacts the entered endpoint even before enabling
 or saving the integration. Enabling Catalogue does not enable RAG or change branding.
+Course page addresses are configured separately; see [course links](CATALOGUE_LINKS.md).
 
 ## Branding and upgrade
 

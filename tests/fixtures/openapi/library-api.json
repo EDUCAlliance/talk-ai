@@ -1,0 +1,80 @@
+{
+	"openapi": "3.0.1",
+	"info": { "title": "Synthetic Library API", "version": "2026-01" },
+	"servers": [ { "url": "https://{region}.library.example/{basePath}", "variables": { "region": { "default": "eu" }, "basePath": { "default": "api/v2" } } } ],
+	"security": [ { "libraryKey": [] } ],
+	"paths": {
+		"/books": {
+			"get": {
+				"operationId": "books",
+				"summary": "Books by author",
+				"parameters": [
+					{ "$ref": "#/components/parameters/Author" },
+					{ "name": "year", "in": "query", "schema": { "type": "integer", "minimum": 1450, "exclusiveMaximum": true, "maximum": 2100 } },
+					{ "name": "after", "in": "query", "schema": { "type": "string", "format": "date" } },
+					{ "name": "formats", "in": "query", "explode": true, "schema": { "type": "array", "items": { "type": "string", "enum": ["print", "ebook", "audio"] } } }
+				],
+				"responses": {
+					"2XX": {
+						"description": "Books",
+						"content": { "application/vnd.library+json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Book" } } } }
+					}
+				}
+			}
+		},
+		"/books/{isbn}": {
+			"get": {
+				"operationId": "book",
+				"parameters": [ { "name": "isbn", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[0-9X-]+$" } } ],
+				"responses": { "200": { "$ref": "#/components/responses/Book" } }
+			}
+		},
+		"/shelves/{shelf}/books": {
+			"get": {
+				"operationId": "shelfBooks",
+				"parameters": [ { "name": "shelf", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 20 } } ],
+				"responses": { "200": { "description": "Books", "content": { "application/json": { "schema": { "allOf": [ { "$ref": "#/components/schemas/Page" }, { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Book" } } } } ] } } } } }
+			}
+		},
+		"/loop": {
+			"get": {
+				"operationId": "loop",
+				"parameters": [ { "$ref": "#/components/parameters/Loop" } ],
+				"responses": { "200": { "description": "Loop", "content": { "application/json": { "schema": { "type": "object" } } } } }
+			}
+		},
+		"/external": {
+			"get": {
+				"operationId": "external",
+				"parameters": [ { "$ref": "https://schemas.library.example/params.json#/Author" } ],
+				"responses": { "200": { "description": "External", "content": { "application/json": { "schema": { "type": "object" } } } } }
+			}
+		}
+	},
+	"components": {
+		"securitySchemes": {
+			"libraryKey": { "type": "apiKey", "in": "header", "name": "X-Library-Key" }
+		},
+		"parameters": {
+			"Author": { "$ref": "#/components/parameters/AuthorDefinition" },
+			"AuthorDefinition": { "name": "author", "in": "query", "required": true, "schema": { "type": "string", "minLength": 2 } },
+			"Loop": { "$ref": "#/components/parameters/Loop2" },
+			"Loop2": { "$ref": "#/components/parameters/Loop" }
+		},
+		"responses": {
+			"Book": { "description": "Book", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Book" } } } }
+		},
+		"schemas": {
+			"Page": { "type": "object", "properties": { "cursor": { "type": "string" }, "count": { "type": "integer" } } },
+			"Book": {
+				"type": "object",
+				"properties": {
+					"isbn": { "type": "string" },
+					"name": { "type": "string" },
+					"authors": { "type": "array", "items": { "type": "string" } },
+					"web_url": { "type": "string" }
+				}
+			}
+		}
+	}
+}

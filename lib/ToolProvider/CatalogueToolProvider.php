@@ -5,7 +5,12 @@ declare(strict_types=1);
 namespace OCA\EducAI\ToolProvider;
 
 use Exception;
+use OCA\EducAI\Service\AgentExecutor;
+use OCA\EducAI\Service\CanonicalLinkResolver;
 use OCA\EducAI\Service\CatalogueEmbeddingService;
+use OCA\EducAI\Service\CatalogueLinkGuard;
+use OCA\EducAI\Service\CatalogueLinkService;
+use OCA\EducAI\Service\CatalogueReferenceLedger;
 use OCA\EducAI\Service\ToolExecutionPolicyService;
 use Psr\Log\LoggerInterface;
 
@@ -24,18 +29,29 @@ class CatalogueToolProvider implements IToolProvider {
 	/** Legacy alias kept for old bot loadouts created before the tool rename. */
 	public const LEGACY_TOOL_CATALOGUE_SEARCH = 'catalogue_search_courses';
 
+	private const OUTPUT_LIMIT = AgentExecutor::TOOL_OUTPUT_LIMIT;
+	private const SEARCH_SUMMARY_LENGTH = 200;
+	private const TITLE_LENGTH = 200;
+	private const LINK_INSTRUCTIONS = 'To link a course, copy its "Course page" URL exactly or write {{course:ID}}; never construct, shorten or alter catalogue links, and never present an application link as the course page. If no course page is available, say so.';
+
 	private CatalogueEmbeddingService $catalogueEmbeddingService;
 	private ToolExecutionPolicyService $toolExecutionPolicyService;
 	private LoggerInterface $logger;
+	private ?CatalogueLinkService $linkService;
+	private ?CatalogueReferenceLedger $ledger;
 
 	public function __construct(
 		CatalogueEmbeddingService $catalogueEmbeddingService,
 		ToolExecutionPolicyService $toolExecutionPolicyService,
 		LoggerInterface $logger,
+		?CatalogueLinkService $linkService = null,
+		?CatalogueReferenceLedger $ledger = null,
 	) {
 		$this->catalogueEmbeddingService = $catalogueEmbeddingService;
 		$this->toolExecutionPolicyService = $toolExecutionPolicyService;
 		$this->logger = $logger;
+		$this->linkService = $linkService;
+		$this->ledger = $ledger;
 	}
 
 	/**
@@ -129,12 +145,16 @@ class CatalogueToolProvider implements IToolProvider {
 	public function executeTool(string $toolName, array $arguments, array $config = []): array {
 		// A saved bot assignment must not bypass a subsequently disabled integration.
 		if (!$this->catalogueEmbeddingService->isEnabled()) {
+			$text = $this->catalogueEmbeddingService->sourceUnavailableReason() === null
+				? 'Catalogue integration is not enabled.'
+				: 'The course catalogue is unavailable right now because its data source cannot be used. Tell the user that course data cannot be retrieved at the moment.';
 			return [
-				'content' => [['type' => 'text', 'text' => 'Catalogue integration is not enabled.']],
+				'content' => [['type' => 'text', 'text' => $text]],
 				'isError' => true,
 			];
 		}
 
+		$this->ledger?->markUsed();
 		$this->logger->info('Executing catalogue tool', [
 			'tool' => $toolName,
 			'argument_keys' => array_keys($arguments),
@@ -266,7 +286,7 @@ class CatalogueToolProvider implements IToolProvider {
 				];
 			}
 
-			$text = $this->buildCatalogueSearchResultText($courses, $query, $total - count($courses));
+			$text = $this->buildSearchResultText($courses, $query, $total - count($courses), false);
 
 			$this->logger->info('Catalogue semantic search completed', [
 				'query' => $query,
@@ -366,7 +386,7 @@ class CatalogueToolProvider implements IToolProvider {
 				];
 			}
 
-			$text = $this->buildCataloguePastSearchResultText($courses, $query, $total - count($courses));
+			$text = $this->buildSearchResultText($courses, $query, $total - count($courses), true);
 
 			$this->logger->info('Catalogue past semantic search completed', [
 				'query' => $query,
@@ -398,11 +418,6 @@ class CatalogueToolProvider implements IToolProvider {
 	}
 
 	/**
-	 * Build human-readable catalogue search results
-	 *
-	 * @param array<int,array<string,mixed>> $courses
-	 */
-	/**
 	 * The search did not run, which must not read like "no matching courses".
 	 *
 	 * @param array{error?:string,retry_after_seconds?:int} $result
@@ -428,191 +443,187 @@ class CatalogueToolProvider implements IToolProvider {
 		];
 	}
 
-	private function buildCatalogueSearchResultText(array $courses, string $query, int $moreAvailable): string {
-		$text = 'Found ' . count($courses) . " learning opportunity(ies) for: \"$query\"";
+	/**
+	 * Whole result entries within the tool output budget; entries that do not
+	 * fit are counted instead of being cut, so no link is ever truncated.
+	 *
+	 * @param array<int,array<string,mixed>> $courses
+	 */
+	private function buildSearchResultText(array $courses, string $query, int $moreAvailable, bool $past): string {
+		$footer = $past
+			? '💡 Use catalogue_get_opportunity with the opportunity_id and is_past=true to get full details. Use catalogue_search to find current opportunities.'
+			: '💡 Use catalogue_get_opportunity with the opportunity_id to get full details including description, schedule and prerequisites.';
+		$footer .= "\n" . self::LINK_INSTRUCTIONS;
+		$intro = $past ? "⚠️ Note: These opportunities have ended. They may be offered again in the future.\n\n" : '';
+		$query = $this->truncateText($query, 200);
+		$headerReserve = mb_strlen($this->searchHeader(count($courses), $query, $moreAvailable + count($courses), $past), 'UTF-8');
+		$omissionReserve = 200;
+
+		$blocks = '';
+		$shown = 0;
+		$used = $headerReserve + mb_strlen($intro . $footer, 'UTF-8') + $omissionReserve;
+		foreach ($courses as $course) {
+			$resolved = $this->resolveLinks($course);
+			$block = $this->searchResultBlock($shown + 1, $course, $resolved, $past, false);
+			if ($used + mb_strlen($block, 'UTF-8') > self::OUTPUT_LIMIT) {
+				$block = $this->searchResultBlock($shown + 1, $course, $resolved, $past, true);
+				if ($used + mb_strlen($block, 'UTF-8') > self::OUTPUT_LIMIT) {
+					break;
+				}
+			}
+			$blocks .= $block;
+			$used += mb_strlen($block, 'UTF-8');
+			$shown++;
+			$this->recordReference($course, $resolved, $past);
+		}
+
+		$omitted = count($courses) - $shown;
+		$text = $this->searchHeader($shown, $query, $moreAvailable + $omitted, $past) . $intro . $blocks;
+		if ($omitted > 0) {
+			$text .= "($omitted further result(s) omitted to stay within the tool output limit; search again with a smaller limit or a more specific query.)\n\n";
+		}
+		return $text . $footer;
+	}
+
+	private function searchHeader(int $shown, string $query, int $moreAvailable, bool $past): string {
+		$text = 'Found ' . $shown . ($past ? ' PAST' : '') . " learning opportunity(ies) for: \"$query\"";
 		if ($moreAvailable > 0) {
 			$text .= " ($moreAvailable more available - increase limit to see more)";
 		}
-		$text .= "\n\n";
+		return $text . "\n\n";
+	}
 
-		foreach ($courses as $index => $course) {
-			$score = $course['_score'] ?? null;
-			$title = $course['title'] ?? 'Untitled';
-			$id = $course['id'] ?? null;
+	/**
+	 * @param array<string,mixed> $course
+	 * @param array{id:?string,canonical_url:?string,application_url:?string} $resolved
+	 */
+	private function searchResultBlock(int $position, array $course, array $resolved, bool $past, bool $compact): string {
+		$title = $this->truncateText($this->stringField($course, 'title') ?? 'Untitled', self::TITLE_LENGTH);
+		$text = $position . '. **' . $title . '**' . ($past ? ' (PAST)' : '');
+		if ($resolved['id'] !== null) {
+			$text .= ' (ID: ' . $resolved['id'] . ')';
+		}
+		$score = $course['_score'] ?? null;
+		if (is_int($score) || is_float($score)) {
+			$text .= sprintf(' [relevance: %.2f]', $score);
+		}
+		$text .= "\n";
 
-			$text .= ($index + 1) . '. **' . $title . '**';
-			if ($id) {
-				$text .= ' (ID: ' . $id . ')';
-			}
-			if ($score !== null) {
-				$text .= sprintf(' [relevance: %.2f]', $score);
-			}
-			$text .= "\n";
-
-			// Summary
-			if (!empty($course['summary'])) {
-				$text .= '   ' . $this->truncateText($course['summary'], 200) . "\n";
+		if (!$compact) {
+			$summary = $this->stringField($course, 'summary');
+			if ($summary !== null) {
+				$text .= '   ' . $this->truncateText($summary, self::SEARCH_SUMMARY_LENGTH) . "\n";
 			}
 
-			// Type and format info
-			$typeInfo = [];
-			if (!empty($course['learningType']['name'])) {
-				$typeInfo[] = $course['learningType']['name'];
-			}
-			if (!empty($course['mobilityFormat']['name'])) {
-				$typeInfo[] = $course['mobilityFormat']['name'];
-			}
-			if (!empty($course['mode']['name'])) {
-				$typeInfo[] = $course['mode']['name'];
-			}
-			if (!empty($typeInfo)) {
+			$typeInfo = array_filter([
+				$this->nestedName($course, 'learningType'),
+				$this->nestedName($course, 'mobilityFormat'),
+				$this->nestedName($course, 'mode'),
+			]);
+			if ($typeInfo !== []) {
 				$text .= '   📋 ' . implode(' • ', $typeInfo) . "\n";
 			}
 
-			// Academic details
-			$details = [];
-			if (!empty($course['discipline']['name'])) {
-				$details[] = $course['discipline']['name'];
+			$details = array_filter([
+				$this->nestedName($course, 'discipline'),
+				$this->nestedName($course, 'leadUniversity'),
+			]);
+			$language = $this->nestedName($course, 'language');
+			if ($language !== null) {
+				$level = $this->nestedName($course, 'languageLevel');
+				$details[] = $level !== null ? "$language ($level)" : $language;
 			}
-			if (!empty($course['leadUniversity']['name'])) {
-				$details[] = $course['leadUniversity']['name'];
-			}
-			if (!empty($course['language']['name'])) {
-				$langInfo = $course['language']['name'];
-				if (!empty($course['languageLevel']['name'])) {
-					$langInfo .= " ({$course['languageLevel']['name']})";
-				}
-				$details[] = $langInfo;
-			}
-			if (!empty($course['ects'])) {
+			if (!empty($course['ects']) && is_scalar($course['ects'])) {
 				$details[] = $course['ects'] . ' ECTS';
 			}
-			if (!empty($details)) {
+			if ($details !== []) {
 				$text .= '   🎓 ' . implode(' | ', $details) . "\n";
 			}
 
-			// Target audience and availability
 			$availability = [];
-			if (!empty($course['levels']) && is_array($course['levels'])) {
-				$levelNames = [];
-				foreach ($course['levels'] as $level) {
-					if (!empty($level['short_name'])) {
-						$levelNames[] = $level['short_name'];
-					} elseif (!empty($level['name'])) {
-						$levelNames[] = $level['name'];
-					}
+			$levels = $this->levelNames($course, true);
+			if ($levels !== []) {
+				$availability[] = 'For: ' . implode(', ', $levels);
+			}
+			if (!$past) {
+				$deadline = $this->stringField($course, 'application_deadline');
+				if ($deadline !== null) {
+					$availability[] = 'Deadline: ' . $deadline;
+				} elseif (!empty($course['permanent'])) {
+					$availability[] = 'Always open';
 				}
-				if (!empty($levelNames)) {
-					$availability[] = 'For: ' . implode(', ', $levelNames);
-				}
 			}
-			if (!empty($course['application_deadline'])) {
-				$availability[] = 'Deadline: ' . $course['application_deadline'];
-			} elseif (!empty($course['permanent']) && $course['permanent']) {
-				$availability[] = 'Always open';
+			if ($availability !== []) {
+				$text .= ($past ? '   👥 ' : '   📅 ') . implode(' | ', $availability) . "\n";
 			}
-			if (!empty($availability)) {
-				$text .= '   📅 ' . implode(' | ', $availability) . "\n";
-			}
-
-			$text .= "\n";
 		}
 
-		$text .= '💡 Use catalogue_get_opportunity with the opportunity_id to get full details including description, schedule, prerequisites, and application links.';
+		return $text . $this->linkLines($resolved, '   ') . "\n";
+	}
 
+	/** @param array{canonical_url:?string,application_url:?string} $resolved */
+	private function linkLines(array $resolved, string $indent): string {
+		$text = $indent . '🔗 Course page: ' . ($resolved['canonical_url'] ?? 'not available (no verified course link)') . "\n";
+		if ($resolved['application_url'] !== null) {
+			$text .= $indent . '📝 Application link (external application form, not the course page): ' . $resolved['application_url'] . "\n";
+		}
 		return $text;
 	}
 
 	/**
-	 * Build human-readable catalogue PAST search results
-	 *
-	 * @param array<int,array<string,mixed>> $courses
+	 * @param array<string,mixed> $course
+	 * @param array{id:?string,canonical_url:?string,application_url:?string} $resolved
 	 */
-	private function buildCataloguePastSearchResultText(array $courses, string $query, int $moreAvailable): string {
-		$text = 'Found ' . count($courses) . " PAST learning opportunity(ies) for: \"$query\"";
-		if ($moreAvailable > 0) {
-			$text .= " ($moreAvailable more available - increase limit to see more)";
+	private function recordReference(array $course, array $resolved, bool $past): void {
+		$reference = CatalogueLinkGuard::referenceFromRecord(['is_past' => $past] + $course, $resolved);
+		if ($reference !== null) {
+			$this->ledger?->record($reference);
 		}
-		$text .= "\n\n";
-		$text .= "⚠️ Note: These opportunities have ended. They may be offered again in the future.\n\n";
+	}
 
-		foreach ($courses as $index => $course) {
-			$score = $course['_score'] ?? null;
-			$title = $course['title'] ?? 'Untitled';
-			$id = $course['id'] ?? null;
+	/**
+	 * @param array<string,mixed> $course
+	 * @return array{id:?string,canonical_url:?string,source:string,application_url:?string,issues:list<string>}
+	 */
+	private function resolveLinks(array $course): array {
+		return $this->linkService?->resolve($course) ?? CanonicalLinkResolver::unconfigured()->resolve($course);
+	}
 
-			$text .= ($index + 1) . '. **' . $title . '** (PAST)';
-			if ($id) {
-				$text .= ' (ID: ' . $id . ')';
-			}
-			if ($score !== null) {
-				$text .= sprintf(' [relevance: %.2f]', $score);
-			}
-			$text .= "\n";
-
-			// Summary
-			if (!empty($course['summary'])) {
-				$text .= '   ' . $this->truncateText($course['summary'], 200) . "\n";
-			}
-
-			// Type and format info
-			$typeInfo = [];
-			if (!empty($course['learningType']['name'])) {
-				$typeInfo[] = $course['learningType']['name'];
-			}
-			if (!empty($course['mobilityFormat']['name'])) {
-				$typeInfo[] = $course['mobilityFormat']['name'];
-			}
-			if (!empty($course['mode']['name'])) {
-				$typeInfo[] = $course['mode']['name'];
-			}
-			if (!empty($typeInfo)) {
-				$text .= '   📋 ' . implode(' • ', $typeInfo) . "\n";
-			}
-
-			// Academic details
-			$details = [];
-			if (!empty($course['discipline']['name'])) {
-				$details[] = $course['discipline']['name'];
-			}
-			if (!empty($course['leadUniversity']['name'])) {
-				$details[] = $course['leadUniversity']['name'];
-			}
-			if (!empty($course['language']['name'])) {
-				$langInfo = $course['language']['name'];
-				if (!empty($course['languageLevel']['name'])) {
-					$langInfo .= " ({$course['languageLevel']['name']})";
-				}
-				$details[] = $langInfo;
-			}
-			if (!empty($course['ects'])) {
-				$details[] = $course['ects'] . ' ECTS';
-			}
-			if (!empty($details)) {
-				$text .= '   🎓 ' . implode(' | ', $details) . "\n";
-			}
-
-			// Target audience
-			if (!empty($course['levels']) && is_array($course['levels'])) {
-				$levelNames = [];
-				foreach ($course['levels'] as $level) {
-					if (!empty($level['short_name'])) {
-						$levelNames[] = $level['short_name'];
-					} elseif (!empty($level['name'])) {
-						$levelNames[] = $level['name'];
-					}
-				}
-				if (!empty($levelNames)) {
-					$text .= '   👥 For: ' . implode(', ', $levelNames) . "\n";
-				}
-			}
-
-			$text .= "\n";
+	/** @param array<string,mixed> $data */
+	private function stringField(array $data, string $key): ?string {
+		$value = $data[$key] ?? null;
+		if (is_int($value) || is_float($value)) {
+			$value = (string)$value;
 		}
+		return is_string($value) && trim($value) !== '' ? $value : null;
+	}
 
-		$text .= '💡 Use catalogue_get_opportunity with the opportunity_id to get full details. Use catalogue_search to find current opportunities.';
+	/** @param array<string,mixed> $data */
+	private function nestedName(array $data, string $key): ?string {
+		return is_array($data[$key] ?? null) ? $this->stringField($data[$key], 'name') : null;
+	}
 
-		return $text;
+	/**
+	 * @param array<string,mixed> $course
+	 * @return list<string>
+	 */
+	private function levelNames(array $course, bool $preferShort): array {
+		if (empty($course['levels']) || !is_array($course['levels'])) {
+			return [];
+		}
+		$names = [];
+		foreach ($course['levels'] as $level) {
+			if (!is_array($level)) {
+				continue;
+			}
+			$name = $preferShort
+				? ($this->stringField($level, 'short_name') ?? $this->stringField($level, 'name'))
+				: ($this->stringField($level, 'name') ?? $this->stringField($level, 'short_name'));
+			if ($name !== null) {
+				$names[] = $name;
+			}
+		}
+		return $names;
 	}
 
 	/**
@@ -671,11 +682,20 @@ class CatalogueToolProvider implements IToolProvider {
 				];
 			}
 
+			$detail = $this->buildCourseDetailText($course);
+			if ($detail === null) {
+				$message = 'This opportunity cannot fit into the tool result without shortening its identity or links. No details were returned.';
+				return [
+					'content' => [['type' => 'text', 'text' => $message]],
+					'isError' => true,
+					'error' => ['code' => 'result_record_too_large', 'message' => $message, 'details' => []],
+				];
+			}
 			return [
 				'content' => [
 					[
 						'type' => 'text',
-						'text' => $this->buildCourseDetailText($course),
+						'text' => $detail,
 					],
 				],
 				'isError' => false,
@@ -695,106 +715,112 @@ class CatalogueToolProvider implements IToolProvider {
 	}
 
 	/**
-	 * Get announcements
+	 * Identity and links first; long sections are shortened or omitted so the
+	 * result never relies on the agent's blind truncation.
+	 *
+	 * @param array<string,mixed> $course
 	 */
-	/**
-	 * Build detailed course information text
-	 */
-	private function buildCourseDetailText(array $course): string {
-		$title = $course['title'] ?? 'Untitled Course';
-		$isPast = $course['is_past'] ?? false;
-		$statusBadge = $isPast ? '⏳ PAST/ARCHIVED' : '✅ CURRENT';
+	private function buildCourseDetailText(array $course): ?string {
+		$resolved = $this->resolveLinks($course);
+		$isPast = (bool)($course['is_past'] ?? false);
+		$title = $this->truncateText($this->stringField($course, 'title') ?? 'Untitled Course', self::TITLE_LENGTH);
 
-		$text = '# ' . $title . "\n\n";
-		$text .= '**Status:** ' . $statusBadge . "\n";
-
-		if (!empty($course['code'])) {
-			$text .= '**Code:** ' . $course['code'] . "\n";
+		$head = '# ' . $title . "\n\n";
+		$head .= '**Status:** ' . ($isPast ? '⏳ PAST/ARCHIVED' : '✅ CURRENT') . "\n";
+		$code = $this->stringField($course, 'code');
+		if ($code !== null) {
+			$head .= '**Code:** ' . $this->truncateText($code, 100) . "\n";
 		}
-		if (!empty($course['id'])) {
-			$text .= '**ID:** ' . $course['id'] . "\n";
+		if ($resolved['id'] !== null) {
+			$head .= '**ID:** ' . $resolved['id'] . "\n";
 		}
-		$text .= "\n";
-
-		if (!empty($course['summary'])) {
-			$text .= "## Summary\n" . $course['summary'] . "\n\n";
+		$head .= $this->linkLines($resolved, '');
+		$footer = "\n" . self::LINK_INSTRUCTIONS;
+		if (mb_strlen($head . $footer, 'UTF-8') > self::OUTPUT_LIMIT) {
+			return null;
 		}
-
-		if (!empty($course['description'])) {
-			$text .= "## Description\n" . $course['description'] . "\n\n";
-		}
-
-		if (!empty($course['details'])) {
-			$text .= "## Schedule & Details\n" . $course['details'] . "\n\n";
-		}
-
-		$text .= "## Course Information\n";
 
 		$infoItems = [
-			'Discipline' => $course['discipline']['name'] ?? null,
-			'Learning Type' => $course['learningType']['name'] ?? null,
-			'Mobility Format' => $course['mobilityFormat']['name'] ?? null,
-			'Mode' => $course['mode']['name'] ?? null,
-			'Language' => $course['language']['name'] ?? null,
-			'Language Level' => $course['languageLevel']['name'] ?? null,
-			'Lead University' => $course['leadUniversity']['name'] ?? null,
-			'Lead Teacher' => $course['leadTeacher']['name'] ?? null,
-			'ECTS Credits' => $course['ects'] ?? null,
-			'Duration' => $course['duration']['name'] ?? null,
-			'Semester' => $course['semester']['name'] ?? null,
-			'Platform' => $course['platform'] ?? null,
+			'Discipline' => $this->nestedName($course, 'discipline'),
+			'Learning Type' => $this->nestedName($course, 'learningType'),
+			'Mobility Format' => $this->nestedName($course, 'mobilityFormat'),
+			'Mode' => $this->nestedName($course, 'mode'),
+			'Language' => $this->nestedName($course, 'language'),
+			'Language Level' => $this->nestedName($course, 'languageLevel'),
+			'Lead University' => $this->nestedName($course, 'leadUniversity'),
+			'Lead Teacher' => $this->nestedName($course, 'leadTeacher'),
+			'ECTS Credits' => $this->stringField($course, 'ects'),
+			'Duration' => $this->nestedName($course, 'duration'),
+			'Semester' => $this->nestedName($course, 'semester'),
+			'Platform' => $this->stringField($course, 'platform'),
 			'Always Available' => isset($course['permanent']) ? ($course['permanent'] ? 'Yes' : 'No') : null,
-			'Application Deadline' => $course['application_deadline'] ?? null,
-			'Capacity' => $course['capacity'] ?? null,
+			'Application Deadline' => $this->stringField($course, 'application_deadline'),
+			'Capacity' => $this->stringField($course, 'capacity'),
+			'Target Levels' => implode(', ', $this->levelNames($course, false)),
 		];
-
-		// Target levels
-		if (!empty($course['levels']) && is_array($course['levels'])) {
-			$levelNames = [];
-			foreach ($course['levels'] as $level) {
-				$levelNames[] = $level['name'] ?? $level['short_name'] ?? '';
-			}
-			$infoItems['Target Levels'] = implode(', ', array_filter($levelNames));
-		}
-
-		// Targeted universities
+		$universities = [];
 		if (!empty($course['targetedUniversities']) && is_array($course['targetedUniversities'])) {
-			$uniNames = [];
-			foreach ($course['targetedUniversities'] as $uni) {
-				$uniNames[] = $uni['name'] ?? $uni['short_name'] ?? '';
+			foreach ($course['targetedUniversities'] as $university) {
+				$name = is_array($university) ? ($this->stringField($university, 'name') ?? $this->stringField($university, 'short_name')) : null;
+				if ($name !== null) {
+					$universities[] = $name;
+				}
 			}
-			$infoItems['Targeted Universities'] = implode(', ', array_filter($uniNames));
 		}
-
+		$infoItems['Targeted Universities'] = implode(', ', $universities);
+		$info = '';
 		foreach ($infoItems as $label => $value) {
 			if ($value !== null && $value !== '') {
-				$text .= "- **$label:** $value\n";
+				$info .= "- **$label:** $value\n";
 			}
 		}
 
-		// Application link
-		if (!empty($course['application_link'])) {
-			$text .= "\n## Application\n";
-			$text .= '**Application Link:** ' . $course['application_link'] . "\n";
+		$sections = [
+			'Summary' => $this->stringField($course, 'summary'),
+			'Description' => $this->stringField($course, 'description'),
+			'Schedule & Details' => $this->stringField($course, 'details'),
+			'Course Information' => $info !== '' ? rtrim($info) : null,
+			'Prerequisites' => $this->stringField($course, 'prerequisites'),
+			'Further Information' => $this->stringField($course, 'further_information'),
+			'Application Contact' => $this->stringField($course, 'application_contact'),
+			'Information Contact' => $this->stringField($course, 'info_contact'),
+		];
+
+		$omissionReserve = 120;
+		$remaining = self::OUTPUT_LIMIT - mb_strlen($head . $footer, 'UTF-8') - $omissionReserve;
+		$body = '';
+		$omitted = 0;
+		foreach ($sections as $heading => $content) {
+			if ($content === null) {
+				continue;
+			}
+			$section = "\n## $heading\n" . trim($content) . "\n";
+			$length = mb_strlen($section, 'UTF-8');
+			if ($length <= $remaining) {
+				$body .= $section;
+				$remaining -= $length;
+				continue;
+			}
+			$marker = ' … [shortened]';
+			$prefix = "\n## $heading\n";
+			$room = $remaining - mb_strlen($prefix . $marker . "\n", 'UTF-8');
+			if ($room >= 120) {
+				$body .= $prefix . rtrim(mb_substr(trim($content), 0, $room, 'UTF-8')) . $marker . "\n";
+				$remaining = 0;
+				continue;
+			}
+			$omitted++;
+		}
+		if ($omitted > 0) {
+			$body .= "\n($omitted section(s) omitted to stay within the tool output limit.)\n";
 		}
 
-		// Additional fields
-		if (!empty($course['prerequisites'])) {
-			$text .= "\n## Prerequisites\n" . $course['prerequisites'] . "\n";
+		if (mb_strlen($head . $body . $footer, 'UTF-8') > self::OUTPUT_LIMIT) {
+			return null;
 		}
-		if (!empty($course['further_information'])) {
-			$text .= "\n## Further Information\n" . $course['further_information'] . "\n";
-		}
-		if (!empty($course['application_contact'])) {
-			$text .= "\n## Application Contact\n" . $course['application_contact'] . "\n";
-		}
-		if (!empty($course['info_contact'])) {
-			$text .= "\n## Information Contact\n" . $course['info_contact'] . "\n";
-		}
-
-		return $text;
+		$this->recordReference($course, $resolved, $isPast);
+		return $head . $body . $footer;
 	}
-
 	/**
 	 * Truncate text to a maximum length
 	 */

@@ -77,7 +77,10 @@ construct a stricter policy accordingly.
 ## Guarantees & caveats
 
 - **Name collisions:** core tools can never be shadowed. A provider tool whose
-  name collides with an existing tool is skipped with a warning in the log.
+  name collides with a core tool is skipped with a warning in the log. A name
+  claimed by more than one provider is withheld from every loadout and calls
+  to it fail with `tool_provider_conflict`, so no provider wins by
+  registration order.
 - **Failure isolation:** a provider that throws in `getTools()` or
   `setInvocationContext()` is logged and skipped; it cannot break the loadout.
 - **Storage:** assignments are stored by tool *name* in the existing

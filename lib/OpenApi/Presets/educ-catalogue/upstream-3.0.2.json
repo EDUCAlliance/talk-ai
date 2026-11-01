@@ -1,0 +1,1247 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Course Catalogue API functions",
+        "version": "3.0.2"
+    },
+    "servers": [
+        {
+            "url": "https://catalogue.educalliance.eu/api/api/"
+        }
+    ],
+    "paths": {
+        "/application/get-status": {
+            "get": {
+                "summary": "Returns the application status for a Course (and the Current User if any).\nDoes not require a valid user being logged in over SAML.\n\nUsage: .../application/get-status?course_id=1234\n\nResponse structure (JSON formatted)\n- success: bool\n- error: string|null -- error message in case of failure; may be omitted or null in case of success\n- (the attributes below are only provided in case of success)\n- user_status: string -- status of application for the current user as per Course::applicationStatus()\n- application_open: bool -- whether the course is open for application; does not take user-specific constraints into account\n- application_accepts_data: bool -- see Course::applicationAcceptsData()\n- application_data: array -- application data for the current user\n    - expected keys are always present but corresponding values might be null\n- can_apply: bool -- whether the current user can apply to the course\n- reason: string -- why can_apply is false (displayed to the end user)",
+                "description": "Returns the application status for a Course (and the Current User if any)",
+                "operationId": "33b95b85a7f51c7b39b776bc344d4100",
+                "parameters": [
+                    {
+                        "name": "course_id",
+                        "in": "query",
+                        "description": "Course ID",
+                        "schema": {
+                            "type": "integer",
+                            "nullable": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApplicationStatusResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/application/apply": {
+            "get": {
+                "summary": "Applies the Current User to a Course.\nRequires a valid user being logged in over SAML.\n\nUsage: .../application/apply?course_id=1234&application_data[motivation]=text&create=1\n\nResponse structure (JSON formatted)\n- success: bool\n- error: string|null -- error message in case of failure; omitted or null in case of success",
+                "description": "Applies the current user to a course",
+                "operationId": "ad0e6a0cd27b491e57625c94d0968d4a",
+                "parameters": [
+                    {
+                        "name": "course_id",
+                        "in": "query",
+                        "description": "Course ID",
+                        "schema": {
+                            "type": "integer",
+                            "nullable": false
+                        }
+                    },
+                    {
+                        "name": "create",
+                        "in": "query",
+                        "description": "Tells whether the application must be created or updated",
+                        "schema": {
+                            "type": "boolean",
+                            "nullable": false
+                        }
+                    },
+                    {
+                        "name": "application_data",
+                        "in": "query",
+                        "description": "Application data",
+                        "schema": {
+                            "type": "string",
+                            "nullable": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/application/unapply": {
+            "get": {
+                "summary": "Unapplies the Current User from a Course.\nRequires a valid user being logged in over SAML.\n\nUsage: .../application/unapply?course_id=1234\n\nResponse structure (JSON formatted)\n- success: bool\n- error: string|null -- error message in case of failure; omitted or null in case of success",
+                "description": "Applies the current user to a course",
+                "operationId": "9c6f92ef7431dd2333e6e4a6a77086d7",
+                "parameters": [
+                    {
+                        "name": "course_id",
+                        "in": "query",
+                        "description": "Course ID",
+                        "schema": {
+                            "type": "integer",
+                            "nullable": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/course/list": {
+            "get": {
+                "summary": "Loads the next offset of the course datasheets",
+                "operationId": "7c6eab1373e871d5cc2543f5b02fb48b",
+                "parameters": [
+                    {
+                        "name": "learning_type_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "discipline_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "target_group",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "mobility_format_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "semester_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "FilterFirst",
+                        "in": "query",
+                        "description": "True if the filter changed, reload from the beginning",
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Number of courses to retrieve",
+                        "schema": {
+                            "type": "integer",
+                            "default": 0
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "description": "The offset of the courses retrieved (for paging)",
+                        "schema": {
+                            "type": "integer",
+                            "default": 0
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "@id for a single course by ID",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "state",
+                        "in": "query",
+                        "description": "Decides the OPEN or the CLOSED state of the courses",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "OPEN",
+                                "CLOSED"
+                            ],
+                            "nullable": false
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ListParams"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoadResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "summary": "Loads the next offset of the course datasheets",
+                "description": "Loads the next page of the course datasheets (load more data).\nCalled from the 'course/default' action too.",
+                "operationId": "b632a70f9ea13519b7e9b9e5677c1d8e",
+                "parameters": [
+                    {
+                        "name": "learning_type_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "discipline_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "target_group",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "mobility_format_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "semester_id",
+                        "in": "query",
+                        "description": "Filter value(s), list of comma-separated integers",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "FilterFirst",
+                        "in": "query",
+                        "description": "True if the filter changed, reload from the beginning",
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Number of courses to retrieve",
+                        "schema": {
+                            "type": "integer",
+                            "default": 0
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "description": "The offset of the courses retrieved (for paging)",
+                        "schema": {
+                            "type": "integer",
+                            "default": 0
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "@id for a single course by ID",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "state",
+                        "in": "query",
+                        "description": "Decides the OPEN or the CLOSED state of the courses",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "OPEN",
+                                "CLOSED"
+                            ],
+                            "nullable": false
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ListParams"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoadResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/view": {
+            "get": {
+                "summary": "Get one LO",
+                "description": "A GET/POST endpoint to retrieve a single learning opportunity by id",
+                "operationId": "6428aa1a7961d233ac1f7c951a7672c2",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "description": "The id of the course to be returned",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoadOneResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/applied": {
+            "get": {
+                "summary": "LOs where current user applied",
+                "description": "A GET endpoint to retrieve learning opportunities where currently connected user has applied",
+                "operationId": "bddc7c7375221202d204fb18c4b72876",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoadAppliedResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/favourite/list": {
+            "get": {
+                "summary": "Returns all favourite courses of the logged-in user.",
+                "description": "Returns all favourite courses of the logged-in user with course data",
+                "operationId": "3f2dea0ea21940138e394b8b9700b1b6",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FavouriteListResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/favourite/create": {
+            "get": {
+                "summary": "Create a new favourite item for the logged-in user.\nIf the LO is already a favourite, does nothing.",
+                "description": "Create a new favourite item for the logged-in user",
+                "operationId": "2fb3acc8fdb585a1ad1fe51a4b0cb6fb",
+                "parameters": [
+                    {
+                        "name": "course_id",
+                        "in": "query",
+                        "description": "Course ID",
+                        "schema": {
+                            "type": "integer",
+                            "nullable": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FavouriteCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean"
+                                        },
+                                        "errors": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/favourite/delete": {
+            "get": {
+                "summary": "Removes a learning opportunity from the favourite list oft the logged-in user.\nIf the LO is not a favourite, does nothing.",
+                "description": "Removes a learning opportunity from the favourite list oft the logged-in user",
+                "operationId": "d797a346ac9b98672c50425711e60f80",
+                "parameters": [
+                    {
+                        "name": "course_id",
+                        "in": "query",
+                        "description": "Course ID",
+                        "schema": {
+                            "type": "integer",
+                            "nullable": false
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FavouriteDeleteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No favourite courses found"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                }
+            }
+        },
+        "/login": {
+            "get": {
+                "summary": "Redirects to the discovery/IdP login page and then back to the age defined in the 'ReturnTo' parameter.\nOptional parameter: 'errorUrl', redirect here when an error occurs.\nAfter the login process, the status can be queried using the '/login/status' action.\nIf already logged in, the login status is returned.",
+                "description": "Logs in to SAML session and backend",
+                "operationId": "28f997474fabd18a1e98ee36eeeb5300",
+                "parameters": [
+                    {
+                        "name": "ReturnTo",
+                        "in": "query",
+                        "description": "Redirect URL for successful login",
+                        "schema": {
+                            "description": "If null, the current URL will be used",
+                            "type": "string",
+                            "nullable": true
+                        }
+                    },
+                    {
+                        "name": "ErrorURL",
+                        "in": "query",
+                        "description": "Redirect URL for error case",
+                        "schema": {
+                            "description": "If null, the current URL will be used",
+                            "type": "string",
+                            "nullable": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Successful login or error case"
+                    },
+                    "200": {
+                        "description": "Already logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoginStatusResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/login/status": {
+            "get": {
+                "description": "Returns login status and attribute values",
+                "operationId": "324d5d0279801fca678c6f13502b9c22",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LoginStatusResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/login/logout": {
+            "get": {
+                "description": "Logs out from SAML session and backend",
+                "operationId": "79568934c1b96d8d8af1b8796ed73503",
+                "parameters": [
+                    {
+                        "name": "ReturnTo",
+                        "in": "query",
+                        "description": "Redirect URL for successful logout",
+                        "schema": {
+                            "description": "If null, the current URL will be used",
+                            "type": "string",
+                            "nullable": true
+                        }
+                    },
+                    {
+                        "name": "ErrorURL",
+                        "in": "query",
+                        "description": "Redirect URL for error case",
+                        "schema": {
+                            "description": "If null, the current URL will be used",
+                            "type": "string",
+                            "nullable": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Successful login or error case"
+                    }
+                }
+            }
+        },
+        "/version": {
+            "get": {
+                "summary": "Returns the actual version number of the API.",
+                "description": "The returned value is based on the latest git tag extracted during build time and placed in the image as a 'version' file.",
+                "operationId": "440b78f9574483ca8d216d58951ca9c1",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "oneOf": [
+                                        {
+                                            "schema": "Schema",
+                                            "description": "Version",
+                                            "properties": {
+                                                "version": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/announcements": {
+            "get": {
+                "description": "Returns list of active announcements",
+                "operationId": "5fb4bdae95e26e0c8e0a77c0b9775dde",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/Announcement"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/filters": {
+            "get": {
+                "summary": "Loads course filters for the index page.\nCalled via AJAX by `index.js` from the 'main/default' action.",
+                "description": "Returns list of all filter values",
+                "operationId": "964d2f17fc91b11af93680796ddd2f88",
+                "responses": {
+                    "200": {
+                        "$ref": "app\\schemas\\FilterValues"
+                    }
+                }
+            }
+        },
+        "/filters/{filterClass}": {
+            "get": {
+                "description": "Returns list of values of a single filter",
+                "operationId": "d8f00291f796fb4b97857ca7f441a17d",
+                "parameters": [
+                    {
+                        "name": "filterClass",
+                        "in": "path",
+                        "description": "name of the desired filter",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "$ref": {
+                            "schema": "SingleFilterValues",
+                            "type": "array",
+                            "items": {
+                                "$ref": "app\\schemas\\NamedValue"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin": {
+            "get": {
+                "summary": "Admin dashboard summary",
+                "description": "Returns summary counters for admin dashboard",
+                "operationId": "40d83423e725e32cb7eb0ba2fffa4e48",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/adminResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/course": {
+            "get": {
+                "summary": "The default action lists Courses.\nIf an id is specified, the action displays the course details as presented to the public.",
+                "description": "The default action lists Courses.",
+                "operationId": "d9c9adced4f47fe87a5e5532666e75f1",
+                "parameters": [
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "[fieldName=>value,...] to filter the results",
+                        "schema": {
+                            "type": "object",
+                            "nullable": true
+                        }
+                    },
+                    {
+                        "name": "orders",
+                        "in": "query",
+                        "description": "order input by fields, example: [\"id\"=>null, \"name\"=>\"ASC;1\",...]",
+                        "schema": {
+                            "type": "object",
+                            "nullable": true
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "the current page request by the user",
+                        "schema": {
+                            "type": "integer",
+                            "default": 1
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "description": "course id",
+                        "schema": {
+                            "type": "integer",
+                            "nullable": true
+                        }
+                    },
+                    {
+                        "name": "output",
+                        "in": "query",
+                        "description": "output format (CSV)",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "CSV"
+                            ],
+                            "nullable": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success (JSON or CSV) ",
+                        "content": {
+                            "text/csv": {},
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/adminDefaultCourseResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Announcement": {
+                "properties": {
+                    "id": {
+                        "description": "Announcements to be displayed on the main public start page",
+                        "type": "integer"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "from_time": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "due_time": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "style": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "creator_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "Course": {
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "application_accepts_motivation": {
+                        "type": "integer"
+                    },
+                    "application_contact": {
+                        "type": "string"
+                    },
+                    "application_deadline": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "application_link": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "capacity": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "created_by": {
+                        "type": "integer"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "details": {
+                        "type": "string"
+                    },
+                    "discipline": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "duration": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "duration_value": {
+                        "type": "integer"
+                    },
+                    "ects": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "further_information": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "info_contact": {
+                        "type": "string"
+                    },
+                    "is_public": {
+                        "type": "integer"
+                    },
+                    "language": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "languageLevel": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "leadTeacher": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "leadUniversity": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "learningType": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "minimumAcademicLevel": {
+                        "oneOf": [
+                            {
+                                "$ref": "app\\schemas\\NamedValue"
+                            }
+                        ],
+                        "nullable": true,
+                        "type": "object"
+                    },
+                    "mobilityFormat": {
+                        "$ref": "app\\schemas\\NamedValue"
+                    },
+                    "mode": {
+                        "oneOf": [
+                            {
+                                "$ref": "app\\schemas\\NamedValue"
+                            }
+                        ],
+                        "nullable": true,
+                        "type": "object"
+                    },
+                    "permanent": {
+                        "type": "integer"
+                    },
+                    "platform": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "prerequisites": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "semester": {
+                        "oneOf": [
+                            {
+                                "$ref": "app\\schemas\\NamedValue"
+                            }
+                        ],
+                        "nullable": true,
+                        "type": "object"
+                    },
+                    "summary": {
+                        "type": "string"
+                    },
+                    "targeted": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "updated_by": {
+                        "type": "integer"
+                    },
+                    "levels": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "app\\schemas\\NamedValue"
+                        }
+                    },
+                    "targetedUniversities": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "app\\schemas\\NamedValue"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "Filter": {
+                "properties": {
+                    "learning_type_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "discipline_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "target_group": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "mobility_format_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "lead_university_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "language_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "duration_range": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "semester_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "m_duration_range": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "ApplicationStatusResponse": {
+                "properties": {
+                    "user_status": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "application_open": {
+                        "type": "boolean"
+                    },
+                    "application_accepts_data": {
+                        "type": "boolean"
+                    },
+                    "application_data": {
+                        "type": "object"
+                    },
+                    "can_apply": {
+                        "type": "boolean"
+                    },
+                    "reason": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "ListParams": {
+                "properties": {
+                    "Filter": {
+                        "$ref": "#/components/schemas/Filter"
+                    },
+                    "FilterFirst": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "search": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "LoadResponse": {
+                "properties": {
+                    "courses": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Course"
+                        }
+                    },
+                    "count": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "LoadOneResponse": {
+                "properties": {
+                    "course": {
+                        "$ref": "#/components/schemas/Course"
+                    }
+                },
+                "type": "object"
+            },
+            "LoadAppliedResponse": {
+                "properties": {
+                    "courses": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Course"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "FavouriteListResponse": {
+                "properties": {
+                    "los": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "FavouriteCreateResponse": {
+                "properties": {
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "app\\schemas\\ValidationErrorSet",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "FavouriteDeleteResponse": {
+                "properties": {
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "error": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "LoginStatusResponse": {
+                "properties": {
+                    "authenticated": {
+                        "type": "boolean"
+                    },
+                    "attributes": {
+                        "description": "The SAML attribute values of the logged in user",
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "user": {
+                        "description": "The application attribute values of the logged in user",
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "error": {
+                        "description": "Error message if the creation of the user object failed, otherwise null.",
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "SingleFilterValues": {
+                "type": "array",
+                "items": {
+                    "$ref": "app\\schemas\\NamedValue"
+                }
+            },
+            "adminResponse": {
+                "properties": {
+                    "numCourses": {
+                        "description": "Number of courses",
+                        "type": "integer"
+                    },
+                    "numTeachers": {
+                        "description": "Number of teachers",
+                        "type": "integer"
+                    },
+                    "numLearningTypes": {
+                        "description": "Number of learning opportunity types",
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "adminDefaultCourseResponse": {
+                "properties": {
+                    "modelClass": {
+                        "description": "The class of the courses",
+                        "type": "string"
+                    },
+                    "models": {
+                        "description": "List of the courses for view",
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Course"
+                        }
+                    },
+                    "search": {
+                        "description": "[fieldName=>value,...] to filter the results",
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "orders": {
+                        "description": "Order input by fields",
+                        "type": "object"
+                    },
+                    "totalPages": {
+                        "description": "Number of pages",
+                        "type": "integer"
+                    },
+                    "totalRows": {
+                        "description": "Number of rows",
+                        "type": "integer"
+                    },
+                    "page": {
+                        "description": "The current page requested by the user",
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "responses": {
+            "500": {
+                "$ref": "app\\schemas\\ErrorResult"
+            },
+            "401": {
+                "description": "User not logged in"
+            }
+        }
+    }
+}

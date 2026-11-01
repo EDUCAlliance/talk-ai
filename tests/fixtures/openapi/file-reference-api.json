@@ -1,0 +1,12 @@
+{
+	"openapi": "3.0.3",
+	"info": { "title": "Synthetic file reference", "version": "1" },
+	"paths": {
+		"/files": {
+			"get": {
+				"parameters": [ { "$ref": "file:///tmp/educai-unsupported-reference.json#/parameters/Q" } ],
+				"responses": { "200": { "description": "Files", "content": { "application/json": { "schema": { "type": "object" } } } } }
+			}
+		}
+	}
+}

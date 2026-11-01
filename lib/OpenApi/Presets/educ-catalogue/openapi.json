@@ -1,0 +1,110 @@
+{
+	"openapi": "3.0.3",
+	"info": {
+		"title": "EDUC course catalogue (Talk AI preset)",
+		"version": "3.0.2-talkai.1",
+		"description": "Read-only subset of the EDUC Alliance Course Catalogue API 3.0.2, normalized to the observed behaviour. See DEVIATIONS.md next to this file."
+	},
+	"servers": [
+		{ "url": "https://catalogue.educalliance.eu/api" }
+	],
+	"security": [],
+	"paths": {
+		"/course/list": {
+			"get": {
+				"operationId": "listCourses",
+				"summary": "Search learning opportunities",
+				"description": "Lists current (OPEN) or archived (CLOSED) learning opportunities, optionally filtered by text and catalogue filter IDs.",
+				"parameters": [
+					{ "name": "state", "in": "query", "required": true, "description": "OPEN for current, CLOSED for archived opportunities.", "schema": { "type": "string", "enum": ["OPEN", "CLOSED"] } },
+					{ "name": "search", "in": "query", "description": "Free text search.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "id", "in": "query", "description": "Opportunity ID. Sent by Talk AI; the API currently ignores it.", "schema": { "type": "integer", "minimum": 1 } },
+					{ "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 500 } },
+					{ "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0 } },
+					{ "name": "learning_type_id", "in": "query", "description": "Comma-separated learning type IDs.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "discipline_id", "in": "query", "description": "Comma-separated discipline IDs.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "target_group", "in": "query", "description": "Comma-separated target group IDs.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "mobility_format_id", "in": "query", "description": "Comma-separated mobility format IDs.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "semester_id", "in": "query", "description": "Comma-separated semester IDs.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "language_id", "in": "query", "description": "Comma-separated language IDs.", "schema": { "type": "string", "maxLength": 200 } },
+					{ "name": "lead_university_id", "in": "query", "description": "Comma-separated university IDs.", "schema": { "type": "string", "maxLength": 200 } }
+				],
+				"responses": {
+					"200": {
+						"description": "One page of opportunities and the total count.",
+						"content": { "application/json": { "schema": { "$ref": "#/components/schemas/CourseList" } } }
+					}
+				}
+			}
+		},
+		"/course/view": {
+			"get": {
+				"operationId": "viewCourse",
+				"summary": "Get one learning opportunity",
+				"description": "Returns a single learning opportunity by its catalogue ID.",
+				"parameters": [
+					{ "name": "id", "in": "query", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+				],
+				"responses": {
+					"200": {
+						"description": "The opportunity.",
+						"content": { "application/json": { "schema": { "$ref": "#/components/schemas/CourseView" } } }
+					}
+				}
+			}
+		},
+		"/version": {
+			"get": {
+				"operationId": "getVersion",
+				"summary": "Get the catalogue API version",
+				"responses": {
+					"200": {
+						"description": "The deployed version.",
+						"content": { "application/json": { "schema": { "type": "object", "properties": { "version": { "type": "string" } } } } }
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"NamedValue": {
+				"type": "object",
+				"nullable": true,
+				"properties": { "id": { "type": "integer" }, "name": { "type": "string" } }
+			},
+			"Course": {
+				"type": "object",
+				"properties": {
+					"id": { "type": "integer" },
+					"code": { "type": "string" },
+					"title": { "type": "string" },
+					"summary": { "type": "string" },
+					"description": { "type": "string" },
+					"ects": { "type": "number", "nullable": true },
+					"capacity": { "type": "integer", "nullable": true },
+					"application_deadline": { "type": "string", "nullable": true },
+					"application_link": { "type": "string", "nullable": true, "description": "Application or learning platform address; not the catalogue page." },
+					"prerequisites": { "type": "string" },
+					"discipline": { "$ref": "#/components/schemas/NamedValue" },
+					"language": { "$ref": "#/components/schemas/NamedValue" },
+					"semester": { "$ref": "#/components/schemas/NamedValue" },
+					"leadUniversity": { "$ref": "#/components/schemas/NamedValue" },
+					"learningType": { "$ref": "#/components/schemas/NamedValue" },
+					"mobilityFormat": { "$ref": "#/components/schemas/NamedValue" }
+				}
+			},
+			"CourseList": {
+				"type": "object",
+				"properties": {
+					"courses": { "type": "array", "items": { "$ref": "#/components/schemas/Course" } },
+					"count": { "type": "integer", "description": "Total number of matching opportunities." }
+				}
+			},
+			"CourseView": {
+				"type": "object",
+				"properties": { "course": { "$ref": "#/components/schemas/Course" } }
+			}
+		}
+	}
+}

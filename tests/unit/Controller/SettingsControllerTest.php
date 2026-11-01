@@ -10,11 +10,16 @@ use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\QueuedRequest;
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Db\SettingsMapper;
 use OCA\EducAI\Exception\ModelTestException;
 use OCA\EducAI\Exception\ProviderContractException;
 use OCA\EducAI\Service\AppIconService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\ConnectionCheckStore;
+use OCA\EducAI\Service\CatalogueEmbeddingService;
+use OCA\EducAI\Service\CredentialService;
+use OCA\EducAI\Service\EmbeddingAdminService;
+use OCA\EducAI\Service\EmbeddingConfigurationService;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\RateLimitService;
@@ -24,6 +29,7 @@ use OCA\EducAI\Webhook\TalkHandler;
 use OCP\App\IAppManager;
 use OCP\BackgroundJob\IJobList;
 use OCP\IGroupManager;
+use OCP\IConfig;
 use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IURLGenerator;
@@ -32,6 +38,43 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 class SettingsControllerTest extends TestCase {
+	public function testSavingOnlyTheCatalogueTemplateDoesNotQueueOrInvalidateEmbeddings(): void {
+		$settings = new Settings();
+		$settings->setApiEndpoint('https://api.example');
+		$settings->setDefaultModel('primary:model');
+		$settings->setCatalogueLinkTemplate('https://courses.example/old/{id}');
+		$settings->setCatalogueLastIndexed(123);
+		$settings->setCatalogueCourseCount(7);
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->method('getSettings')->willReturn($settings);
+		$mapper->expects($this->exactly(2))->method('update')->willReturnArgument(0);
+		$config = $this->createMock(IConfig::class);
+		$config->expects($this->never())->method('setAppValue');
+		$configuration = new EmbeddingConfigurationService($config);
+		$logger = $this->createMock(LoggerInterface::class);
+		$service = new SettingsService($mapper, $this->createMock(CredentialService::class),
+			$this->createMock(\OCA\EducAI\Service\TalkBotRegistrationService::class), $logger, $configuration);
+		$jobs = $this->createMock(IJobList::class);
+		$jobs->expects($this->never())->method('add');
+		$catalogue = $this->createMock(CatalogueEmbeddingService::class);
+		$catalogue->method('isEnabled')->willReturn(true);
+		$catalogue->expects($this->never())->method('reindex');
+		$ingestion = $this->createMock(RagIngestionService::class);
+		$ingestion->expects($this->never())->method('enqueueSource');
+		$admin = new EmbeddingAdminService($this->createMock(BotSourceMapper::class), $ingestion, $service, $catalogue, $jobs, $configuration, $logger);
+		$controller = $this->createController($this->createMock(RateLimitService::class),
+			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
+			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service, embeddingAdmin: $admin);
+
+		$response = $controller->update('', 'https://api.example', 'primary:model', catalogueLinkTemplate: 'https://courses.example/new/{id}');
+
+		$this->assertSame(200, $response->getStatus());
+		$this->assertSame('https://courses.example/new/{id}', $response->getData()['catalogue_link_template']);
+		$this->assertSame('https://courses.example/new/{id}', $mapper->getSettings()->getCatalogueLinkTemplate());
+		$this->assertSame(123, $settings->getCatalogueLastIndexed());
+		$this->assertSame(7, $settings->getCatalogueCourseCount());
+	}
+
 	public function testUpdatePassesOutputLimitsAndReturnsTheSavedMap(): void {
 		$settings = new Settings();
 		$settings->setMaxOutputTokens(8192);
@@ -1307,6 +1350,7 @@ class SettingsControllerTest extends TestCase {
 		?IL10N $l10n = null,
 		?SettingsService $settingsService = null,
 		?ConnectionCheckStore $connectionChecks = null,
+		?EmbeddingAdminService $embeddingAdmin = null,
 	): SettingsController {
 		$l10n ??= $this->createL10n();
 		return new SettingsController(
@@ -1326,7 +1370,7 @@ class SettingsControllerTest extends TestCase {
 			$this->createMock(LoggerInterface::class),
 			$traceService,
 			$l10n,
-			$this->createMock(\OCA\EducAI\Service\EmbeddingAdminService::class),
+			$embeddingAdmin ?? $this->createMock(EmbeddingAdminService::class),
 			null,
 			$connectionChecks,
 		);

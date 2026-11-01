@@ -125,6 +125,8 @@
 				</div>
 			</div>
 		</AdminSection>
+
+		<ApiConnectionsSection />
 	</div>
 </template>
 
@@ -133,13 +135,14 @@ import { t } from '../../l10n.js'
 import { endpointHost } from '../../utils/adminSettings.js'
 import { formatWhen } from '../../utils/adminOverview.js'
 import AdminSection from './AdminSection.vue'
+import ApiConnectionsSection from './ApiConnectionsSection.vue'
 import SecretField from './SecretField.vue'
 import ServiceSource from './ServiceSource.vue'
 import TestAction from './TestAction.vue'
 
 export default {
 	name: 'CapabilitiesTab',
-	components: { AdminSection, SecretField, ServiceSource, TestAction },
+	components: { AdminSection, ApiConnectionsSection, SecretField, ServiceSource, TestAction },
 	inject: ['admin'],
 	computed: {
 		services() {
