@@ -190,6 +190,8 @@ test('the semantic diff marks removed tools that bots use today', () => {
 		{ kind: 'changed', id: 5, matchKey: 'GET /x', label: 'GET /x', aspects: ['parameters', 'response'], changes: [], wasOffered: false },
 		{ kind: 'added', id: 4, matchKey: '', label: '', aspects: [], changes: [], wasOffered: false },
 	])
+	const named = api.diffEntries({ base_revision_id: 9, added: [4], removed: [], changed: [], unchanged: 2 }, active, [operation(4, { match_key: 'GET /export', config: config({ label: 'Export all courses' }) })])
+	assert.equal(named[0].label, 'Export all courses', 'A new operation is named by its draft label')
 	assert.deepEqual(api.diffEntries({ base_revision_id: null, added: [1], removed: [], changed: [] }, null), [])
 })
 
@@ -397,13 +399,15 @@ test('rendered section shows changes against the approved revision and lets a pa
 
 test('rendered section offers the settings of an approved connection without a draft', async ctx => {
 	const active = revision(9, [operation(1, { config: config({ enabled: true, read_confirmed: true, auth: 'scheme:bearerAuth', label: 'Search courses' }) })], { status: 'approved', approved_by: 'admin', approved_at: 1_790_000_000 })
-	const approved = detail({ connection: connection({ active_revision_id: 9, draft_revision_id: null, enabled: true }), active, draft: null })
+	const approved = detail({ connection: connection({ active_revision_id: 9, draft_revision_id: null, enabled: true, approval_current: true }), active, draft: null })
 	const { component } = section({ [LIST]: { connections: [approved.connection] }, [DETAIL]: approved, 'GET /apps/educai/api/v1/groups': { groups: [] } })
 	const { container } = mountDom(ctx, component)
 	await settle()
 	await click(button(container, 'Open'))
 	assert.match(container.textContent, /Address and authentication/)
 	assert.match(container.textContent, /credential stored/)
+	assert.ok(button(container, 'Review the approved document again'), 'A current approval can be reviewed again, for example to offer a revoked tool')
+	assert.doesNotMatch(container.textContent, /tools of this connection are paused/)
 	await click(button(container, 'Edit connection settings'))
 	const dialog = container.querySelector('[role="dialog"]')
 	assert.ok(dialog, 'The settings dialog opens without importing a new document')

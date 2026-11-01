@@ -523,10 +523,11 @@ export function diffEntries(diff, active, reviewedOperations = null) {
 		}
 	}
 	const label = (id, matchKey) => (active?.operations ?? []).find(operation => operation.id === id)?.config?.label || matchKey
+	const draftLabel = id => (reviewedOperations ?? []).find(operation => operation.id === id)?.config?.label || ''
 	return [
 		...(diff.removed ?? []).map(entry => ({ kind: 'removed', id: entry.id, matchKey: entry.match_key, label: label(entry.id, entry.match_key), aspects: [], changes: [], wasOffered: offered.get(entry.id) === true })),
 		...[...changed.values()].map(entry => ({ kind: 'changed', id: entry.id, matchKey: entry.match_key, label: label(entry.id, entry.match_key), aspects: entry.aspects.map(aspectLabel), changes: Object.entries(entry.changes).map(([aspect, values]) => ({ aspect, label: aspectLabel(aspect), before: JSON.stringify(values.before, null, 2), after: JSON.stringify(values.after, null, 2) })), wasOffered: offered.get(entry.id) === true })),
-		...(diff.added ?? []).map(id => ({ kind: 'added', id, matchKey: '', label: '', aspects: [], changes: [], wasOffered: false })),
+		...(diff.added ?? []).map(id => ({ kind: 'added', id, matchKey: '', label: draftLabel(id), aspects: [], changes: [], wasOffered: false })),
 	]
 }
 

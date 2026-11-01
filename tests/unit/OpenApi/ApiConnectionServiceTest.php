@@ -406,11 +406,28 @@ final class ApiConnectionServiceTest extends TestCase {
 		self::assertSame([], $this->exposedNames());
 	}
 
+	public function testARevokedOperationCanBeOfferedAgainFromTheSameDocument(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$revision = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$search = $this->harness->approveCourseSearch($connection, $revision);
+		$tool = OpenApiToolCatalog::toolName($connection->getId(), $search);
+		$this->expectConnectionError('document_unchanged', fn () => $this->harness->import($connection, Fixture::read('courses-api.json')));
+		$this->harness->service->revokeOperation($revision->getId(), $search, OpenApiHarness::ADMIN);
+
+		$draft = $this->harness->service->reopenActive($connection->getId(), OpenApiHarness::ADMIN);
+		self::assertSame($revision->getSha256(), $draft->getSha256());
+		self::assertFalse($draft->getOpConfigArray()[(string)$search]['read_confirmed'], 'A revoked operation needs a fresh confirmation');
+		self::assertSame([], $this->exposedNames(), 'Reopening approves nothing');
+		$this->harness->service->updateDraftOperations($draft->getId(), [$search => ['enabled' => true, 'auth' => 'scheme:bearerAuth']], OpenApiHarness::ADMIN);
+		$this->harness->service->updateDraftOperations($draft->getId(), [$search => ['read_confirmed' => true]], OpenApiHarness::ADMIN);
+		$this->harness->service->approve($draft->getId(), OpenApiHarness::ADMIN);
+		self::assertSame([$tool], $this->exposedNames());
+	}
+
 	public function testASuspendedApprovalCanBeReviewedAgainWithoutANewDocument(): void {
 		$connection = $this->harness->createCoursesConnection();
 		$revision = $this->harness->import($connection, Fixture::read('courses-api.json'));
 		$search = $this->harness->approveCourseSearch($connection, $revision);
-		$this->expectConnectionError('document_unchanged', fn () => $this->harness->service->reopenActive($connection->getId(), OpenApiHarness::ADMIN));
 		$this->expectConnectionError('document_unchanged', fn () => $this->harness->import($connection, Fixture::read('courses-api.json')));
 
 		$this->harness->service->updateConnection($connection->getId(), ['base_url' => 'https://other.courses.example/v1'], OpenApiHarness::ADMIN);

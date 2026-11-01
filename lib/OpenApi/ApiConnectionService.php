@@ -219,8 +219,10 @@ class ApiConnectionService {
 	}
 
 	/**
-	 * Opens the approved document as a new draft, so the review can be
-	 * confirmed again after the base URL or authentication changed.
+	 * Opens the approved document as a new draft: to confirm the review again
+	 * after the base URL or authentication changed, to offer a revoked or
+	 * another operation, or to correct a mapping. Nothing changes for bots
+	 * until the draft is approved.
 	 *
 	 * @throws ApiConnectionException
 	 * @throws OpenApiImportException
@@ -230,9 +232,6 @@ class ApiConnectionService {
 		$active = $this->activeRevision($connection);
 		if ($active === null) {
 			throw new ApiConnectionException('no_approved_revision', 'There is no approved document to review again.', 409);
-		}
-		if (self::approvalCurrent($active, $connection)) {
-			throw new ApiConnectionException('document_unchanged', 'This document is identical to the approved revision.', 409);
 		}
 		$loaded = $this->loader->load($active->getDocument());
 		return $this->createDraft($connection, $active, $loaded, $active->getSourceKind(), $active->getSourceUrl(), $userId);

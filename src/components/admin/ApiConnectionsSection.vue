@@ -186,8 +186,12 @@
 				<p class="ta-hint">
 					{{ t('educai', 'OpenAPI 3.0 as JSON, up to 2 MiB. Importing only creates a draft; bots keep using the approved revision until you approve the new one.') }}
 				</p>
-				<div v-if="detail.active && !detail.connection.approval_current && !draft" class="ta-note ta-note--warn" role="status">
-					{{ t('educai', 'The base address or authentication changed after approval, so the tools of this connection are paused.') }}
+				<div v-if="detail.active && !draft"
+					:class="detail.connection.approval_current ? 'ta-row' : 'ta-note ta-note--warn'"
+					:role="detail.connection.approval_current ? null : 'status'">
+					<template v-if="!detail.connection.approval_current">
+						{{ t('educai', 'The base address or authentication changed after approval, so the tools of this connection are paused.') }}
+					</template>
 					<button type="button"
 						class="ta-btn ta-btn--small"
 						:disabled="busy !== ''"

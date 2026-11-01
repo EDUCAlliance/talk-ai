@@ -100,7 +100,10 @@ final class ApiConnectionControllerTest extends TestCase {
 		self::assertTrue($enabled['connection']['enabled']);
 		$this->harness->catalog->reset();
 		self::assertSame(['api_' . $id . '_' . $search], array_column($this->harness->catalog->exposed(), 'name'));
-		$this->error($controller->reopen($id), 409, 'document_unchanged');
+		$current = $this->ok($controller->reopen($id), 201);
+		self::assertSame($draft['id'], $current['active']['id'], 'Reviewing a current approval again changes nothing until approval');
+		self::assertSame(['api_' . $id . '_' . $search], array_column($this->harness->catalog->exposed(), 'name'));
+		$this->ok($controller->discard($current['draft']['id']));
 
 		$this->params = ['base_url' => 'https://other.courses.example/v1'];
 		$paused = $this->ok($controller->update($id));
