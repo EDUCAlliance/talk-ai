@@ -28,7 +28,7 @@ class ApiConnectionService {
 	public const MAX_CREDENTIAL = 4096;
 	public const MAX_ASSIGN_GROUPS = 50;
 	private const REVIEW_DIFF_ASPECTS = ['review_mapping' => 'mapping', 'review_auth' => 'auth', 'review_fixed' => 'fixed', 'review_enabled' => 'enabled', 'review_read_confirmed' => 'read_confirmed', 'review_label' => 'label', 'review_description' => 'description'];
-	private const DIFF_ASPECTS = ['parameters', 'security', 'servers', 'response', 'blockers', 'summary', 'description', 'deprecated'];
+	private const DIFF_ASPECTS = ['operation_id', 'parameters', 'security', 'servers', 'response', 'blockers', 'summary', 'description', 'deprecated'];
 
 	public function __construct(
 		private ApiConnectionMapper $connections,

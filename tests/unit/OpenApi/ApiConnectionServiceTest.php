@@ -199,6 +199,25 @@ final class ApiConnectionServiceTest extends TestCase {
 		self::assertContains(OpenApiToolCatalog::toolName($connection->getId(), $search), $this->exposedNames());
 	}
 
+	public function testOperationIdOnlyChangeKeepsIdentityAndReportsOldAndNewNames(): void {
+		$connection = $this->harness->createCoursesConnection();
+		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
+		$id = $this->harness->approveCourseSearch($connection, $first);
+		$draft = $this->harness->import($connection, OpenApiHarness::document('courses-api.json', static function (array $document): array {
+			$document['paths']['/courses']['get']['operationId'] = 'browseCourses';
+			return $document;
+		}));
+
+		self::assertSame($id, $this->harness->operationId($draft, 'GET /courses'));
+		$diff = $this->harness->service->diff($draft, $this->harness->connections->findById($connection->getId()));
+		self::assertSame([], $diff['added']);
+		self::assertSame([], $diff['removed']);
+		self::assertCount(1, $diff['changed']);
+		self::assertContains('operation_id', $diff['changed'][0]['aspects']);
+		self::assertSame(['before' => 'listCourses', 'after' => 'browseCourses'], $diff['changed'][0]['changes']['operation_id']);
+		self::assertArrayNotHasKey('summary', $diff['changed'][0]['changes']);
+	}
+
 	public function testRemovedOperationsAreTombstonedAndNeverRevived(): void {
 		$connection = $this->harness->createCoursesConnection();
 		$first = $this->harness->import($connection, Fixture::read('courses-api.json'));
