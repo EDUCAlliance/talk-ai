@@ -142,6 +142,7 @@ jobs:
 
           test "$(cut -d/ -f1 "$archive_list" | sort -u)" = "$APP_NAME"
           grep -Fx "$APP_NAME/appinfo/info.xml" "$archive_list" >/dev/null
+          grep -Fx "$APP_NAME/CHANGELOG.md" "$archive_list" >/dev/null
           grep -Fx "$APP_NAME/vendor/autoload.php" "$archive_list" >/dev/null
           grep -Fx "$APP_NAME/js/educai-main.mjs" "$archive_list" >/dev/null
           grep -Fx "$APP_NAME/l10n/de.js" "$archive_list" >/dev/null

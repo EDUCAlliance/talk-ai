@@ -23,6 +23,19 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
 	exit 1
 fi
 
+# The App Store shows the CHANGELOG.md section whose heading matches the version
+# (`^## (\d+\.\d+\.\d+)`); pre-release versions use the `## [Unreleased]` section.
+CHANGELOG="$SOURCE_ROOT/CHANGELOG.md"
+if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	CHANGELOG_HEADING="^## ${VERSION//./\\.}([^0-9.]|$)"
+else
+	CHANGELOG_HEADING='^## \[Unreleased\]'
+fi
+if [[ ! -f "$CHANGELOG" ]] || ! grep -Eq "$CHANGELOG_HEADING" "$CHANGELOG"; then
+	echo "CHANGELOG.md has no section for $VERSION (expected a heading matching $CHANGELOG_HEADING)" >&2
+	exit 1
+fi
+
 TEMP_BASE="$SOURCE_ROOT/build/.release-tmp"
 mkdir -p "$TEMP_BASE"
 BUILD_ROOT="$(mktemp -d "$TEMP_BASE/build.XXXXXX")"
@@ -56,7 +69,7 @@ rsync -a \
 		--optimize-autoloader
 )
 
-for path in appinfo img js l10n lib templates vendor LICENSE README.md; do
+for path in appinfo img js l10n lib templates vendor CHANGELOG.md LICENSE README.md; do
 	if [[ ! -e "$WORK_ROOT/$path" ]]; then
 		echo "Required release path is missing after build: $path" >&2
 		exit 1
