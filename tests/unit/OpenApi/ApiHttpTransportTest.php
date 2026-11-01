@@ -256,7 +256,7 @@ final class ApiHttpTransportTest extends TestCase {
 					}
 					return self::json('{}');
 				} finally {
-					curl_close($handle);
+					unset($handle);
 				}
 			}, true);
 			$base = 'http://' . $address . '/v1';

@@ -132,6 +132,7 @@ const CODE_TEXTS = () => ({
 	request_body_unsupported: t('educai', 'Request bodies are not supported.'),
 	no_success_response: t('educai', 'The document declares no successful response.'),
 	response_not_json: t('educai', 'The successful response is not JSON.'),
+	response_schema_complex: t('educai', 'The response schema uses composition or a discriminator. Check the result mapping with a test call; full OpenAPI response validation is not performed.'),
 	response_unreadable: t('educai', 'The response description could not be read; check the result mapping with a test call.'),
 	response_schema_unreadable: t('educai', 'The response schema could not be read; check the result mapping with a test call.'),
 	security_unsupported: t('educai', 'The required authentication is not supported (only bearer tokens, API keys in a header or anonymous access).'),

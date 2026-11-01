@@ -670,7 +670,6 @@ class BotServiceTest extends TestCase {
 		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([['name' => 'api_3_4', 'config' => []]]);
 		$service = $this->createBotService($this->createMock(BotMapper::class), $this->createMock(PermissionService::class), null, null, null, $toolRegistry);
 		$method = new \ReflectionMethod(BotService::class, 'resolveEffectiveToolLoadout');
-		$method->setAccessible(true);
 
 		foreach (['owner', 'reviewer'] as $user) {
 			$names = array_column($method->invoke($service, $bot, $user)['built_in'], 'name');

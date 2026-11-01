@@ -1646,6 +1646,16 @@ OC.L10N.register(
     "Waiting for the embedding service…" : "Wartet auf den Embedding-Dienst…",
     "Not released for every bot visibility. Allow personal, group, team and global bots for this connection first." : "Nicht für jede Bot-Sichtbarkeit freigegeben. Erlaube für diese Verbindung zuerst persönliche, Gruppen-, Team- und globale Bots.",
     "Source unavailable" : "Quelle nicht verfügbar",
-    "The course catalogue cannot use its API connection. Searches and refreshes are paused; the index is kept." : "Der Kurskatalog kann seine API-Verbindung nicht nutzen. Suche und Aktualisierung pausieren; der Index bleibt erhalten."
+    "The course catalogue cannot use its API connection. Searches and refreshes are paused; the index is kept." : "Der Kurskatalog kann seine API-Verbindung nicht nutzen. Suche und Aktualisierung pausieren; der Index bleibt erhalten.",
+    "The response schema uses composition or a discriminator. Check the result mapping with a test call; full OpenAPI response validation is not performed." : "Das Antwortschema verwendet Schema-Komposition oder einen Discriminator. Prüfe die Ergebniszuordnung mit einem Testaufruf; eine vollständige OpenAPI-Antwortvalidierung findet nicht statt.",
+    "result mapping" : "Ergebniszuordnung",
+    "chosen authentication" : "gewählte Authentifizierung",
+    "fixed values" : "feste Werte",
+    "offered to bots" : "für Bots angeboten",
+    "read confirmation" : "Lesebestätigung",
+    "reviewed label" : "geprüfte Bezeichnung",
+    "reviewed description" : "geprüfte Beschreibung",
+    "Approved value" : "Freigegebener Wert",
+    "Draft value" : "Entwurfswert"
 },
 "nplurals=2; plural=(n != 1);");

@@ -5812,3 +5812,43 @@ msgstr "Quelle nicht verfügbar"
 #: src/components/admin/CatalogueSourceSwitch.vue
 msgid "The course catalogue cannot use its API connection. Searches and refreshes are paused; the index is kept."
 msgstr "Der Kurskatalog kann seine API-Verbindung nicht nutzen. Suche und Aktualisierung pausieren; der Index bleibt erhalten."
+
+#: src/utils/apiConnections.js
+msgid "The response schema uses composition or a discriminator. Check the result mapping with a test call; full OpenAPI response validation is not performed."
+msgstr "Das Antwortschema verwendet Schema-Komposition oder einen Discriminator. Prüfe die Ergebniszuordnung mit einem Testaufruf; eine vollständige OpenAPI-Antwortvalidierung findet nicht statt."
+
+#: src/utils/apiConnections.js
+msgid "result mapping"
+msgstr "Ergebniszuordnung"
+
+#: src/utils/apiConnections.js
+msgid "chosen authentication"
+msgstr "gewählte Authentifizierung"
+
+#: src/utils/apiConnections.js
+msgid "fixed values"
+msgstr "feste Werte"
+
+#: src/utils/apiConnections.js
+msgid "offered to bots"
+msgstr "für Bots angeboten"
+
+#: src/utils/apiConnections.js
+msgid "read confirmation"
+msgstr "Lesebestätigung"
+
+#: src/utils/apiConnections.js
+msgid "reviewed label"
+msgstr "geprüfte Bezeichnung"
+
+#: src/utils/apiConnections.js
+msgid "reviewed description"
+msgstr "geprüfte Beschreibung"
+
+#: src/utils/apiConnections.js
+msgid "Approved value"
+msgstr "Freigegebener Wert"
+
+#: src/utils/apiConnections.js
+msgid "Draft value"
+msgstr "Entwurfswert"
