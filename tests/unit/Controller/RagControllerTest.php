@@ -10,6 +10,7 @@ use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Service\BotService;
+use OCA\EducAI\Service\KnowledgeSourcePresenter;
 use OCA\EducAI\Service\KnowledgeSourceStatus;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RagIngestionService;
@@ -232,7 +233,7 @@ class RagControllerTest extends TestCase {
 			$this->createMock(RagIngestionService::class),
 			$this->createMock(UrlContentFetcher::class),
 			$this->createMock(PermissionService::class),
-			$this->createMock(IRootFolder::class),
+			new KnowledgeSourcePresenter($this->createMock(IRootFolder::class), $l10n, $this->createMock(LoggerInterface::class)),
 			'alice',
 			$this->createMock(LoggerInterface::class),
 			$l10n,

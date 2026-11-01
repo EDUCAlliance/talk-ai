@@ -71,9 +71,32 @@
 			</p>
 			<details v-if="status.rag.errors.length" class="ta-details embedding-maintenance__errors">
 				<summary>{{ n('educai', 'Show {count} failed source', 'Show {count} failed sources', status.rag.errors.length, { count: status.rag.errors.length }) }}</summary>
-				<ul>
-					<li v-for="source in status.rag.errors" :key="source.source_id">
-						{{ t('educai', 'Source {source} (bot {bot}) could not be indexed. Check source access and embedding settings, then retry.', { source: source.source_id, bot: source.bot_id }) }}
+				<ul class="embedding-maintenance__error-list">
+					<li v-for="source in status.rag.errors"
+						:key="source.source_id"
+						class="embedding-maintenance__error">
+						<p class="embedding-maintenance__error-title">
+							<strong>{{ sourceName(source) }}</strong>
+							<span class="embedding-maintenance__error-type">{{ sourceType(source) }}</span>
+						</p>
+						<p class="embedding-maintenance__error-meta">
+							{{ botLabel(source) }}
+							<template v-if="source.owner_uid">
+								· {{ t('educai', 'added by {user}', { user: source.owner_uid }) }}
+							</template>
+							<template v-if="source.path && source.path !== source.display_name">
+								· <span class="embedding-maintenance__error-path">{{ source.path }}</span>
+							</template>
+						</p>
+						<p class="embedding-maintenance__error-message">
+							{{ source.error_message || t('educai', 'The knowledge source could not be indexed. Check source access and embedding settings, then retry.') }}
+						</p>
+						<details v-if="source.detail"
+							class="embedding-maintenance__error-detail"
+							:open="!source.error_message || source.error_code === 'knowledge_source_processing_failed'">
+							<summary>{{ t('educai', 'Technical details') }}</summary>
+							<code>{{ source.detail }}</code>
+						</details>
 					</li>
 				</ul>
 				<p v-if="status.rag.error > status.rag.errors.length" class="ta-hint">
@@ -159,6 +182,25 @@ export default {
 		n,
 		formatDate(timestamp) {
 			return timestamp ? new Date(timestamp * 1000).toLocaleString(getCanonicalLocale()) : t('educai', 'Never')
+		},
+		sourceName(source) {
+			return source.display_name || source.path || t('educai', 'Source {id}', { id: source.source_id })
+		},
+		sourceType(source) {
+			const labels = {
+				url: t('educai', 'Web page'),
+				folder: t('educai', 'Folder'),
+				file: t('educai', 'File'),
+			}
+			return labels[source.source_type] || ''
+		},
+		botLabel(source) {
+			if (!source.bot_name) {
+				return t('educai', 'Deleted bot (ID {id})', { id: source.bot_id })
+			}
+			return source.bot_mention
+				? t('educai', 'Bot "{name}" ({mention})', { name: source.bot_name, mention: source.bot_mention })
+				: t('educai', 'Bot "{name}"', { name: source.bot_name })
 		},
 		async loadStatus() {
 			if (this.loading || this.destroyed) return
@@ -253,10 +295,68 @@ export default {
 	margin-block-start: 14px;
 }
 
-.embedding-maintenance__errors ul {
+.embedding-maintenance__error-list {
+	display: grid;
+	gap: 8px;
 	margin: 10px 0 0;
-	padding-inline-start: 20px;
+	padding: 0;
+	list-style: none;
+}
+
+.embedding-maintenance__error {
+	padding: 8px 12px;
+	border-inline-start: 3px solid var(--color-error, #c62828);
+	border-radius: var(--border-radius, 6px);
+	background: color-mix(in srgb, var(--color-error, #c62828) 6%, var(--color-main-background));
+	font-size: 14px;
+}
+
+.embedding-maintenance__error p {
+	margin: 0;
+}
+
+.embedding-maintenance__error-title {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 8px;
+	overflow-wrap: anywhere;
+}
+
+.embedding-maintenance__error-type,
+.embedding-maintenance__error-meta {
+	color: var(--color-text-maxcontrast);
+	font-size: 13px;
+}
+
+.embedding-maintenance__error-path {
+	overflow-wrap: anywhere;
+}
+
+.embedding-maintenance__error .embedding-maintenance__error-message {
+	margin-block-start: 4px;
 	color: var(--color-error-text, var(--color-error));
+}
+
+.embedding-maintenance__error-detail {
+	margin-block-start: 4px;
+	font-size: 13px;
+}
+
+.embedding-maintenance__error-detail summary {
+	cursor: pointer;
+	color: var(--color-text-maxcontrast);
+}
+
+.embedding-maintenance__error-detail code {
+	display: block;
+	margin-block-start: 4px;
+	padding: 6px 8px;
+	border-radius: var(--border-radius, 6px);
+	background: var(--color-background-dark);
+	font-size: 12px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .embedding-maintenance__catalogue {

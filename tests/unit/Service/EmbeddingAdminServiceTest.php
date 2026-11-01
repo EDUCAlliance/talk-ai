@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Tests\Unit\Service;
 
+use OCA\EducAI\Db\Bot;
+use OCA\EducAI\Db\BotMapper;
 use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Jobs\ReindexBotSourceJob;
@@ -11,9 +13,14 @@ use OCA\EducAI\Jobs\ReindexCatalogueEmbeddingsJob;
 use OCA\EducAI\Service\CatalogueEmbeddingService;
 use OCA\EducAI\Service\EmbeddingAdminService;
 use OCA\EducAI\Service\EmbeddingConfigurationService;
+use OCA\EducAI\Service\KnowledgeSourcePresenter;
+use OCA\EducAI\Service\KnowledgeSourceStatus;
 use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\SettingsService;
+use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\BackgroundJob\IJobList;
+use OCP\Files\IRootFolder;
+use OCP\IL10N;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -24,6 +31,7 @@ class EmbeddingAdminServiceTest extends TestCase {
 	private CatalogueEmbeddingService $catalogue;
 	private IJobList $jobs;
 	private EmbeddingConfigurationService $configuration;
+	private BotMapper $bots;
 	private EmbeddingAdminService $service;
 
 	protected function setUp(): void {
@@ -33,7 +41,8 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$this->catalogue = $this->createMock(CatalogueEmbeddingService::class);
 		$this->jobs = $this->createMock(IJobList::class);
 		$this->configuration = $this->createMock(EmbeddingConfigurationService::class);
-		$this->service = new EmbeddingAdminService($this->sources, $this->ingestion, $this->settings, $this->catalogue, $this->jobs, $this->configuration, $this->createMock(LoggerInterface::class));
+		$this->bots = $this->createMock(BotMapper::class);
+		$this->service = $this->createService();
 	}
 
 	public function testCoreQueuesSourcesWithoutCatalogueOrNetworkWork(): void {
@@ -115,7 +124,13 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$ready = $this->source(13, 'ready');
 		$ready->setLastIndexedAt(234);
 		$error = $this->source(14, 'error');
-		$error->setErrorMessage('private upstream response');
+		$error->setNodeType('url');
+		$error->setSourceUrl('https://example.com/docs/handbook.html');
+		$error->setErrorMessage(KnowledgeSourceStatus::encode(KnowledgeSourceStatus::EMBEDDING_FAILED, ['http_status' => 401], 'HTTP 401 from https://alice:hunter22@llm.example/v1 (Authorization: Bearer sk-abcdefgh12345)'));
+		$bot = new Bot();
+		$bot->setBotName('Study Helper');
+		$bot->setMentionName('study-helper');
+		$this->bots->expects($this->once())->method('findById')->with(3)->willReturn($bot);
 		$this->sources->method('findAll')->willReturn([$this->source(11), $processing, $ready, $error]);
 
 		$status = $this->service->getStatus();
@@ -123,10 +138,24 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$this->assertSame(4, $status['rag']['total']);
 		foreach (['queued', 'processing', 'ready', 'error'] as $state) $this->assertSame(1, $status['rag'][$state]);
 		$this->assertSame(234, $status['rag']['last_indexed']);
-		$this->assertSame([['source_id' => 14, 'bot_id' => 3]], $status['rag']['errors']);
+		$this->assertSame([[
+			'source_id' => 14,
+			'bot_id' => 3,
+			'bot_name' => 'Study Helper',
+			'bot_mention' => 'study-helper',
+			'owner_uid' => '',
+			'source_type' => 'url',
+			'status' => 'error',
+			'error_code' => KnowledgeSourceStatus::EMBEDDING_FAILED,
+			'error_message' => 'The embedding service rejected the request (HTTP 401). The previous index is kept; administrators find details in the Nextcloud log.',
+			'detail' => 'HTTP 401 from https://[redacted]@llm.example/v1 (Authorization: Bearer [redacted])',
+			'path' => 'https://example.com/docs/handbook.html',
+			'display_name' => 'handbook.html',
+		]], $status['rag']['errors']);
 		$this->assertSame('disabled', $status['catalogue']['state']);
 		$this->assertSame(7, $status['catalogue']['count']);
-		$this->assertStringNotContainsString('private', json_encode($status));
+		$this->assertStringNotContainsString('hunter22', json_encode($status));
+		$this->assertStringNotContainsString('sk-abcdefgh', json_encode($status));
 	}
 
 	public function testReindexIsOnlyRequestedForContentIndexedBeforeTheChange(): void {
@@ -140,7 +169,7 @@ class EmbeddingAdminServiceTest extends TestCase {
 		foreach ([[[], false], [[$this->source(20)], false], [[$fresh], false], [[$fresh, $old], true]] as [$sources, $expected]) {
 			$this->sources = $this->createMock(BotSourceMapper::class);
 			$this->sources->method('findAll')->willReturn($sources);
-			$service = new EmbeddingAdminService($this->sources, $this->ingestion, $this->settings, $this->catalogue, $this->jobs, $this->configuration, $this->createMock(LoggerInterface::class));
+			$service = $this->createService();
 			$this->assertSame($expected, $service->getStatus()['rag']['needs_reindex']);
 		}
 	}
@@ -159,13 +188,16 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$waiting = $this->source(31);
 		$waiting->setProgressStage('waiting');
 		$unreachable = $this->source(32, 'unavailable');
+		$this->bots->method('findById')->willThrowException(new DoesNotExistException('gone'));
 		$this->sources->method('findAll')->willReturn([$waiting, $unreachable]);
 
 		$status = $this->service->getStatus();
 		$this->assertSame(1, $status['rag']['queued']);
 		$this->assertSame(0, $status['rag']['processing']);
 		$this->assertSame(1, $status['rag']['error']);
-		$this->assertSame([['source_id' => 32, 'bot_id' => 3]], $status['rag']['errors']);
+		$this->assertSame(32, $status['rag']['errors'][0]['source_id']);
+		$this->assertNull($status['rag']['errors'][0]['bot_name']);
+		$this->assertNull($status['rag']['errors'][0]['error_message']);
 
 		$queued = [];
 		// Source 31 waits for a retry scheduled for later; it is queued already.
@@ -174,6 +206,19 @@ class EmbeddingAdminServiceTest extends TestCase {
 		$result = $this->service->queueAll();
 		$this->assertSame([32], $queued);
 		$this->assertSame(1, $result['already_queued_rag_sources']);
+	}
+
+	private function createService(): EmbeddingAdminService {
+		$l10nBuilder = $this->getMockBuilder(IL10N::class);
+		if (!method_exists(IL10N::class, 't')) {
+			$l10nBuilder->addMethods(['t']);
+		}
+		$l10n = $l10nBuilder->getMock();
+		$l10n->method('t')->willReturnCallback(static fn (string $text, array $parameters = []): string => $parameters === [] ? $text : vsprintf($text, $parameters));
+		$logger = $this->createMock(LoggerInterface::class);
+		$presenter = new KnowledgeSourcePresenter($this->createMock(IRootFolder::class), $l10n, $logger);
+
+		return new EmbeddingAdminService($this->sources, $this->ingestion, $this->settings, $this->catalogue, $this->jobs, $this->configuration, $logger, $this->bots, $presenter);
 	}
 
 	private function source(int $id, string $status = 'pending'): BotSource {

@@ -1265,7 +1265,6 @@ OC.L10N.register(
     "Reindexing is queued and processed by Nextcloud background jobs. Queued does not mean completed." : "Die Neuindizierung wird eingereiht und von Nextcloud-Hintergrundaufträgen verarbeitet. Eingereiht bedeutet nicht abgeschlossen.",
     "Save settings first" : "Zuerst Einstellungen speichern",
     "Save the changed embedding or integration settings before reindexing." : "Speichere die geänderten Embedding- oder Integrationseinstellungen, bevor du neu indizierst.",
-    "Source {source} (bot {bot}) could not be indexed. Check source access and embedding settings, then retry." : "Quelle {source} (Bot {bot}) konnte nicht indiziert werden. Prüfe den Zugriff auf die Quelle und die Embedding-Einstellungen und versuche es dann erneut.",
     "The last catalogue indexing attempt failed. Check the catalogue connection and embedding configuration, then retry. Details are available in the Nextcloud log." : "Der letzte Versuch, den Katalog zu indizieren, ist fehlgeschlagen. Prüfe die Katalog-Verbindung und die Embedding-Konfiguration und versuche es dann erneut. Details findest du im Nextcloud-Protokoll.",
     "Total" : "Gesamt",
     "Default path for new wikis:" : "Standardpfad für neue Wikis:",
@@ -1658,6 +1657,16 @@ OC.L10N.register(
     "Approved value" : "Freigegebener Wert",
     "Draft value" : "Entwurfswert",
     "Address and authentication" : "Adresse und Authentifizierung",
-    "operation ID" : "Operations-ID"
+    "operation ID" : "Operations-ID",
+    "added by {user}" : "hinzugefügt von {user}",
+    "The knowledge source could not be indexed. Check source access and embedding settings, then retry." : "Die Wissensquelle konnte nicht indiziert werden. Prüfe den Zugriff auf die Quelle und die Embedding-Einstellungen und versuche es dann erneut.",
+    "Technical details" : "Technische Details",
+    "Source {id}" : "Quelle {id}",
+    "Web page" : "Webseite",
+    "Folder" : "Ordner",
+    "File" : "Datei",
+    "Deleted bot (ID {id})" : "Gelöschter Bot (ID {id})",
+    "Bot \"{name}\" ({mention})" : "Bot „{name}“ ({mention})",
+    "Bot \"{name}\"" : "Bot „{name}“"
 },
 "nplurals=2; plural=(n != 1);");

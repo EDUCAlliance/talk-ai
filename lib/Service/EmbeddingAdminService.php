@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace OCA\EducAI\Service;
 
+use OCA\EducAI\Db\Bot;
+use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Jobs\ReindexCatalogueEmbeddingsJob;
+use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\BackgroundJob\IJobList;
 use Psr\Log\LoggerInterface;
 
@@ -19,12 +23,49 @@ class EmbeddingAdminService {
 		private IJobList $jobs,
 		private EmbeddingConfigurationService $configuration,
 		private LoggerInterface $logger,
+		private BotMapper $botMapper,
+		private KnowledgeSourcePresenter $presenter,
 	) {
+	}
+
+	/**
+	 * Names the bot and the file, folder or page and says what went wrong. This overview is
+	 * admin-only, so the stored technical detail is included with credentials masked.
+	 *
+	 * @param array<int,?Bot> $bots lookup cache, keyed by bot id
+	 * @return array<string,mixed>
+	 */
+	private function describeFailedSource(BotSource $source, array &$bots): array {
+		$botId = $source->getBotId();
+		if (!array_key_exists($botId, $bots)) {
+			try {
+				$bots[$botId] = $this->botMapper->findById($botId);
+			} catch (DoesNotExistException) {
+				$bots[$botId] = null;
+			}
+		}
+		$bot = $bots[$botId];
+		$status = $this->presenter->describeStatus($source);
+
+		return [
+			'source_id' => $source->getId(),
+			'bot_id' => $botId,
+			'bot_name' => $bot?->getBotName(),
+			'bot_mention' => $bot?->getMentionName(),
+			'owner_uid' => $source->getOwnerUid(),
+			'source_type' => $source->getNodeType(),
+			'status' => $source->getStatus(),
+			'error_code' => $status['source_error_code'],
+			'error_message' => $status['error_message'],
+			'detail' => $this->presenter->technicalDetail($source),
+		] + $this->presenter->describeLocation($source);
 	}
 
 	public function getStatus(): array {
 		$counts = ['total' => 0, 'queued' => 0, 'processing' => 0, 'ready' => 0, 'error' => 0];
 		$errors = [];
+		/** @var array<int,?Bot> $bots */
+		$bots = [];
 		$lastIndexed = null;
 		$oldestIndexed = null;
 		foreach ($this->sourceMapper->findAll() as $source) {
@@ -41,8 +82,7 @@ class EmbeddingAdminService {
 				$counts[$status]++;
 			}
 			if ($status === 'error' && count($errors) < 50) {
-				// Do not expose provider errors, URLs or credentials in this overview.
-				$errors[] = ['source_id' => $source->getId(), 'bot_id' => $source->getBotId()];
+				$errors[] = $this->describeFailedSource($source, $bots);
 			}
 			if ($source->getLastIndexedAt() !== null) {
 				$lastIndexed = max($lastIndexed ?? 0, $source->getLastIndexedAt());

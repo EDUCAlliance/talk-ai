@@ -5860,3 +5860,43 @@ msgstr "Adresse und Authentifizierung"
 #: src/utils/apiConnections.js
 msgid "operation ID"
 msgstr "Operations-ID"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "added by {user}"
+msgstr "hinzugefügt von {user}"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "The knowledge source could not be indexed. Check source access and embedding settings, then retry."
+msgstr "Die Wissensquelle konnte nicht indiziert werden. Prüfe den Zugriff auf die Quelle und die Embedding-Einstellungen und versuche es dann erneut."
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Technical details"
+msgstr "Technische Details"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Source {id}"
+msgstr "Quelle {id}"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Web page"
+msgstr "Webseite"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Folder"
+msgstr "Ordner"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "File"
+msgstr "Datei"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Deleted bot (ID {id})"
+msgstr "Gelöschter Bot (ID {id})"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Bot \"{name}\" ({mention})"
+msgstr "Bot „{name}“ ({mention})"
+
+#: src/components/EmbeddingMaintenance.vue
+msgid "Bot \"{name}\""
+msgstr "Bot „{name}“"
