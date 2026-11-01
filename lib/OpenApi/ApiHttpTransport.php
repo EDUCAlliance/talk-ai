@@ -126,6 +126,9 @@ class ApiHttpTransport {
 			'curl' => [
 				CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
 				CURLOPT_MAXFILESIZE => $maxBytes,
+				// Behind Nextcloud's HTTP proxy the CONNECT reply would otherwise
+				// reach "on_headers" first and be judged as the API's response.
+				CURLOPT_SUPPRESS_CONNECT_HEADERS => true,
 				CURLOPT_NOPROGRESS => false,
 				CURLOPT_PROGRESSFUNCTION => static function ($handle, float $downloadSize, float $downloaded, float $uploadSize, float $uploaded) use ($maxBytes, &$tooLarge): int {
 					$tooLarge = $tooLarge || $downloaded > $maxBytes;

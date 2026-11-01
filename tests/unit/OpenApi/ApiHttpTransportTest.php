@@ -141,6 +141,7 @@ final class ApiHttpTransportTest extends TestCase {
 		self::assertSame([
 			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
 			CURLOPT_MAXFILESIZE => ApiHttpTransport::MAX_RESPONSE_BYTES,
+			CURLOPT_SUPPRESS_CONNECT_HEADERS => true,
 			CURLOPT_ENCODING => 'identity',
 			CURLOPT_HTTP_CONTENT_DECODING => false,
 		], $curl);
