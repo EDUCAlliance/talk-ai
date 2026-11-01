@@ -192,6 +192,7 @@ test('the semantic diff marks removed tools that bots use today', () => {
 	])
 	const named = api.diffEntries({ base_revision_id: 9, added: [4], removed: [], changed: [], unchanged: 2 }, active, [operation(4, { match_key: 'GET /export', config: config({ label: 'Export all courses' }) })])
 	assert.equal(named[0].label, 'Export all courses', 'A new operation is named by its draft label')
+	assert.equal(api.aspectLabel('operation_id'), 'operation ID')
 	assert.deepEqual(api.diffEntries({ base_revision_id: null, added: [1], removed: [], changed: [] }, null), [])
 })
 

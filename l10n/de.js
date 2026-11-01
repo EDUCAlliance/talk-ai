@@ -1657,6 +1657,7 @@ OC.L10N.register(
     "reviewed description" : "geprüfte Beschreibung",
     "Approved value" : "Freigegebener Wert",
     "Draft value" : "Entwurfswert",
-    "Address and authentication" : "Adresse und Authentifizierung"
+    "Address and authentication" : "Adresse und Authentifizierung",
+    "operation ID" : "Operations-ID"
 },
 "nplurals=2; plural=(n != 1);");

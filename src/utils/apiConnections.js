@@ -462,6 +462,7 @@ const REVIEW_DIFF_FIELDS = { review_mapping: 'mapping', review_auth: 'auth', rev
 
 export function aspectLabel(aspect) {
 	return {
+		operation_id: t('educai', 'operation ID'),
 		parameters: t('educai', 'parameters'),
 		security: t('educai', 'authentication'),
 		servers: t('educai', 'servers'),

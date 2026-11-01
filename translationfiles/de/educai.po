@@ -5856,3 +5856,7 @@ msgstr "Entwurfswert"
 #: src/components/admin/ApiConnectionsSection.vue
 msgid "Address and authentication"
 msgstr "Adresse und Authentifizierung"
+
+#: src/utils/apiConnections.js
+msgid "operation ID"
+msgstr "Operations-ID"
