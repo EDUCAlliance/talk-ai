@@ -237,6 +237,33 @@ try {
 	$check('compressed_response_rejected', static fn (): bool => $fails('/gzip', 'response_compressed'));
 	$check('declared_oversize_refused_from_headers', static fn (): bool => $failsWithin('/declared-large', 'response_too_large', 1.5));
 	$check('streamed_oversize_aborted_during_transfer', static fn (): bool => $failsWithin('/streamed-large', 'response_too_large', 2.6));
+	$check('unknown_length_transfer_is_bounded_without_native_curl_limit', static function () use ($clientService, $mocks, $config, $logger, $base, $failure): bool {
+		$stats = [];
+		$declaredLength = null;
+		$curl = new \GuzzleHttp\Handler\CurlHandler();
+		$client = $clientService->newClient(static function ($request, array $options) use ($curl, &$stats, &$declaredLength) {
+			// Simulate the missing in-transfer MAXFILESIZE enforcement on
+			// cURL < 8.4 while preserving Nextcloud's actual middleware stack.
+			unset($options['curl'][CURLOPT_MAXFILESIZE]);
+			$options['on_stats'] = static function (\GuzzleHttp\TransferStats $transfer) use (&$stats): void {
+				$stats = $transfer->getHandlerStats();
+			};
+			$onHeaders = $options['on_headers'];
+			$options['on_headers'] = static function ($response) use ($onHeaders, &$declaredLength): void {
+				$declaredLength = $response->getHeaderLine('Content-Length');
+				$onHeaders($response);
+			};
+			return $curl($request, $options);
+		});
+		$service = $mocks->dependency(\OCP\Http\Client\IClientService::class);
+		$service->method('newClient')->willReturn($client);
+		$bounded = new ApiHttpTransport($service, new ApiNetworkPolicy($config), $logger);
+		$limit = 65_536;
+		$error = $failure(static fn () => $bounded->getJson($base . '/streamed-large', $base, [], 5.0, [], $limit));
+		return $error?->getErrorCode() === 'response_too_large' && $error->getDetails() === ['limit_bytes' => $limit]
+			&& $declaredLength === '' && ($stats['size_download'] ?? 0) > $limit
+			&& $stats['size_download'] <= $limit + 65_536;
+	});
 	$check('document_fetch_sends_no_credentials', static fn (): bool => json_decode($transport->fetchDocument($base . '/openapi.json'), true)['openapi'] === '3.0.3');
 	$check('timeout_reported', static function () use ($fails): bool {
 		$start = microtime(true);

@@ -96,6 +96,7 @@ class ApiHttpTransport {
 			}
 		}
 		$timeout = max(0.5, min($timeout, self::MAX_TIMEOUT_SECONDS));
+		$tooLarge = false;
 		$options = [
 			'headers' => $headers,
 			'timeout' => $timeout,
@@ -120,10 +121,16 @@ class ApiHttpTransport {
 				}
 			},
 			// Nextcloud merges "curl" shallowly; keep its HTTP/2 default. cURL
-			// enforces the size limit during the transfer from version 8.4 on.
+			// only enforces unknown-length bodies from version 8.4 on; the
+			// progress callback also bounds transfers on older supported cURL.
 			'curl' => [
 				CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
 				CURLOPT_MAXFILESIZE => $maxBytes,
+				CURLOPT_NOPROGRESS => false,
+				CURLOPT_PROGRESSFUNCTION => static function ($handle, float $downloadSize, float $downloaded, float $uploadSize, float $uploaded) use ($maxBytes, &$tooLarge): int {
+					$tooLarge = $tooLarge || $downloaded > $maxBytes;
+					return $tooLarge ? 1 : 0;
+				},
 			],
 		];
 
@@ -145,7 +152,7 @@ class ApiHttpTransport {
 				}
 				$curlError ??= self::curlError($cause);
 			}
-			if ($curlError === CURLE_FILESIZE_EXCEEDED) {
+			if ($tooLarge || $curlError === CURLE_FILESIZE_EXCEEDED) {
 				$this->log('response_too_large', $logContext, $start);
 				throw self::tooLarge($maxBytes);
 			}

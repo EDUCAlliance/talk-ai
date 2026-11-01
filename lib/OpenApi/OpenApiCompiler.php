@@ -285,11 +285,7 @@ final class OpenApiCompiler {
 				$pathNames[] = $name;
 			}
 			if ($in === 'header' || $in === 'cookie') {
-				if ($required) {
-					$entry['blockers'][] = ['code' => 'parameter_location_unsupported', 'detail' => $label];
-				} else {
-					$entry['notes'][] = ['code' => 'optional_parameter_not_offered', 'detail' => $label];
-				}
+				$entry['blockers'][] = ['code' => 'parameter_location_unsupported', 'detail' => $label];
 				continue;
 			}
 			if (preg_match(self::PARAMETER_NAME, $name) !== 1) {
@@ -587,6 +583,8 @@ final class OpenApiCompiler {
 		$unknown = false;
 		$found = false;
 		$schema = null;
+		$complex = false;
+		$suggester = new ResponseMappingSuggester($refs);
 		foreach ($responses as $status => $response) {
 			$status = (string)$status;
 			if (preg_match('/^2(?:[0-9]{2}|XX)$/D', $status) !== 1) {
@@ -610,7 +608,9 @@ final class OpenApiCompiler {
 			foreach ($content as $mediaType => $media) {
 				if (preg_match('#^application/(?:[A-Za-z0-9.+-]+\+)?json(?:\s*;.*)?$#i', (string)$mediaType) === 1) {
 					$json = true;
-					$schema ??= self::isObject($media) ? ($media['schema'] ?? null) : null;
+					$responseSchema = self::isObject($media) ? ($media['schema'] ?? null) : null;
+					$schema ??= $responseSchema;
+					$complex = $suggester->usesComposition($responseSchema) || $complex;
 				}
 			}
 		}
@@ -623,9 +623,12 @@ final class OpenApiCompiler {
 			return;
 		}
 		$entry['response']['json'] = $json ? true : null;
+		if ($complex) {
+			$entry['notes'][] = ['code' => 'response_schema_complex', 'detail' => ''];
+		}
 		if ($schema !== null) {
 			try {
-				$entry['response']['suggestion'] = (new ResponseMappingSuggester($refs))->suggest($schema);
+				$entry['response']['suggestion'] = $suggester->suggest($schema);
 			} catch (OpenApiImportException $e) {
 				if ($e->getErrorCode() === 'document_too_complex') {
 					throw $e;

@@ -34,7 +34,8 @@ the spec.
   written in the spec. There is no case folding, percent decoding, slash
   trimming or parameter renaming; `/a/{x}` and `/a/{y}` are different operations.
 - `operationId` is stored as a hint only. Duplicate operationIds are reported
-  as conflicts and block the affected operations instead of being remapped.
+  as conflicts for review; they do not block otherwise supported operations.
+  Identity remains method plus exact path; no operation is silently remapped.
 - `active_key` = `sha256(<connection id> "\n" <match key>)` is set while the
   identity is live and backed by a unique index. A re-import resolves existing
   identities through it, so label or description changes keep the tool name.

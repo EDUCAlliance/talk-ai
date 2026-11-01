@@ -134,12 +134,16 @@ final class ApiHttpTransportTest extends TestCase {
 		$transport->getJson(self::BASE . '/courses', self::BASE, [], 5.0);
 		$options = $client->requests[0]['options'];
 
+		self::assertFalse($options['curl'][CURLOPT_NOPROGRESS]);
+		self::assertIsCallable($options['curl'][CURLOPT_PROGRESSFUNCTION]);
+		$curl = $options['curl'];
+		unset($curl[CURLOPT_NOPROGRESS], $curl[CURLOPT_PROGRESSFUNCTION]);
 		self::assertSame([
 			CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
 			CURLOPT_MAXFILESIZE => ApiHttpTransport::MAX_RESPONSE_BYTES,
 			CURLOPT_ENCODING => 'identity',
 			CURLOPT_HTTP_CONTENT_DECODING => false,
-		], $options['curl']);
+		], $curl);
 		$onHeaders = $options['on_headers'];
 		$onHeaders($this->headers(200, ['Content-Type' => 'application/json', 'Content-Length' => (string)ApiHttpTransport::MAX_RESPONSE_BYTES]));
 		$refusals = [
@@ -183,6 +187,97 @@ final class ApiHttpTransportTest extends TestCase {
 				return ['errno' => CURLE_FILESIZE_EXCEEDED];
 			}
 		});
+	}
+
+	public function testUnknownLengthTransferAbortsWithoutTheNativeCurlSizeLimit(): void {
+		if (!function_exists('proc_open')) {
+			self::markTestSkipped('The local HTTP fixture cannot start without proc_open.');
+		}
+		$socket = @stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
+		if ($socket === false) {
+			self::markTestSkipped('The local HTTP fixture cannot bind a loopback port.');
+		}
+		$address = stream_socket_get_name($socket, false);
+		fclose($socket);
+		$serverLog = tempnam(sys_get_temp_dir(), 'educai-transfer-');
+		$server = @proc_open(
+			[PHP_BINARY, '-d', 'output_buffering=0', '-S', $address, dirname(__DIR__, 2) . '/integration/openapi-http-fixture.php'],
+			[0 => ['pipe', 'r'], 1 => ['file', $serverLog, 'a'], 2 => ['file', $serverLog, 'a']],
+			$pipes,
+		);
+		if (!is_resource($server)) {
+			unlink($serverLog);
+			self::markTestSkipped('The local HTTP fixture process could not start.');
+		}
+		fclose($pipes[0]);
+		try {
+			$ready = false;
+			for ($attempt = 0; $attempt < 100; $attempt++) {
+				$probe = @stream_socket_client('tcp://' . $address, $errno, $error, 0.05);
+				if (is_resource($probe)) {
+					fclose($probe);
+					$ready = true;
+					break;
+				}
+				usleep(10000);
+			}
+			if (!$ready) {
+				self::markTestSkipped('The local HTTP fixture did not become ready.');
+			}
+			$received = 0;
+			$declaredLength = null;
+			$curlError = null;
+			[$transport] = $this->transport(static function (string $url, array $options) use (&$received, &$declaredLength, &$curlError): IResponse {
+				$handle = curl_init($url);
+				$curl = $options['curl'];
+				// Emulate pre-8.4 cURL: it does not enforce MAXFILESIZE for
+				// unknown-length bodies. Only the progress guard can abort.
+				unset($curl[CURLOPT_MAXFILESIZE]);
+				curl_setopt_array($handle, $curl + [
+					CURLOPT_TIMEOUT => 5,
+					CURLOPT_PROXY => '',
+					CURLOPT_FOLLOWLOCATION => $options['allow_redirects'],
+					CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$declaredLength): int {
+						if (stripos($line, 'Content-Length:') === 0) {
+							$declaredLength = trim(substr($line, 15));
+						}
+						return strlen($line);
+					},
+					CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$received): int {
+						$received += strlen($chunk);
+						return strlen($chunk);
+					},
+				]);
+				try {
+					$result = curl_exec($handle);
+					$curlError = curl_errno($handle);
+					if ($result === false) {
+						throw new \RuntimeException('cURL error ' . $curlError);
+					}
+					return self::json('{}');
+				} finally {
+					curl_close($handle);
+				}
+			}, true);
+			$base = 'http://' . $address . '/v1';
+			$limit = 65_536;
+			try {
+				$transport->getJson($base . '/streamed-large', $base, [], 5.0, [], $limit);
+				self::fail('Expected the unknown-length transfer to abort.');
+			} catch (ApiExecutionException $e) {
+				self::assertSame('response_too_large', $e->getErrorCode());
+				self::assertSame(['limit_bytes' => $limit], $e->getDetails());
+				self::assertTrue($e->wasRequestSent());
+			}
+			self::assertNull($declaredLength, 'The fixture must not declare its body length.');
+			self::assertSame(CURLE_ABORTED_BY_CALLBACK, $curlError);
+			self::assertGreaterThan($limit, $received);
+			self::assertLessThanOrEqual($limit + 65_536, $received, 'Abort within one server chunk, long before the 2 MiB body.');
+		} finally {
+			proc_terminate($server);
+			proc_close($server);
+			unlink($serverLog);
+		}
 	}
 
 	public function testVendorJsonMediaTypesAreAccepted(): void {

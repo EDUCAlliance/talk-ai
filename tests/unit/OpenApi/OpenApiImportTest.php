@@ -118,16 +118,54 @@ final class OpenApiImportTest extends TestCase {
 		}
 	}
 
+	public function testDocumentByteLimitIsInclusive(): void {
+		$document = self::document();
+		$bytes = $document . str_repeat(' ', OpenApiDocumentLoader::MAX_BYTES - strlen($document));
+		self::assertSame(OpenApiDocumentLoader::MAX_BYTES, strlen($bytes));
+		self::assertSame('3.0.3', (new OpenApiDocumentLoader())->load($bytes)['version']);
+		self::assertImportError('document_too_large', $bytes . ' ');
+	}
+
+	public function testDocumentDepthLimitIsInclusive(): void {
+		// json_decode's stack budget includes the terminal scalar: root at
+		// level 1, nested objects at 2..63 and the scalar at level 64.
+		$nested = 0;
+		for ($depth = 2; $depth < OpenApiDocumentLoader::MAX_DEPTH; $depth++) {
+			$nested = ['child' => $nested];
+		}
+		self::assertSame('3.0.3', (new OpenApiDocumentLoader())->load(self::document(['x-depth' => $nested]))['version']);
+		self::assertImportError('document_too_deep', self::document(['x-depth' => ['child' => $nested]]));
+	}
+
+	public function testDocumentNodeLimitIsInclusive(): void {
+		// openapi, info, info.title, info.version, paths and x-nodes count
+		// as six values; every array member adds exactly one more node.
+		$nodes = array_fill(0, OpenApiDocumentLoader::MAX_NODES - 6, 0);
+		$loaded = (new OpenApiDocumentLoader())->load(self::document(['x-nodes' => $nodes]));
+		self::assertCount(OpenApiDocumentLoader::MAX_NODES - 6, $loaded['document']['x-nodes']);
+		$nodes[] = 0;
+		self::assertImportError('document_too_complex', self::document(['x-nodes' => $nodes]));
+	}
+
 	public function testReferenceExpansionIsBudgeted(): void {
 		$refs = new RefResolver(['components' => ['schemas' => ['S' => ['type' => 'string']]]]);
+		for ($i = 0; $i < RefResolver::MAX_RESOLUTIONS; $i++) {
+			$resolved = $refs->resolve(['$ref' => '#/components/schemas/S']);
+		}
+		self::assertSame(['type' => 'string'], $resolved);
 		try {
-			for ($i = 0; $i <= RefResolver::MAX_RESOLUTIONS; $i++) {
-				$refs->resolve(['$ref' => '#/components/schemas/S']);
-			}
+			$refs->resolve(['$ref' => '#/components/schemas/S']);
 			self::fail('Expected the reference budget to be exhausted');
 		} catch (OpenApiImportException $e) {
 			self::assertSame('document_too_complex', $e->getErrorCode());
+			self::assertSame(['limit_references' => RefResolver::MAX_RESOLUTIONS], $e->getDetails());
 		}
+	}
+
+	public function testFileReferencesAreRejectedWithoutReadingTheFile(): void {
+		$operation = self::compileFixture('file-reference-api.json')['operations']['GET /files'];
+		self::assertFalse($operation['supported']);
+		self::assertSame(['ref_external'], self::blockerCodes($operation));
 	}
 
 	public function testCompilesEveryOperationWithConcreteReasons(): void {
@@ -143,7 +181,60 @@ final class OpenApiImportTest extends TestCase {
 		self::assertSame(['security_unsupported'], self::blockerCodes($operations['GET /admin/export']));
 		self::assertSame(['security_unsupported'], self::blockerCodes($operations['GET /combined']));
 		self::assertSame('security_and_unsupported', $operations['GET /combined']['security']['alternatives'][0]['reason']);
-		self::assertContains('optional_parameter_not_offered', self::noteCodes($operations['GET /courses']));
+		self::assertFalse($operations['GET /optional-header']['supported']);
+		self::assertSame(['parameter_location_unsupported'], self::blockerCodes($operations['GET /optional-header']));
+		self::assertSame([], self::noteCodes($operations['GET /optional-header']));
+	}
+
+	/** @return iterable<string,array{string,bool}> */
+	public static function unsupportedParameterLocations(): iterable {
+		foreach (['header', 'cookie'] as $location) {
+			foreach ([false, true] as $required) {
+				yield $location . ($required ? ' required' : ' optional') => [$location, $required];
+			}
+		}
+	}
+
+	#[DataProvider('unsupportedParameterLocations')]
+	public function testHeaderAndCookieParametersAlwaysBlockTheOperation(string $location, bool $required): void {
+		$document = json_decode(Fixture::read('courses-api.json'), true, 64, JSON_THROW_ON_ERROR);
+		$document['paths']['/courses']['get']['parameters'][] = ['name' => 'trace', 'in' => $location, 'required' => $required, 'schema' => ['type' => 'string']];
+		$operations = (new OpenApiCompiler())->compile($document, '3.0.3')['operations'];
+		$operation = array_values(array_filter($operations, static fn (array $op): bool => $op['match_key'] === 'GET /courses'))[0];
+		self::assertFalse($operation['supported']);
+		self::assertSame(['parameter_location_unsupported'], self::blockerCodes($operation));
+		self::assertNotContains('optional_parameter_not_offered', self::noteCodes($operation));
+	}
+
+	/** @return iterable<string,array{array<string,mixed>}> */
+	public static function complexResponses(): iterable {
+		foreach (['oneOf', 'anyOf', 'allOf'] as $keyword) {
+			yield $keyword => [[$keyword => [['type' => 'object'], ['type' => 'array', 'items' => ['type' => 'object']]]]];
+		}
+		yield 'not' => [['not' => ['type' => 'string']]];
+		yield 'discriminator' => [['type' => 'object', 'discriminator' => ['propertyName' => 'kind']]];
+		yield 'nested reference' => [['type' => 'object', 'properties' => ['data' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/Complex']]]]];
+		yield 'additional properties' => [['type' => 'object', 'additionalProperties' => ['oneOf' => [['type' => 'string'], ['type' => 'integer']]]]];
+	}
+
+	#[DataProvider('complexResponses')]
+	public function testComplexResponseSchemasAreAdvisoryForSupportedRequests(array $schema): void {
+		$document = json_decode(self::document(['paths' => ['/read' => ['get' => [
+			'parameters' => [['name' => 'q', 'in' => 'query', 'schema' => ['type' => 'string', 'maxLength' => 40]]]],
+		]]]), true, 64, JSON_THROW_ON_ERROR);
+		$document['components']['schemas']['Complex'] = ['oneOf' => [['type' => 'string'], ['type' => 'object']]];
+		$complex = ['description' => 'complex', 'content' => ['application/json' => ['schema' => $schema]]];
+		foreach ([
+			['200' => $complex],
+			['200' => ['description' => 'simple', 'content' => ['application/json' => ['schema' => ['type' => 'object']]]], '201' => $complex],
+		] as $responses) {
+			$document['paths']['/read']['get']['responses'] = $responses;
+			$operation = (new OpenApiCompiler())->compile($document, '3.0.3')['operations'][0];
+			self::assertTrue($operation['supported']);
+			self::assertSame([], self::blockerCodes($operation));
+			self::assertSame(['response_schema_complex'], self::noteCodes($operation));
+			self::assertSame(40, $operation['input_schema']['properties']['query']['properties']['q']['maxLength']);
+		}
 	}
 
 	public function testSecurityIsInheritedOrReplacedAndAnonymousIsAnExplicitAlternative(): void {

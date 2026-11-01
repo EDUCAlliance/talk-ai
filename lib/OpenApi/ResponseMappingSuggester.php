@@ -93,6 +93,42 @@ final class ResponseMappingSuggester {
 		return $suggestion;
 	}
 
+	/**
+	 * Response schemas are documentation, not a complete validation contract.
+	 *
+	 * @param list<string> $stack References already being expanded
+	 */
+	public function usesComposition(mixed $schema, array $stack = []): bool {
+		try {
+			$schema = $this->refs->resolve($schema, $stack, $visited);
+		} catch (OpenApiImportException $e) {
+			if ($e->getErrorCode() === 'document_too_complex') {
+				throw $e;
+			}
+			return false;
+		}
+		if (!is_array($schema)) {
+			return false;
+		}
+		foreach (['oneOf', 'anyOf', 'allOf', 'not', 'discriminator'] as $keyword) {
+			if (array_key_exists($keyword, $schema)) {
+				return true;
+			}
+		}
+		$stack = array_merge($stack, $visited);
+		foreach (['items', 'additionalProperties'] as $keyword) {
+			if ($this->usesComposition($schema[$keyword] ?? null, $stack)) {
+				return true;
+			}
+		}
+		foreach (is_array($schema['properties'] ?? null) ? $schema['properties'] : [] as $property) {
+			if ($this->usesComposition($property, $stack)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public static function fieldKey(string $name): ?string {
 		$key = strtolower(preg_replace('/([a-z])([A-Z])/', '$1_$2', $name) ?? $name);
 		$key = trim(preg_replace('/[^a-z0-9]+/', '_', $key) ?? '', '_');
