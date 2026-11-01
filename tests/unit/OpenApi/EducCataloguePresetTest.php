@@ -8,6 +8,7 @@ require_once __DIR__ . '/Support/OpenApiHarness.php';
 
 use OCA\EducAI\Db\ApiConnection;
 use OCA\EducAI\Db\ApiSpecRevision;
+use OCA\EducAI\Db\CatalogueEmbeddingMapper;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\OpenApi\ApiConnectionException;
 use OCA\EducAI\OpenApi\ApiConnectionService;
@@ -16,12 +17,15 @@ use OCA\EducAI\OpenApi\CatalogueApiSource;
 use OCA\EducAI\OpenApi\OpenApiCompiler;
 use OCA\EducAI\OpenApi\OpenApiDocumentLoader;
 use OCA\EducAI\Service\CatalogueClient;
+use OCA\EducAI\Service\CatalogueEmbeddingService;
+use OCA\EducAI\Service\EmbeddingClient;
 use OCA\EducAI\Service\SettingsService;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\FakeResponse;
 use OCA\EducAI\Tests\Unit\OpenApi\Support\OpenApiHarness;
 use OCP\Http\Client\IClient;
 use OCP\Http\Client\IClientService;
 use OCP\Http\Client\IResponse;
+use OCP\IConfig;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -130,7 +134,7 @@ final class EducCataloguePresetTest extends TestCase {
 			self::assertSame(array_slice($legacyRequests, -count($sent)), array_map(self::requestKey(...), $sent), 'case ' . $index);
 		}
 		$this->harness->respondJson($current);
-		self::assertSame(['courses' => $current['courses'], 'more' => 2], $adapter->searchCourses());
+		self::assertSame(['courses' => $current['courses'], 'more' => 2, 'paging' => ['remaining' => 2, 'total' => 3]], $adapter->searchCourses());
 		self::assertSame([], $this->harness->responses);
 	}
 
@@ -139,7 +143,7 @@ final class EducCataloguePresetTest extends TestCase {
 		$adapter = $this->catalogueClient($this->harness->catalogueSource);
 		$large = ['courses' => [['id' => 1, 'title' => 'Large', 'description' => str_repeat('x', ApiHttpTransport::MAX_RESPONSE_BYTES)]], 'count' => 1];
 		$this->harness->respondJson($large);
-		self::assertSame(['courses' => $large['courses'], 'morePast' => 0], $adapter->getPastCourses([], 500, 0));
+		self::assertSame(['courses' => $large['courses'], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => 1]], $adapter->getPastCourses([], 500, 0));
 
 		$this->harness->responses[] = new FakeResponse(200, ['Content-Type' => 'application/json'], '"' . str_repeat('x', CatalogueApiSource::MAX_RESPONSE_BYTES) . '"');
 		$this->expectCatalogueFailure($adapter, 'response_too_large');
@@ -163,7 +167,7 @@ final class EducCataloguePresetTest extends TestCase {
 		$sent = count($this->harness->client->requests);
 		$this->harness->service->setEnabled($connectionId, false, OpenApiHarness::ADMIN);
 		$this->expectCatalogueFailure($adapter, 'connection_disabled');
-		self::assertTrue($adapter->isEnabled());
+		self::assertFalse($adapter->isEnabled());
 		$this->harness->service->setEnabled($connectionId, true, OpenApiHarness::ADMIN);
 		$this->harness->service->updateConnection($connectionId, ['base_url' => 'https://catalogue.example.org/api'], OpenApiHarness::ADMIN);
 		$this->expectCatalogueFailure($adapter, 'base_url_changed');
@@ -176,6 +180,93 @@ final class EducCataloguePresetTest extends TestCase {
 		self::assertSame('operation_revoked', $this->harness->catalogueSource->operationStatus($connectionId)[CatalogueApiSource::LIST_OPERATION]);
 	}
 
+	public function testOnlyAConnectionReleasedForEveryBotVisibilityCanServeTheCatalogue(): void {
+		$connectionId = $this->approvePreset();
+		$this->harness->catalogueSource->select(null);
+		$this->harness->service->updateConnection($connectionId, ['bot_visibilities' => ['personal', 'groups']], OpenApiHarness::ADMIN);
+
+		try {
+			$this->harness->catalogueSource->select($connectionId);
+			self::fail('A restricted connection must not become the catalogue source');
+		} catch (ApiConnectionException $e) {
+			self::assertSame('catalogue_source_unavailable', $e->getErrorCode());
+			self::assertSame('audience_not_instance_wide', $e->getDetails()['reason']);
+		}
+		self::assertSame('audience_not_instance_wide', $this->harness->catalogueSource->operationStatus($connectionId)[CatalogueApiSource::LIST_OPERATION]);
+
+		// Restricting a connection that already serves the catalogue stops it at once.
+		$this->harness->service->updateConnection($connectionId, ['bot_visibilities' => ApiConnection::BOT_VISIBILITIES], OpenApiHarness::ADMIN);
+		$this->harness->catalogueSource->select($connectionId);
+		$this->harness->service->updateConnection($connectionId, ['bot_visibilities' => ['personal', 'groups', 'teams']], OpenApiHarness::ADMIN);
+		$client = $this->catalogueClient($this->harness->catalogueSource);
+		self::assertFalse($client->isEnabled());
+		self::assertSame('audience_not_instance_wide', $client->sourceUnavailableReason());
+		$this->expectCatalogueFailure($client, 'audience_not_instance_wide');
+		self::assertSame([], $this->harness->client->requests);
+
+		$this->harness->service->updateConnection($connectionId, ['bot_visibilities' => ApiConnection::BOT_VISIBILITIES], OpenApiHarness::ADMIN);
+		self::assertTrue($client->isEnabled());
+		self::assertNull($client->sourceUnavailableReason());
+	}
+
+	public function testAnUnavailableSourceStopsSearchesAndRefreshesButKeepsTheIndex(): void {
+		$connectionId = $this->approvePreset();
+		$client = $this->catalogueClient($this->harness->catalogueSource);
+		$mapper = $this->createMock(CatalogueEmbeddingMapper::class);
+		$mapper->expects(self::never())->method('findByCourseIdAndPast');
+		$mapper->expects(self::never())->method('findAllCurrentByModel');
+		$mapper->expects(self::never())->method('deleteStale');
+		$mapper->expects(self::never())->method('upsert');
+		$embeddings = $this->createMock(EmbeddingClient::class);
+		$embeddings->expects(self::never())->method('embedQuery');
+		$embeddings->expects(self::never())->method('embedTexts');
+		$index = new CatalogueEmbeddingService($client, $mapper, $embeddings, $this->createMock(SettingsService::class), $this->createMock(LoggerInterface::class), $this->createMock(IConfig::class));
+		$active = $this->harness->service->activeRevision($this->harness->connections->findById($connectionId));
+		$listOperation = $this->harness->operationId($active, CatalogueApiSource::LIST_OPERATION);
+
+		foreach ([
+			'connection_disabled' => fn () => $this->harness->service->setEnabled($connectionId, false, OpenApiHarness::ADMIN),
+			'operation_revoked' => fn () => $this->harness->service->revokeOperation($active->getId(), $listOperation, OpenApiHarness::ADMIN),
+		] as $reason => $makeUnavailable) {
+			$makeUnavailable();
+			self::assertFalse($index->isEnabled(), $reason);
+			self::assertSame($reason, $index->sourceUnavailableReason());
+			self::assertSame('search_failed', $index->search('robotics')['error'] ?? null, $reason);
+			self::assertSame('search_failed', $index->searchPast('robotics')['error'] ?? null, $reason);
+			self::assertNull($index->getCourseFromEmbeddings(777, false), $reason);
+			self::assertFalse($index->reindex()['success'], $reason);
+			$this->harness->service->setEnabled($connectionId, true, OpenApiHarness::ADMIN);
+		}
+		self::assertSame([], $this->harness->client->requests);
+	}
+
+	public function testIncompleteApiSnapshotsNeverPruneTheIndex(): void {
+		$this->approvePreset();
+		$client = $this->catalogueClient($this->harness->catalogueSource);
+		$mapper = $this->createMock(CatalogueEmbeddingMapper::class);
+		$mapper->expects(self::never())->method('deleteStale');
+		$mapper->method('findAllCurrentByModel')->willReturn([]);
+		$mapper->method('findAllPastByModel')->willReturn([]);
+		$embeddings = $this->createMock(EmbeddingClient::class);
+		$embeddings->method('getActiveModel')->willReturn('synthetic');
+		$embeddings->method('embedTexts')->willReturnCallback(static fn (array $texts): array => array_fill(0, count($texts), [1.0, 0.0]));
+		$index = new CatalogueEmbeddingService($client, $mapper, $embeddings, $this->createMock(SettingsService::class), $this->createMock(LoggerInterface::class), $this->createMock(IConfig::class));
+
+		foreach ([
+			'no count' => [['courses' => []]],
+			'invalid count' => [['courses' => [], 'count' => 'invalid']],
+			'negative count' => [['courses' => [['id' => 1]], 'count' => -1]],
+			'repeated page' => [['courses' => [['id' => 42, 'title' => 'A']], 'count' => 2], ['courses' => [['id' => 42, 'title' => 'A']], 'count' => 2]],
+			'count changes' => [['courses' => [['id' => 1, 'title' => 'A']], 'count' => 2], ['courses' => [['id' => 2, 'title' => 'B']], 'count' => 3]],
+		] as $case => $pages) {
+			foreach ($pages as $page) {
+				$this->harness->respondJson($page);
+			}
+			self::assertFalse($index->reindex()['success'], $case);
+			self::assertSame([], $this->harness->responses, $case);
+		}
+	}
+
 	public function testSwitchingBackUsesTheLegacyEndpointWithoutTouchingTheConnection(): void {
 		$connectionId = $this->approvePreset();
 		$this->harness->catalogueSource->select(null);
@@ -185,7 +276,7 @@ final class EducCataloguePresetTest extends TestCase {
 		$client = $this->catalogueClient($this->harness->catalogueSource, $this->legacyClientService($queue, $requests), self::BASE);
 
 		self::assertFalse($client->usesApiConnection());
-		self::assertSame(['courses' => [], 'more' => 0], $client->searchCourses());
+		self::assertSame(['courses' => [], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => 0]], $client->searchCourses());
 		self::assertCount(1, $requests);
 		self::assertSame([], $this->harness->client->requests);
 		self::assertTrue($this->harness->connections->findById($connectionId)->isEnabled());

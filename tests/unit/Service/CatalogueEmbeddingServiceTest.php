@@ -62,14 +62,14 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 		$this->settingsService->expects($this->never())->method('updateCatalogueIndexStats');
 
 		$this->assertFalse($this->service->reindex()['success']);
-		$this->assertSame(['courses' => [], 'total' => 0], $this->service->search('physics'));
-		$this->assertSame(['courses' => [], 'total' => 0], $this->service->searchPast('physics'));
+		$this->assertSame(['courses' => [], 'total' => 0, 'error' => 'search_failed'], $this->service->search('physics'));
+		$this->assertSame(['courses' => [], 'total' => 0, 'error' => 'search_failed'], $this->service->searchPast('physics'));
 		$this->assertNull($this->service->getCourseFromEmbeddings(42, false));
 	}
 
 	public function testSuccessfulIndexPreservesCourseIdsAndUsesOneModelForBothPartitions(): void {
-		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42, 'title' => 'Physics']], 'more' => 0]);
-		$this->client->method('getPastCourses')->willReturn(['courses' => [['id' => 81, 'title' => 'History']], 'morePast' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42, 'title' => 'Physics']], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [['id' => 81, 'title' => 'History']], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->embeddings->expects($this->once())->method('getActiveModel')->willReturn('embedding-v2');
 		$this->embeddings->expects($this->exactly(2))->method('embedTexts')
 			->with($this->isType('array'), 'embedding-v2')->willReturn([[1.0, 0.0]]);
@@ -94,7 +94,7 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 	}
 
 	public function testFailedArchivedFetchNeverDeletesExistingCurrentOrArchivedRecords(): void {
-		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42, 'title' => 'Physics']], 'more' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42, 'title' => 'Physics']], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->client->method('getPastCourses')->willThrowException(new \RuntimeException('private upstream payload'));
 		$this->embeddings->expects($this->never())->method('embedTexts');
 		$this->mapper->expects($this->never())->method('upsert');
@@ -109,8 +109,8 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 
 	public function testProviderPauseStopsTheRunInsteadOfSendingTheRemainingBatches(): void {
 		$courses = array_map(static fn (int $id): array => ['id' => $id, 'title' => 'Course ' . $id], range(1, 25));
-		$this->client->method('searchCourses')->willReturn(['courses' => $courses, 'more' => 0]);
-		$this->client->method('getPastCourses')->willReturn(['courses' => [['id' => 99]], 'morePast' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => $courses, 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [['id' => 99]], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
 		$this->embeddings->expects($this->once())->method('embedTexts')
 			->willThrowException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(120));
@@ -124,9 +124,40 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 		$this->assertStringContainsString('pause of 120 seconds', $this->status['last_error']);
 	}
 
+	public function testAConsistentPagedSnapshotStillRemovesDeletedCourses(): void {
+		$this->client->method('searchCourses')->willReturnCallback(static fn (?string $query, array $filters, int $limit, int $offset): array => $offset === 0
+			? ['courses' => [['id' => 1, 'title' => 'A'], ['id' => 2, 'title' => 'B']], 'more' => 1, 'paging' => ['remaining' => 1, 'total' => 3]]
+			: ['courses' => [['id' => 3, 'title' => 'C']], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => 3]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => 0]]);
+		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
+		$this->embeddings->method('embedTexts')->willReturnCallback(static fn (array $texts): array => array_fill(0, count($texts), [1.0, 0.0]));
+		$this->mapper->expects($this->once())->method('deleteStale')->with([1, 2, 3], []);
+
+		$this->assertTrue($this->service->reindex()['success']);
+	}
+
+	public function testASnapshotThatMissesPartOfItsStatedTotalKeepsTheIndex(): void {
+		foreach ([
+			'fewer than stated' => ['courses' => [['id' => 1], ['id' => 2]], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => 3]],
+			'unknown remainder' => ['courses' => [['id' => 1]], 'more' => 0, 'paging' => ['remaining' => null, 'total' => null]],
+		] as $case => $page) {
+			$client = $this->createMock(CatalogueClient::class);
+			$client->method('isEnabled')->willReturn(true);
+			$client->method('searchCourses')->willReturn($page);
+			$client->expects($this->never())->method('getPastCourses');
+			$mapper = $this->createMock(CatalogueEmbeddingMapper::class);
+			$mapper->expects($this->never())->method('deleteStale');
+			$mapper->expects($this->never())->method('upsert');
+			$service = new CatalogueEmbeddingService($client, $mapper, $this->embeddings, $this->settingsService, $this->createMock(LoggerInterface::class), $this->config);
+
+			$this->assertFalse($service->reindex()['success'], $case);
+			$this->assertSame('failed', $this->status['state'], $case);
+		}
+	}
+
 	public function testIncompleteEmbeddingBatchRetainsPreviousIndexAndSuccessfulTimestamp(): void {
-		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42], ['id' => 43]], 'more' => 0]);
-		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42], ['id' => 43]], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
 		$this->embeddings->method('embedTexts')->willReturn([[1.0, 0.0]]);
 		$this->mapper->expects($this->never())->method('upsert');
@@ -140,8 +171,8 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 	}
 
 	public function testDisablingDuringAnEmbeddingRequestPreventsIndexWritesAndCleanup(): void {
-		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42]], 'more' => 0]);
-		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 42]], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
 		$this->embeddings->method('embedTexts')->willReturnCallback(function (): array {
 			$this->enabled = false;
@@ -158,7 +189,7 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 	public function testPaginationLimitCannotPruneCoursesBeyondTheDownloadedSnapshot(): void {
 		$this->client->expects($this->exactly(10))->method('searchCourses')
 			->willReturnCallback(static fn (?string $query, array $filters, int $limit, int $offset): array => [
-				'courses' => [['id' => $offset + 1]], 'more' => 1,
+				'courses' => [['id' => $offset + 1]], 'more' => 1, 'paging' => ['remaining' => 1, 'total' => null],
 			]);
 		$this->client->expects($this->never())->method('getPastCourses');
 		$this->embeddings->expects($this->never())->method('embedTexts');
@@ -220,8 +251,8 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 
 	public function testRunAfterAPauseKeepsUnchangedCoursesAndEmbedsOnlyTheRest(): void {
 		$courses = array_map(static fn (int $id): array => ['id' => $id, 'title' => 'Course ' . $id], range(1, 12));
-		$this->client->method('searchCourses')->willReturn(['courses' => $courses, 'more' => 0]);
-		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => $courses, 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
 		$text = new \ReflectionMethod($this->service, 'buildSearchableText');
 		$stored = [];
@@ -255,8 +286,8 @@ class CatalogueEmbeddingServiceTest extends TestCase {
 	}
 
 	public function testRequestedPauseIsKeptAndTheRefreshWaitsForIt(): void {
-		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 1, 'title' => 'A']], 'more' => 0]);
-		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0]);
+		$this->client->method('searchCourses')->willReturn(['courses' => [['id' => 1, 'title' => 'A']], 'more' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
+		$this->client->method('getPastCourses')->willReturn(['courses' => [], 'morePast' => 0, 'paging' => ['remaining' => 0, 'total' => null]]);
 		$this->embeddings->method('getActiveModel')->willReturn('embedding-v2');
 		$this->embeddings->method('embedTexts')->willThrowException(new \OCA\EducAI\Exception\EmbeddingRateLimitedException(86400));
 		$this->mapper->method('count')->willReturn(5);

@@ -44,10 +44,10 @@
 				{{ t('educai', 'The selected API connection no longer exists. The catalogue refresh fails and keeps the existing index until you choose another source.') }}
 			</p>
 			<p v-else-if="currentCandidate && !usable(currentCandidate)" class="ta-note ta-note--warn" role="status">
-				{{ t('educai', 'The selected API connection cannot serve the course list right now. The catalogue refresh fails and keeps the existing index until the connection works again or you switch back.') }}
+				{{ t('educai', 'The selected API connection cannot serve the course list right now. Catalogue searches and refreshes are paused and the existing index is kept until the connection works again or you switch back.') }}
 			</p>
 			<p v-if="choice !== null" class="ta-note ta-note--warn" role="note">
-				{{ t('educai', 'Course data from an API connection reaches every bot that uses the catalogue tools, independent of the bot and group restrictions of that connection.') }}
+				{{ t('educai', 'Course data reaches every bot that uses the catalogue tools. Only an API connection released for personal, group, team and global bots can serve the catalogue.') }}
 			</p>
 			<p v-if="error" class="ta-note ta-note--error" role="alert">
 				{{ error }}

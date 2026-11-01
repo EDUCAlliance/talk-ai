@@ -459,10 +459,10 @@ test('rendered catalogue source switch only offers ready connections and saves t
 	assert.match(container.textContent, /Version check \(optional\): Not offered\./)
 	assert.match(container.textContent, /Course list: Approve a document revision/)
 	assert.equal(button(container, 'Use this source').disabled, true)
-	assert.doesNotMatch(container.textContent, /independent of the bot and group restrictions/)
+	assert.doesNotMatch(container.textContent, /Only an API connection released for personal, group, team and global bots/)
 
 	await change(radios[1], true)
-	assert.match(container.textContent, /independent of the bot and group restrictions/)
+	assert.match(container.textContent, /Only an API connection released for personal, group, team and global bots/)
 	await click(button(container, 'Use this source'))
 	assert.deepEqual(calls.at(-1), ['PUT', api.CATALOGUE_SOURCE_URL, { connectionId: 3 }])
 	assert.match(successes.at(-1), /through the API connection/)
@@ -491,5 +491,21 @@ test('rendered catalogue source switch warns when the selected connection stoppe
 	assert.equal(radios[1].checked, true)
 	assert.equal(radios[1].disabled, false, 'The current choice stays visible even when it is unusable')
 	assert.match(container.textContent, /Course list: The API connection is disabled\./)
-	assert.match(container.textContent, /keeps the existing index until the connection works again/)
+	assert.match(container.textContent, /existing index is kept until the connection works again/)
+})
+
+test('rendered catalogue source switch refuses connections not released for every bot visibility', async ctx => {
+	const state = {
+		connection_id: null,
+		selected_found: true,
+		candidates: [{ id: 4, name: 'Restricted catalogue', enabled: true, operations: { 'GET /course/list': 'audience_not_instance_wide', 'GET /version': 'audience_not_instance_wide' } }],
+	}
+	const axios = { get: async () => ({ data: state }), put: async () => ({ data: state }) }
+	const component = compileSfc('components/admin/CatalogueSourceSwitch', { ...api, t, axios, generateUrl: url => url, showSuccess: () => {} })
+	const { container } = mountDom(ctx, component)
+	await settle()
+
+	const radios = [...container.querySelectorAll('input[name="catalogue-source"]')]
+	assert.equal(radios[1].disabled, true, 'A connection limited to some bot visibilities cannot serve the catalogue')
+	assert.match(container.textContent, /Course list: Not released for every bot visibility\./)
 })

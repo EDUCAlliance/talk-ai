@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\EducAI\OpenApi;
 
 use OCA\EducAI\AppInfo\Application;
+use OCA\EducAI\Db\ApiConnection;
 use OCP\IConfig;
 
 /**
@@ -40,6 +41,32 @@ class CatalogueApiSource {
 	}
 
 	/**
+	 * Catalogue data reaches every bot that uses the catalogue tools, so only a
+	 * connection released for all bot visibilities may serve it.
+	 */
+	public static function servesEveryAudience(ApiConnection $connection): bool {
+		return array_diff(ApiConnection::BOT_VISIBILITIES, $connection->getBotVisibilityList()) === [];
+	}
+
+	/**
+	 * Why the selected connection cannot serve the course list right now; null
+	 * when it can or when no connection is selected. Checked on every call, so
+	 * disabling, revoking or restricting the connection stops the catalogue at once.
+	 */
+	public function unavailableReason(): ?string {
+		$connectionId = $this->selectedConnectionId();
+		if ($connectionId === null) {
+			return null;
+		}
+		try {
+			$this->resolve($connectionId, self::LIST_OPERATION);
+			return null;
+		} catch (ApiExecutionException $e) {
+			return self::reason($e);
+		}
+	}
+
+	/**
 	 * Selecting requires an available list operation; switching back to the
 	 * legacy endpoint (null) is always possible. Neither triggers a reindex.
 	 *
@@ -69,11 +96,15 @@ class CatalogueApiSource {
 				$this->resolve($connectionId, $matchKey);
 				$status[$matchKey] = null;
 			} catch (ApiExecutionException $e) {
-				$details = $e->getDetails();
-				$status[$matchKey] = is_string($details['reason'] ?? null) ? $details['reason'] : $e->getErrorCode();
+				$status[$matchKey] = self::reason($e);
 			}
 		}
 		return $status;
+	}
+
+	private static function reason(ApiExecutionException $e): string {
+		$reason = $e->getDetails()['reason'] ?? null;
+		return is_string($reason) ? $reason : $e->getErrorCode();
 	}
 
 	/**
@@ -108,6 +139,9 @@ class CatalogueApiSource {
 			$connection = $this->connectionService->getConnection($connectionId);
 		} catch (ApiConnectionException) {
 			throw new ApiExecutionException('tool_not_available', 'The catalogue API connection is not available.', ['reason' => 'connection_not_found']);
+		}
+		if (!self::servesEveryAudience($connection)) {
+			throw new ApiExecutionException('tool_not_available', 'The catalogue API connection is not released for every bot visibility.', ['reason' => 'audience_not_instance_wide']);
 		}
 		$revision = $this->connectionService->activeRevision($connection);
 		foreach ($revision?->getManifestArray()['operations'] ?? [] as $operation) {

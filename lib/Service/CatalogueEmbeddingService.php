@@ -48,6 +48,11 @@ class CatalogueEmbeddingService {
 		return $this->catalogueClient->isEnabled();
 	}
 
+	/** Why the selected API connection cannot serve the catalogue right now; null when it can or none is selected. */
+	public function sourceUnavailableReason(): ?string {
+		return $this->catalogueClient->sourceUnavailableReason();
+	}
+
 	/**
 	 * Reindex all courses from the catalogue (both current and past)
 	 *
@@ -233,8 +238,9 @@ class CatalogueEmbeddingService {
 	 *         error is "rate_limited" or "search_failed": the search did not run, which is not "no match"
 	 */
 	private function doSearch(string $query, int $limit, float $minScore, bool $isPast): array {
+		// An unavailable source is not "no match": the stored index stays unread.
 		if (!$this->isEnabled()) {
-			return ['courses' => [], 'total' => 0];
+			return ['courses' => [], 'total' => 0, 'error' => 'search_failed'];
 		}
 
 		$query = trim($query);
@@ -363,6 +369,7 @@ class CatalogueEmbeddingService {
 		$offset = 0;
 		$limit = 500;
 		$maxIterations = 10;
+		$total = null;
 
 		for ($i = 0; $i < $maxIterations; $i++) {
 			$this->requireEnabled();
@@ -370,8 +377,20 @@ class CatalogueEmbeddingService {
 				? $this->catalogueClient->getPastCourses([], $limit, $offset)
 				: $this->catalogueClient->searchCourses(null, [], $limit, $offset);
 			$courses = $result['courses'] ?? [];
-			$more = $result[$isPast ? 'morePast' : 'more'] ?? 0;
-			if ($courses === [] && $more > 0) {
+			// Without a stated remaining count or total, a page could be followed by
+			// more courses; treating it as the end would delete their records.
+			$remaining = $result['paging']['remaining'] ?? null;
+			if (!is_int($remaining)) {
+				throw new Exception('The catalogue did not state how many courses there are; previous records were retained');
+			}
+			$pageTotal = $result['paging']['total'] ?? null;
+			if (is_int($pageTotal)) {
+				if ($total !== null && $pageTotal !== $total) {
+					throw new Exception('The catalogue changed its course count during the refresh; previous records were retained');
+				}
+				$total = $pageTotal;
+			}
+			if ($courses === [] && $remaining > 0) {
 				throw new Exception('Catalogue pagination did not return the remaining courses');
 			}
 
@@ -380,11 +399,18 @@ class CatalogueEmbeddingService {
 					throw new Exception('Catalogue returned an invalid course ID');
 				}
 				$course['id'] = (int)$course['id'];
+				// A course seen twice means the pages overlap, so others may be missing.
+				if (isset($allCourses[$course['id']])) {
+					throw new Exception('The catalogue returned course ' . $course['id'] . ' twice; previous records were retained');
+				}
 				$allCourses[$course['id']] = $course;
 			}
 			$offset += count($courses);
 
-			if ($more <= 0) {
+			if ($remaining <= 0) {
+				if ($total !== null && count($allCourses) !== $total) {
+					throw new Exception('The catalogue returned ' . count($allCourses) . ' of ' . $total . ' courses; previous records were retained');
+				}
 				return array_values($allCourses);
 			}
 		}

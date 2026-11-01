@@ -66,6 +66,7 @@ const CODE_TEXTS = () => ({
 	preset_invalid: t('educai', 'The preset shipped with the app is damaged. Reinstall the app.'),
 	catalogue_source_unavailable: t('educai', 'The connection cannot serve the course list yet: approve its course list operation and enable the connection first.'),
 	catalogue_source_in_use: t('educai', 'The course catalogue reads through this connection. Switch the catalogue source first.'),
+	audience_not_instance_wide: t('educai', 'Not released for every bot visibility. Allow personal, group, team and global bots for this connection first.'),
 	operation_missing: t('educai', 'The approved document does not contain this operation.'),
 	operation_removed: t('educai', 'The operation was removed from the document.'),
 	// Import

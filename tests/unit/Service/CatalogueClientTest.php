@@ -28,7 +28,7 @@ class CatalogueClientTest extends TestCase {
 		$this->assertFalse($catalogue->isEnabled());
 		$this->assertNull($catalogue->getVersion());
 		$this->assertFalse($catalogue->testConnection()['success']);
-		foreach ([['searchCourses', []], ['getPastCourses', []], ['getFilterOptions', []], ['getCourseById', [42]]] as [$method, $args]) {
+		foreach ([['searchCourses', []], ['getPastCourses', []], ['getCourseById', [42]]] as [$method, $args]) {
 			try {
 				$catalogue->$method(...$args);
 				$this->fail('Disabled method must not reach the API: ' . $method);
@@ -57,7 +57,7 @@ class CatalogueClientTest extends TestCase {
 		$catalogue = new CatalogueClient($clientService, $settingsService, $this->createMock(LoggerInterface::class));
 
 		$this->assertTrue($catalogue->isEnabled());
-		$this->assertSame(['courses' => [['id' => 42, 'title' => 'Physics']], 'more' => 2], $catalogue->searchCourses());
+		$this->assertSame(['courses' => [['id' => 42, 'title' => 'Physics']], 'more' => 2, 'paging' => ['remaining' => 2, 'total' => 3]], $catalogue->searchCourses());
 		$this->assertTrue($settings->getCatalogueEnabled());
 		$this->assertSame('https://catalogue.example/api/', $settings->getCatalogueApiEndpoint());
 	}

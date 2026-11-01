@@ -69,8 +69,9 @@ class EmbeddingAdminService {
 		$stats['enabled'] = $enabled;
 		$stats['queued'] = $enabled && $queued;
 		$stats['needs_reindex'] = $stats['needs_reindex'] || $this->configuration->isRequired('catalogue');
+		$stats['source_unavailable_reason'] = $enabled ? null : $this->catalogue->sourceUnavailableReason();
 		if (!$enabled) {
-			$stats['state'] = 'disabled';
+			$stats['state'] = $stats['source_unavailable_reason'] !== null ? 'source_unavailable' : 'disabled';
 		} elseif ($queued && ($stats['state'] ?? '') !== 'running') {
 			$stats['state'] = 'queued';
 		}

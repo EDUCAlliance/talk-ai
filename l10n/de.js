@@ -8,8 +8,8 @@ OC.L10N.register(
     "API connection \"{name}\"" : "API-Verbindung „{name}“",
     "To read through a reviewed API connection instead, add the EDUC course catalogue preset under Capabilities → API connections, approve it and enable it." : "Um stattdessen über eine geprüfte API-Verbindung zu lesen, füge unter Funktionen → API-Verbindungen die Vorlage für den EDUC-Kurskatalog hinzu, gib sie frei und aktiviere sie.",
     "The selected API connection no longer exists. The catalogue refresh fails and keeps the existing index until you choose another source." : "Die gewählte API-Verbindung existiert nicht mehr. Die Katalogaktualisierung schlägt fehl und behält den bestehenden Index, bis du eine andere Quelle wählst.",
-    "The selected API connection cannot serve the course list right now. The catalogue refresh fails and keeps the existing index until the connection works again or you switch back." : "Die gewählte API-Verbindung kann die Kursliste gerade nicht liefern. Die Katalogaktualisierung schlägt fehl und behält den bestehenden Index, bis die Verbindung wieder funktioniert oder du zurückwechselst.",
-    "Course data from an API connection reaches every bot that uses the catalogue tools, independent of the bot and group restrictions of that connection." : "Kursdaten aus einer API-Verbindung erreichen jeden Bot, der die Katalog-Werkzeuge nutzt – unabhängig von den Bot- und Gruppenbeschränkungen dieser Verbindung.",
+    "The selected API connection cannot serve the course list right now. Catalogue searches and refreshes are paused and the existing index is kept until the connection works again or you switch back." : "Die gewählte API-Verbindung kann die Kursliste gerade nicht liefern. Katalogsuche und -aktualisierung pausieren, der bestehende Index bleibt erhalten, bis die Verbindung wieder funktioniert oder du zurückwechselst.",
+    "Course data reaches every bot that uses the catalogue tools. Only an API connection released for personal, group, team and global bots can serve the catalogue." : "Kursdaten erreichen jeden Bot, der die Katalog-Werkzeuge nutzt. Nur eine API-Verbindung, die für persönliche, Gruppen-, Team- und globale Bots freigegeben ist, kann den Katalog bedienen.",
     "Switching…" : "Wird umgestellt…",
     "Use this source" : "Diese Quelle verwenden",
     "Applies immediately and separately from the settings above. The existing index is kept; the next refresh reads from the new source." : "Gilt sofort und unabhängig von den Einstellungen oben. Der bestehende Index bleibt erhalten; die nächste Aktualisierung liest aus der neuen Quelle.",
@@ -1643,6 +1643,9 @@ OC.L10N.register(
     "The source is reachable again and is indexed after a pause of the embedding service. Until then the bot does not use it." : "Die Quelle ist wieder erreichbar und wird nach einer Pause des Embedding-Dienstes indiziert. Bis dahin verwendet der Bot sie nicht.",
     "Indexing was interrupted, for example by a server restart. The previous index is kept; start it again with Reindex." : "Die Indizierung wurde unterbrochen, zum Beispiel durch einen Serverneustart. Der bisherige Index bleibt erhalten; starte sie mit „Neu indizieren“ erneut.",
     "The chunk overlap must be smaller than the chunk size." : "Die Chunk-Überlappung muss kleiner als die Chunk-Größe sein.",
-    "Waiting for the embedding service…" : "Wartet auf den Embedding-Dienst…"
+    "Waiting for the embedding service…" : "Wartet auf den Embedding-Dienst…",
+    "Not released for every bot visibility. Allow personal, group, team and global bots for this connection first." : "Nicht für jede Bot-Sichtbarkeit freigegeben. Erlaube für diese Verbindung zuerst persönliche, Gruppen-, Team- und globale Bots.",
+    "Source unavailable" : "Quelle nicht verfügbar",
+    "The course catalogue cannot use its API connection. Searches and refreshes are paused; the index is kept." : "Der Kurskatalog kann seine API-Verbindung nicht nutzen. Suche und Aktualisierung pausieren; der Index bleibt erhalten."
 },
 "nplurals=2; plural=(n != 1);");

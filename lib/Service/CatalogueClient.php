@@ -14,7 +14,7 @@ use Psr\Log\LoggerInterface;
  * Client for the EDUC Alliance Course Catalogue API
  *
  * This service provides methods to search courses, get course details,
- * retrieve filter options, and fetch announcements from the catalogue.
+ * and read the current or archived course lists through the selected source.
  */
 class CatalogueClient {
 	private IClientService $clientService;
@@ -39,8 +39,37 @@ class CatalogueClient {
 	 */
 	public function isEnabled(): bool {
 		$settings = $this->settingsService->getSettings();
-		return (bool)$settings->getCatalogueEnabled()
-			&& ($this->usesApiConnection() || trim($settings->getCatalogueApiEndpoint() ?? '') !== '');
+		if (!(bool)$settings->getCatalogueEnabled()) {
+			return false;
+		}
+		// A selected API connection serves only while it can: disabling, revoking or
+		// restricting it stops searches and refreshes. The index is kept for its return.
+		if ($this->apiSource !== null && $this->apiSource->isSelected()) {
+			return $this->apiSource->unavailableReason() === null;
+		}
+		return trim($settings->getCatalogueApiEndpoint() ?? '') !== '';
+	}
+
+	/** @throws Exception Naming the reason when the selected API connection cannot be used */
+	private function assertEnabled(): void {
+		if ($this->isEnabled()) {
+			return;
+		}
+		$reason = $this->sourceUnavailableReason();
+		throw new Exception($reason === null
+			? 'Course Catalogue integration is not enabled'
+			: 'The course catalogue source cannot be used right now [' . $reason . ']');
+	}
+
+	/**
+	 * Why the selected API connection cannot serve the switched-on catalogue right
+	 * now; null when it can, when none is selected or when the catalogue is off.
+	 */
+	public function sourceUnavailableReason(): ?string {
+		if (!(bool)$this->settingsService->getSettings()->getCatalogueEnabled()) {
+			return null;
+		}
+		return $this->apiSource?->unavailableReason();
 	}
 
 	/** Whether catalogue reads go through an approved API connection instead of the endpoint. */
@@ -64,7 +93,7 @@ class CatalogueClient {
 	 * @param array $filters Optional filters (learning_type_id, discipline_id, target_group, etc.)
 	 * @param int $limit Number of courses to return
 	 * @param int $offset Pagination offset
-	 * @return array{courses: array, more: int}
+	 * @return array{courses: array, more: int, paging: array{remaining: ?int, total: ?int}}
 	 * @throws Exception
 	 */
 	public function searchCourses(
@@ -73,9 +102,7 @@ class CatalogueClient {
 		int $limit = 20,
 		int $offset = 0,
 	): array {
-		if (!$this->isEnabled()) {
-			throw new Exception('Course Catalogue integration is not enabled');
-		}
+		$this->assertEnabled();
 
 		$params = [
 			'state' => 'OPEN',
@@ -125,11 +152,12 @@ class CatalogueClient {
 				throw new Exception('Catalogue API response is missing its courses list');
 			}
 			$courses = $data['courses'];
-			$more = $this->extractRemainingCount($data, $courses, $offset, 'more');
+			$paging = $this->paging($data, $courses, $offset, 'more');
 
 			return [
 				'courses' => $courses,
-				'more' => $more,
+				'more' => $paging['remaining'] ?? 0,
+				'paging' => $paging,
 			];
 		} catch (Exception $e) {
 			$this->logger->error('Catalogue API search failed', [
@@ -149,9 +177,7 @@ class CatalogueClient {
 	 * @throws Exception
 	 */
 	public function getCourseById(int $courseId, bool $isPast = false): ?array {
-		if (!$this->isEnabled()) {
-			throw new Exception('Course Catalogue integration is not enabled');
-		}
+		$this->assertEnabled();
 
 		$state = $isPast ? 'CLOSED' : 'OPEN';
 
@@ -161,9 +187,7 @@ class CatalogueClient {
 			$maxIterations = 10;
 
 			for ($i = 0; $i < $maxIterations; $i++) {
-				if (!$this->isEnabled()) {
-					throw new Exception('Course Catalogue integration is not enabled');
-				}
+				$this->assertEnabled();
 				$data = $this->fetch('/course/list', [
 					'state' => $state,
 					// Keep id for forward compatibility if API starts filtering by id.
@@ -187,7 +211,7 @@ class CatalogueClient {
 					break;
 				}
 
-				$remaining = $this->extractRemainingCount($data, $courses, $offset, $isPast ? 'morePast' : 'more');
+				$remaining = $this->paging($data, $courses, $offset, $isPast ? 'morePast' : 'more')['remaining'] ?? 0;
 				if ($remaining <= 0) {
 					break;
 				}
@@ -208,46 +232,16 @@ class CatalogueClient {
 	}
 
 	/**
-	 * Get available filter options
-	 *
-	 * @return array Filter values including learning types, disciplines, etc.
-	 * @throws Exception
-	 */
-	public function getFilterOptions(): array {
-		if (!$this->isEnabled()) {
-			throw new Exception('Course Catalogue integration is not enabled');
-		}
-
-		try {
-			return $this->fetch('/filters', [], 30);
-		} catch (Exception $e) {
-			$this->logger->error('Catalogue API filters failed', [
-				'url' => $this->target('/filters'),
-				'error' => $e->getMessage(),
-			]);
-			throw new Exception('Failed to get filter options: ' . $e->getMessage());
-		}
-	}
-
-	/**
-	 * Get current announcements
-	 *
-	 * @return array List of announcements
-	 * @throws Exception
-	 */
-	/**
 	 * Get past courses
 	 *
 	 * @param array $filters Optional filters
 	 * @param int $limit Number of courses to return
 	 * @param int $offset Pagination offset
-	 * @return array{courses: array, morePast: int}
+	 * @return array{courses: array, morePast: int, paging: array{remaining: ?int, total: ?int}}
 	 * @throws Exception
 	 */
 	public function getPastCourses(array $filters = [], int $limit = 20, int $offset = 0): array {
-		if (!$this->isEnabled()) {
-			throw new Exception('Course Catalogue integration is not enabled');
-		}
+		$this->assertEnabled();
 
 		$params = [
 			'state' => 'CLOSED',
@@ -274,11 +268,12 @@ class CatalogueClient {
 				throw new Exception('Catalogue API response is missing its courses list');
 			}
 			$courses = $data['courses'];
-			$morePast = $this->extractRemainingCount($data, $courses, $offset, 'morePast');
+			$paging = $this->paging($data, $courses, $offset, 'morePast');
 
 			return [
 				'courses' => $courses,
-				'morePast' => $morePast,
+				'morePast' => $paging['remaining'] ?? 0,
+				'paging' => $paging,
 			];
 		} catch (Exception $e) {
 			$this->logger->error('Catalogue API past courses failed', [
@@ -290,21 +285,34 @@ class CatalogueClient {
 	}
 
 	/**
-	 * Support both legacy ("more"/"morePast") and new ("count") pagination responses.
+	 * Courses after this page, from the legacy remaining count ("more"/"morePast")
+	 * or the total ("count"). Both null when the response states neither as a
+	 * non-negative whole number: the page may then not be the last one.
 	 *
 	 * @param array<string,mixed> $data
 	 * @param array<int,mixed> $courses
+	 * @return array{remaining: ?int, total: ?int}
 	 */
-	private function extractRemainingCount(array $data, array $courses, int $offset, string $legacyKey): int {
-		if (isset($data[$legacyKey]) && is_numeric($data[$legacyKey])) {
-			return max(0, (int)$data[$legacyKey]);
+	private function paging(array $data, array $courses, int $offset, string $legacyKey): array {
+		$remaining = self::wholeNumber($data[$legacyKey] ?? null);
+		if ($remaining !== null) {
+			return ['remaining' => $remaining, 'total' => null];
 		}
-
-		if (isset($data['count']) && is_numeric($data['count'])) {
-			return max(0, (int)$data['count'] - ($offset + count($courses)));
+		$total = self::wholeNumber($data['count'] ?? null);
+		if ($total !== null) {
+			return ['remaining' => max(0, $total - ($offset + count($courses))), 'total' => $total];
 		}
+		return ['remaining' => null, 'total' => null];
+	}
 
-		return 0;
+	private static function wholeNumber(mixed $value): ?int {
+		if (is_int($value)) {
+			return $value >= 0 ? $value : null;
+		}
+		if (is_float($value) && $value >= 0 && $value <= 9007199254740991 && floor($value) === $value) {
+			return (int)$value;
+		}
+		return is_string($value) && preg_match('/^(0|[1-9][0-9]{0,15})$/D', $value) === 1 ? (int)$value : null;
 	}
 
 	/**

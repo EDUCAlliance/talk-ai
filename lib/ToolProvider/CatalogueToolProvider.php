@@ -145,8 +145,11 @@ class CatalogueToolProvider implements IToolProvider {
 	public function executeTool(string $toolName, array $arguments, array $config = []): array {
 		// A saved bot assignment must not bypass a subsequently disabled integration.
 		if (!$this->catalogueEmbeddingService->isEnabled()) {
+			$text = $this->catalogueEmbeddingService->sourceUnavailableReason() === null
+				? 'Catalogue integration is not enabled.'
+				: 'The course catalogue is unavailable right now because its data source cannot be used. Tell the user that course data cannot be retrieved at the moment.';
 			return [
-				'content' => [['type' => 'text', 'text' => 'Catalogue integration is not enabled.']],
+				'content' => [['type' => 'text', 'text' => $text]],
 				'isError' => true,
 			];
 		}

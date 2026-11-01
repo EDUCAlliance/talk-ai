@@ -161,6 +161,14 @@ export function deriveOverview({
 			action: { tab: 'knowledge', target: 'educai-admin-index', label: t('educai', 'Open index') },
 		})
 	}
+	if (saved.catalogueEnabled && embedding?.catalogue?.state === 'source_unavailable') {
+		attention.push({
+			id: 'catalogue-source',
+			tone: 'warn',
+			text: t('educai', 'The course catalogue cannot use its API connection. Searches and refreshes are paused; the index is kept.'),
+			action: { tab: 'knowledge', target: 'educai-admin-catalogue', label: t('educai', 'Open catalogue') },
+		})
+	}
 	if (saved.catalogueEnabled && embedding?.catalogue?.last_error) {
 		attention.push({
 			id: 'catalogue-error',
