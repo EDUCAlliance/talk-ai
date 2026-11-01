@@ -654,6 +654,36 @@ class BotServiceTest extends TestCase {
 		$this->assertSame('Owner User', $result[0]['owner_name']);
 	}
 
+	public function testPendingApiToolsOfAPublishedBotWaitForApprovalEvenForOwnerAndTester(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setApprovalStatus('pending');
+		$bot->setTestingEnabledBy('reviewer');
+		$bot->setPendingChangesArray([
+			'tools' => [
+				['is_builtin' => true, 'builtin_name' => 'api_3_9'],
+				['is_builtin' => true, 'builtin_name' => 'api_3_4'],
+				['is_builtin' => true, 'builtin_name' => 'catalogue_search_courses'],
+			],
+		]);
+		$toolRegistry = $this->createMock(ToolRegistry::class);
+		$toolRegistry->method('getToolsForBot')->with(7)->willReturn([]);
+		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([['name' => 'api_3_4', 'config' => []]]);
+		$service = $this->createBotService($this->createMock(BotMapper::class), $this->createMock(PermissionService::class), null, null, null, $toolRegistry);
+		$method = new \ReflectionMethod(BotService::class, 'resolveEffectiveToolLoadout');
+		$method->setAccessible(true);
+
+		foreach (['owner', 'reviewer'] as $user) {
+			$names = array_column($method->invoke($service, $bot, $user)['built_in'], 'name');
+			// The live API tool and other pending changes run; the API tool the change adds does not yet.
+			$this->assertSame(['api_3_4', 'catalogue_search_courses'], $names, $user);
+		}
+		$this->assertSame(['api_3_4'], array_column($method->invoke($service, $bot, 'audience')['built_in'], 'name'));
+
+		// A bot that was never published has no wider audience yet: its owner tries the new tool.
+		$bot->setApprovedAt(null);
+		$this->assertSame(['api_3_9', 'api_3_4', 'catalogue_search_courses'], array_column($method->invoke($service, $bot, 'owner')['built_in'], 'name'));
+	}
+
 	public function testResolveEffectiveToolLoadoutUsesPendingBuiltInAssignmentsForTestingReviewer(): void {
 		$bot = $this->createApprovedBot();
 		$bot->setApprovalStatus('pending');

@@ -2347,7 +2347,20 @@ class BotService {
 	 * @return SplitToolLoadout
 	 */
 	private function resolveEffectiveToolLoadout(Bot $bot, string $userId): array {
-		return $this->resolveToolLoadout($bot, $this->usesPendingLoadout($bot, $userId));
+		$pending = $this->usesPendingLoadout($bot, $userId);
+		$loadout = $this->resolveToolLoadout($bot, $pending);
+		$isApiTool = static fn (array $entry): bool => OpenApiToolCatalog::parseToolName((string)($entry['name'] ?? '')) !== null;
+		if ($pending && $bot->getApprovedAt() !== null && array_filter($loadout['built_in'], $isApiTool) !== []) {
+			// A published bot answers in rooms its owner or tester shares with others. API
+			// tools that only the pending change adds would publish their data there before
+			// approval, so they take effect once the change is approved. The review shows them.
+			$live = array_column($this->toolRegistry->getBuiltInToolsForBot($bot->getId()), 'name');
+			$loadout['built_in'] = array_values(array_filter(
+				$loadout['built_in'],
+				static fn (array $entry): bool => !$isApiTool($entry) || in_array($entry['name'], $live, true),
+			));
+		}
+		return $loadout;
 	}
 
 	/** Owners and testers of a pending bot run its pending tools. */
