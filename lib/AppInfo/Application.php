@@ -559,6 +559,7 @@ class Application extends App implements IBootstrap {
 				$c->get(\OCP\L10N\IFactory::class),
 				$c->get(LLMClient::class),
 				$c->get(\OCA\EducAI\Service\CatalogueLinkGuard::class),
+				$c->get(\OCA\EducAI\OpenApi\ApiToolAccess::class),
 			);
 		});
 
