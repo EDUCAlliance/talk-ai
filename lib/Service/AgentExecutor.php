@@ -505,7 +505,7 @@ class AgentExecutor {
 					if ($preparedToolCall['rejection'] !== null) {
 						continue;
 					}
-					$displayName = $this->safeToolProgressName($preparedToolCall['toolName']);
+					$displayName = $this->toolProgressName($preparedToolCall['toolName'], $builtInTools);
 					if ($displayName !== null) {
 						$toolNames[] = $displayName;
 					}
@@ -716,6 +716,26 @@ class AgentExecutor {
 			'arguments' => $arguments,
 			'rejection' => null,
 		];
+	}
+
+	/**
+	 * Talk shows the provider's label where there is one (an OpenAPI tool is
+	 * called api_<connection>_<operation>). The line is rendered as Markdown,
+	 * so the label keeps only words and plain punctuation (no dots or slashes,
+	 * which Talk would turn into links): an admin-written label cannot add a
+	 * mention, a link or formatting.
+	 *
+	 * @param array<string,mixed> $builtInTools
+	 */
+	private function toolProgressName(?string $toolName, array $builtInTools): ?string {
+		$label = $toolName !== null ? ($builtInTools[$toolName]['label'] ?? null) : null;
+		if (is_string($label)) {
+			$label = trim((string)preg_replace('/\s+/u', ' ', (string)preg_replace('/[^\p{L}\p{N}\s:,()&+\'-]/u', '', $label)));
+			if ($label !== '') {
+				return mb_substr($label, 0, 80);
+			}
+		}
+		return $this->safeToolProgressName($toolName);
 	}
 
 	private function safeToolProgressName(?string $toolName): ?string {
@@ -1198,6 +1218,7 @@ class AgentExecutor {
 				'definition' => $definition,
 				'config' => $assignedBuiltInConfigs[$assignedName] ?? [],
 				'policy' => $policy,
+				'label' => is_string($toolDef['label'] ?? null) ? $toolDef['label'] : null,
 			];
 			// Also add to map for schema filtering
 			$map[$name] = [
