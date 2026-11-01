@@ -196,7 +196,13 @@ final class OpenApiCompiler {
 		$entry['input_schema'] = self::inputSchema($entry['parameters']);
 		$this->analyzeResponses($operation['responses'] ?? null, $refs, $entry);
 
-		$hints = self::mutationHints(self::words($path . ' ' . ($entry['operation_id'] ?? '') . ' ' . $entry['summary']));
+		// Verbs sit in path segments or lead the operationId and summary; later summary
+		// words are mostly nouns ("Get one book by ISBN") and would only add noise.
+		$hints = self::mutationHints(array_values(array_unique(array_merge(
+			self::words($path),
+			array_slice(self::words((string)($entry['operation_id'] ?? '')), 0, 1),
+			array_slice(self::words($entry['summary']), 0, 1),
+		))));
 		if ($hints !== []) {
 			$entry['notes'][] = ['code' => 'possibly_mutating', 'detail' => implode(', ', array_slice($hints, 0, 5))];
 		}

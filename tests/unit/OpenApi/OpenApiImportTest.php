@@ -275,6 +275,8 @@ final class OpenApiImportTest extends TestCase {
 			'/mail/resend' => $get('Mail again'),
 			'/courses' => $get('Read and review open courses'),
 			'/records/{id}' => $get('Returns one record'),
+			'/books/{isbn}' => $get('Get one book by ISBN'),
+			'/rooms/{id}/hold' => $get('Book a room for a meeting'),
 		]]));
 		$notes = [];
 		foreach ((new OpenApiCompiler())->compile($loaded['document'], $loaded['version'], null)['operations'] as $operation) {
@@ -285,6 +287,8 @@ final class OpenApiImportTest extends TestCase {
 		self::assertSame(['resend'], $notes['GET /mail/resend']);
 		self::assertSame([], $notes['GET /courses']);
 		self::assertSame([], $notes['GET /records/{id}']);
+		self::assertSame([], $notes['GET /books/{isbn}'], 'A noun later in the summary is no verb');
+		self::assertSame(['book'], $notes['GET /rooms/{id}/hold']);
 	}
 
 	public function testMarksPossiblyMutatingReadsAndServerOverrides(): void {
