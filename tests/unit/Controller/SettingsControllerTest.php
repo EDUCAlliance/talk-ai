@@ -19,6 +19,7 @@ use OCA\EducAI\Service\ConnectionCheckStore;
 use OCA\EducAI\Service\CatalogueEmbeddingService;
 use OCA\EducAI\Service\CredentialService;
 use OCA\EducAI\Service\EmbeddingAdminService;
+use OCA\EducAI\Service\KnowledgeSourcePresenter;
 use OCA\EducAI\Service\EmbeddingConfigurationService;
 use OCA\EducAI\Service\LLMClient;
 use OCA\EducAI\Service\RagIngestionService;
@@ -61,7 +62,8 @@ class SettingsControllerTest extends TestCase {
 		$catalogue->expects($this->never())->method('reindex');
 		$ingestion = $this->createMock(RagIngestionService::class);
 		$ingestion->expects($this->never())->method('enqueueSource');
-		$admin = new EmbeddingAdminService($this->createMock(BotSourceMapper::class), $ingestion, $service, $catalogue, $jobs, $configuration, $logger);
+		$admin = new EmbeddingAdminService($this->createMock(BotSourceMapper::class), $ingestion, $service, $catalogue, $jobs, $configuration, $logger,
+			$this->createMock(BotMapper::class), $this->createMock(KnowledgeSourcePresenter::class));
 		$controller = $this->createController($this->createMock(RateLimitService::class),
 			$this->createMock(BotService::class), $this->createMock(BotMapper::class),
 			$this->createMock(TalkHandler::class), $this->createMock(TraceService::class), settingsService: $service, embeddingAdmin: $admin);
