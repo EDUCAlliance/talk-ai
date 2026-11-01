@@ -59,9 +59,10 @@ that hint is not proof that GET is read-only.
    **Import**. URL import sends no connection credentials; obtain private authenticated specifications separately and upload the
    file. Import creates a draft only; no operation is tested or released.
 3. Inspect **Servers in the document** and **Address actually used**. Use the appropriate server suggestion or **Edit connection
-   settings** to set the real base and authentication. Enter only the token/key, not a bearer prefix. Stored credentials are
-   represented by a stored indicator, never read back. Replacement and removal take effect on Save; Cancel leaves the stored value
-   unchanged.
+   settings** to set the real base and authentication. The settings stay reachable after approval, for example to rotate a key.
+   Enter only the token/key, not a bearer prefix. Stored credentials are represented by a stored indicator, never read back.
+   Replacement and removal take effect on Save; Cancel or Escape leaves the stored value unchanged, and a failed save keeps the
+   dialog with every edit for a retry.
 4. For each intended operation, inspect blockers and notes, enable **Offer to bots**, and confirm **I checked that this operation
    only reads data and changes nothing**. GET and a spec's `readOnly` annotation are not that confirmation. Review the tool label
    and model description; both start from untrusted spec text and become the reviewed model-facing description. Select
@@ -88,7 +89,8 @@ that hint is not proof that GET is read-only.
     nothing to bots.
 11. Use the bot in a Talk room where Talk AI is active. Tool metadata carries the reviewed label; the model receives only the
     effective assigned definitions and projected data. Source links come from the reviewed mapping when valid, not from the API base
-    address. The normal Talk tool display uses labels, not raw OpenAPI descriptions. See [BOT_SETUP_GUIDE.md](BOT_SETUP_GUIDE.md).
+    address. While a tool runs, Talk shows its label (for example "Using tool: Course catalogue: Search courses"), reduced to words
+    and plain punctuation, never the internal `api_…` name or raw OpenAPI descriptions. See [BOT_SETUP_GUIDE.md](BOT_SETUP_GUIDE.md).
 
 ### Mapping the response
 
@@ -109,10 +111,14 @@ alone does not establish completeness.
 ## Updating, withdrawing and re-releasing
 
 - Import the replacement document into the same connection. Earlier drafts are discarded; the approved revision stays in use until
-  deliberate approval of the new draft. Identical bytes are rejected as `document_unchanged` while base/auth approval is current.
-  There is no background spec refresh during chat.
-- Unchanged, non-revoked operation definitions inherit their reviewed settings. New/changed definitions start with no read
-  confirmation and are not offered. Review additions, removals and changes before approving.
+  deliberate approval of the new draft. Identical bytes are rejected as `document_unchanged` while base/auth approval is current;
+  to change the review of the approved document itself (offer a further or revoked operation, correct a mapping), use **Review the
+  approved document again**, which is available at any time. There is no background spec refresh during chat.
+- Unchanged, non-revoked operation definitions inherit their reviewed settings. A **changed** definition keeps its reviewed
+  settings (label, description, authentication, fixed values, mapping) and stays offered, but loses its read confirmation: the
+  draft cannot be approved until you confirm the new definition again or stop offering it. Settings that no longer fit the new
+  definition, such as a fixed value for a removed parameter or an authentication choice that no longer exists, appear as review
+  problems. **New** operations start unconfirmed and are not offered. Revoked operations start from the suggested defaults.
 - **Changes compared to the approved revision** shows approved/draft values, not only names: parameters/schema, security, servers,
   response, blockers, descriptive changes and reviewed mapping, auth, fixed values, offered/read-confirmed policy, label and
   description. Method/path changes appear as removal plus addition. Connection settings show the actual base/auth separately; the
@@ -123,9 +129,10 @@ alone does not establish completeness.
 - **Disable** stops subsequent calls for the connection. **Revoke** on an approved operation clears its read confirmation
   immediately, including copies in already imported drafts. Subsequent attempts fail before HTTP, even from saved assignments. This
   does not cancel an HTTP request already in flight or erase answers already published in Talk.
-- To re-release a revoked operation, use an existing draft or import a new revision, explicitly confirm read semantics afresh,
-  review/offer it and approve. If the same document would be unchanged, edit/import an appropriately revised document. Enabling
-  alone does not undo revocation. Disabling alone does not erase approval: re-enabling can resume still-approved operations.
+- To re-release a revoked operation, select **Review the approved document again** (or use a draft of a newer document), offer the
+  operation, explicitly confirm read semantics afresh and approve. The re-release is logged with the approving administrator.
+  Enabling alone does not undo revocation. Disabling alone does not erase approval: re-enabling resumes still-approved operations
+  for saved bot assignments without editing the bots.
 - Changing base URL or auth mode/header pauses approved tools. Use **Review the approved document again**, or import for the new
   settings, then approve. Token replacement/removal does not change the approval snapshot; missing/unreadable credentials still
   block calls. Choosing connection auth `none` clears its key.
@@ -255,7 +262,7 @@ availability/argument/budget rejections happen locally.
 | --- | --- |
 | `document_missing` | Upload a file or enter the document address. |
 | `document_fetch_failed` | Inspect `details.reason` for the bounded URL-download failure. |
-| `document_unchanged` | Active bytes/settings are unchanged; no replacement draft was created. |
+| `document_unchanged` | Active bytes/settings are unchanged; no replacement draft was created. Use **Review the approved document again** to change the review. |
 | `document_not_utf8` | Convert the document to UTF-8. |
 | `document_not_json` | Supply a JSON object, not another root value. |
 | `document_invalid_json` | Fix JSON syntax. |

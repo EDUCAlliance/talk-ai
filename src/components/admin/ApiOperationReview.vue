@@ -87,7 +87,7 @@
 				<textarea :id="`api-op-${operation.id}-description`"
 					class="ta-input"
 					rows="2"
-					maxlength="1000"
+					maxlength="600"
 					:value="modelValue.description"
 					:disabled="readonly"
 					@input="set('description', $event.target.value)" />
