@@ -4,6 +4,18 @@ All notable changes to Talk AI (`educai`) are documented in this file. The forma
 
 ## [Unreleased]
 
+## 3.0.2 – 2026-11-11
+
+Two fixes for document conversion with Docling. No database change.
+
+### Added
+
+- OpenDocument texts, spreadsheets and presentations (ODT, ODS, ODP) are converted when the Docling Serve profile is selected, as knowledge sources and as attachments in Talk. Until now Talk AI listed them as unsupported files and never sent them. Docling reads them without OCR or a vision model. The AcademicCloud / EDUC profile is unchanged.
+
+### Fixed
+
+- Long documents no longer fail with "Docling conversion timed out" after two minutes. Talk AI now waits up to 10 minutes for one conversion (one more minute per megabyte above two, at most 15) instead of 2 to 10. The old limit followed the file size, so a small PDF with many pages was given up while the server was still working on it, and the files sent after it had to wait behind it. Docling Serve's own limit `max_sync_wait` has a default of 120 seconds and must be raised on the server as well; see [docs/DOCLING.md](docs/DOCLING.md).
+
 ## 3.0.1 – 2026-11-11
 
 No change to the app itself. This release only renews a screenshot on the Nextcloud App Store.
