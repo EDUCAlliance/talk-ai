@@ -481,7 +481,8 @@ export default {
 				await this.$refs.editor.attachPendingSources(bot.id)
 				if (mode === 'submit' && bot.approval_status === 'draft') {
 					// The bot exists now. Submitting can still be cancelled; then it stays a draft.
-					this.submitBot = bot
+					// The answer of the server carries no tool list; the form knows what was just saved.
+					this.submitBot = { ...bot, tools: this.preview.bot.tools }
 					return
 				}
 				this.finishWith(bot, bot.approval_status === 'draft' ? 'draft' : 'ready')

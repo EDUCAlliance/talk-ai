@@ -274,7 +274,7 @@
 					{{ t('educai', 'What the bot is allowed to do in the chat.') }}
 				</p>
 			</template>
-			<p v-if="toolLoading" class="talkai-hint">
+			<p v-if="toolsPending" class="talkai-hint" role="status">
 				{{ t('educai', 'Loading tools…') }}
 			</p>
 			<div v-else class="talkai-capcards">
@@ -434,7 +434,7 @@
 				<p class="talkai-section__lead">
 					{{ t('educai', 'Technical view of the capabilities. A change here changes the switches under “Capabilities” as well.') }}
 				</p>
-				<p v-if="toolLoading" class="talkai-hint">
+				<p v-if="toolsPending" class="talkai-hint" role="status">
 					{{ t('educai', 'Loading tools…') }}
 				</p>
 				<p v-else-if="visibleTools.length === 0 && unavailableSelectedTools.length === 0" class="talkai-hint">
@@ -865,6 +865,11 @@ export default {
 		},
 
 		// --- Capabilities ---
+		// The switches appear once the offer and the saved selection are both known:
+		// a selection that arrives later would silently undo what was switched in between.
+		toolsPending() {
+			return this.toolLoading || this.botToolsLoading
+		},
 		offered() {
 			return groupOfferedTools(this.availableTools)
 		},
@@ -1027,6 +1032,12 @@ export default {
 		reset() {
 			this.initializeForm()
 		},
+		/** Stop asking the server about this bot, e.g. right before it is deleted. */
+		stopLoading() {
+			this.stopPolling()
+			this.botToolsRequestId++
+			this.ragSourcesRequestId++
+		},
 
 		// --- Loading ---
 		async loadAvailableTools() {
@@ -1035,7 +1046,7 @@ export default {
 		},
 		// A new bot starts with the capabilities of its template; "Documents in chat" is on unless the template says otherwise.
 		applyPresetTools() {
-			if (this.bot || this.presetToolsApplied || this.availableTools.length === 0 || this.dirty) {
+			if (this.bot || this.presetToolsApplied || this.availableTools.length === 0) {
 				return
 			}
 			const wanted = this.preset?.capabilities ?? ['documents']

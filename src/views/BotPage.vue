@@ -544,6 +544,7 @@ export default {
 		},
 		async deleteBot() {
 			this.deleting = true
+			this.$refs.editor?.stopLoading()
 			try {
 				await store.deleteBot(this.bot.id)
 				showSuccess(t('educai', 'Bot deleted successfully'))
