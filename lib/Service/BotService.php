@@ -7,6 +7,7 @@ namespace OCA\EducAI\Service;
 use Exception;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\BotTool;
 use OCA\EducAI\Db\BotToolMapper;
@@ -19,11 +20,13 @@ use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
+use OCA\EducAI\Exception\PreviewUnavailableException;
 use OCA\EducAI\OpenApi\ApiToolAccess;
 use OCA\EducAI\OpenApi\ApiToolAssignmentException;
 use OCA\EducAI\OpenApi\OpenApiToolCatalog;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
+use OCA\EducAI\Webhook\TalkActor;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\IGroupManager;
@@ -41,6 +44,11 @@ use Psr\Log\LoggerInterface;
  * @psalm-import-type ToolAssignmentPayload from \OCA\EducAI\TypeDefinitions
  */
 class BotService {
+	/** Limits of the preview chat for a bot that is not created yet */
+	public const PREVIEW_MAX_MESSAGES = 20;
+	public const PREVIEW_MAX_MESSAGE_BYTES = 4000;
+	public const PREVIEW_MAX_INSTRUCTION_BYTES = 60000;
+
 	public const TEMPERATURE_NOT_PROVIDED = '__educai_temperature_not_provided__';
 	private const AI_SERVICE_UNAVAILABLE_MESSAGE = "Sorry, I'm having trouble connecting to the AI service right now. Please try again later.";
 	private const CONTEXT_LIMIT_MESSAGE = "This request is too large for the model's context window. Please shorten your message, reduce the conversation context, or choose a model with a larger context window.";
@@ -194,6 +202,39 @@ class BotService {
 	}
 
 	/**
+	 * A user's own bots with what the bot list shows next to them: tools,
+	 * knowledge source counts and the edit flag.
+	 *
+	 * @param string $userId
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function getBotsByUserEnriched(string $userId): array {
+		$result = [];
+
+		foreach ($this->getBotsByUser($userId) as $bot) {
+			// Owners see every attached source, whether or not the bot currently uses them
+			$sources = $this->findSourcesForBot($bot->getId());
+
+			$botData = $bot->jsonSerialize();
+			$botData['tools'] = $this->buildAssignedToolEntries($bot);
+			$botData['rag_source_count'] = count($sources);
+			$botData['rag_source_problem_count'] = count(array_filter(
+				$sources,
+				static fn (BotSource $source): bool => in_array(
+					$source->getStatus(),
+					[KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::UNAVAILABLE],
+					true
+				)
+			));
+			$botData['can_edit'] = true;
+
+			$result[] = $botData;
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Get a specific bot
 	 *
 	 * @param int $id
@@ -214,8 +255,9 @@ class BotService {
 		}
 
 		$bot = $this->botMapper->findById($botId);
-		// Allow owner or admin to view bot tools
-		if ($bot->getUserId() !== $userId && !$this->permissionService->isAdmin($userId)) {
+		// Whoever may save the bot may also load its tool assignments. Nextcloud admins keep
+		// their read access to every bot, which the admin settings rely on.
+		if (!$this->permissionService->canEditBot($userId, $bot) && !$this->permissionService->isAdmin($userId)) {
 			throw new AuthorizationException('You do not have permission to view this bot');
 		}
 		$visibility = $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic());
@@ -282,7 +324,8 @@ class BotService {
 		$ragEnabled = null,
 		?array $tools = null,
 		?string $description = null,
-		?array $onboardingQuestions = null
+		?array $onboardingQuestions = null,
+		$allowGuests = null
 	): Bot {
 		// Validate mention name format
 		if (!preg_match('/^@?[a-z0-9_-]+$/i', $mentionName)) {
@@ -323,6 +366,7 @@ class BotService {
 		$bot->setAllowedTeams($this->encodeIdList($normalizedVisibility === 'teams' ? ($allowedTeams ?? []) : []));
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$bot->setRagEnabled($this->normalizeBool($ragEnabled) ?? false);
+		$bot->setAllowGuests($this->normalizeBool($allowGuests) ?? false);
 		if ($description !== null) {
 			$bot->setDescription($description);
 		}
@@ -381,7 +425,8 @@ class BotService {
 		$ragEnabled = null,
 		?array $tools = null,
 		?string $description = null,
-		?array $onboardingQuestions = null
+		?array $onboardingQuestions = null,
+		$allowGuests = null
 	): Bot {
 		$bot = $this->botMapper->findById($id);
 		$originalStatus = $bot->getApprovalStatus() ?? 'approved';
@@ -411,6 +456,8 @@ class BotService {
 		if ($targetRagEnabled === null) {
 			$targetRagEnabled = $editableState['rag_enabled'];
 		}
+		// Not sent means unchanged, so older clients never switch the guests off by accident.
+		$targetAllowGuests = $this->normalizeBool($allowGuests) ?? $editableState['allow_guests'];
 		$targetTools = $this->stripWikiToolsForVisibility($tools, $targetVisibility, $targetAllowedTeams, $bot->getUserId());
 		$editableToolNames = $this->editableBuiltInToolNames($bot);
 		$this->assertApiToolAssignments(
@@ -446,6 +493,7 @@ class BotService {
 				'allowed_groups' => $this->encodeIdList($targetAllowedGroups),
 				'allowed_teams' => $this->encodeIdList($targetAllowedTeams),
 				'rag_enabled' => $targetRagEnabled,
+				'allow_guests' => $targetAllowGuests,
 				'tools' => $targetTools, // Store tool changes too
 				'onboarding_questions' => $targetOnboardingQuestions, // Store onboarding question changes
 			];
@@ -473,6 +521,7 @@ class BotService {
 		$bot->setAllowedGroups($this->encodeIdList($targetAllowedGroups));
 		$bot->setAllowedTeams($this->encodeIdList($targetAllowedTeams));
 		$bot->setRagEnabled($targetRagEnabled);
+		$bot->setAllowGuests($targetAllowGuests);
 		$bot->setDescription($targetDescription);
 		$bot->setOnboardingQuestionsArray($targetOnboardingQuestions);
 
@@ -781,6 +830,8 @@ class BotService {
 
 			$botData = $bot->jsonSerialize();
 			$botData['review_target'] = $this->buildReviewTarget($bot);
+			// Counterpart of review_target.tools, so the review can show which tools change
+			$botData['live_tools'] = $this->buildToolDisplayEntries($this->resolveToolLoadout($bot, false));
 
 			// Get owner display name
 			$owner = $this->userManager->get($bot->getUserId());
@@ -1389,6 +1440,82 @@ class BotService {
 		}
 	}
 
+	/**
+	 * Answer a few messages with the instruction and model of a bot that does not exist yet,
+	 * so its author can try the wording before creating it.
+	 *
+	 * The turn goes through the same executor, model choice, temperature and output handling
+	 * as a message in Talk. Nothing is stored, and a draft has neither tools nor an indexed
+	 * knowledge base, so the answer comes from the instruction and the conversation alone.
+	 *
+	 * @param array<int,mixed> $messages Conversation so far, oldest first, ending with the user's message
+	 * @return array{reply: string, incomplete: bool}
+	 * @throws \InvalidArgumentException For an unusable instruction or conversation
+	 * @throws ModelNotReleasedException
+	 * @throws PreviewUnavailableException When the chat endpoint is rate-limited or gave no answer
+	 */
+	public function previewReply(string $systemPrompt, ?string $model, mixed $temperature, array $messages): array {
+		$systemPrompt = trim($systemPrompt);
+		if ($systemPrompt === '' || strlen($systemPrompt) > self::PREVIEW_MAX_INSTRUCTION_BYTES) {
+			throw new \InvalidArgumentException('The preview needs an instruction of a usable length');
+		}
+		if ($messages === [] || count($messages) > self::PREVIEW_MAX_MESSAGES || !array_is_list($messages)) {
+			throw new \InvalidArgumentException('The preview needs a short conversation');
+		}
+		$conversation = [];
+		foreach ($messages as $entry) {
+			$role = is_array($entry) ? ($entry['role'] ?? null) : null;
+			$content = is_array($entry) && is_string($entry['content'] ?? null) ? trim($entry['content']) : '';
+			if (!in_array($role, ['user', 'assistant'], true) || $content === '' || strlen($content) > self::PREVIEW_MAX_MESSAGE_BYTES) {
+				throw new \InvalidArgumentException('The preview conversation contains an unusable message');
+			}
+			$conversation[] = ['role' => $role, 'content' => $content];
+		}
+		if ($conversation[count($conversation) - 1]['role'] !== 'user') {
+			throw new \InvalidArgumentException('The preview conversation must end with a message of the user');
+		}
+
+		// The same rules as for saving a bot: only released models, the default otherwise.
+		$draft = new Bot();
+		if ($model !== null && trim($model) !== '') {
+			$draft->setModel($this->authorizeModelSelection($model));
+		}
+		$draft->setTemperature($this->settingsService->normalizeTemperatureValue($temperature, true));
+
+		if ($this->rateLimitService->isEnabled()) {
+			if (!$this->rateLimitService->canProcess()) {
+				throw new PreviewUnavailableException(PreviewUnavailableException::RATE_LIMITED);
+			}
+			$this->rateLimitService->recordUsage();
+		}
+
+		try {
+			$result = $this->agentExecutor->run($systemPrompt, $conversation, [], array_filter([
+				'model' => $draft->getModel(),
+				'temperature' => $this->resolveTemperature($draft),
+				'built_in_tools' => [],
+			], static fn ($value) => $value !== null));
+		} catch (\Throwable $e) {
+			$this->logger->warning('Bot preview failed', ['exception_class' => get_class($e)]);
+			throw new PreviewUnavailableException(PreviewUnavailableException::NO_ANSWER);
+		}
+		if (is_array($result['rateLimitHeaders'] ?? null)) {
+			$this->rateLimitService->updateFromHeaders($result['rateLimitHeaders']);
+		}
+		$status = $result['status'] ?? null;
+		$reply = is_string($result['content'] ?? null) ? AssistantContentSanitizer::sanitize($result['content']) : '';
+		$incomplete = $status === 'incomplete' && ($result['terminalReason'] ?? null) === 'length';
+		if (!in_array($status, ['completed', 'incomplete'], true) || trim($reply) === '') {
+			$this->logger->warning('Bot preview got no usable answer', [
+				'status' => is_string($status) ? $status : null,
+				'terminal_reason' => is_string($result['terminalReason'] ?? null) ? $result['terminalReason'] : null,
+			]);
+			throw new PreviewUnavailableException(PreviewUnavailableException::NO_ANSWER);
+		}
+
+		return ['reply' => $reply, 'incomplete' => $incomplete];
+	}
+
 	private function enforceCatalogueLinks(string $assistantMessage, string $userId, ?int $traceRunId): string {
 		if ($this->catalogueLinkGuard === null || $this->l10nFactory === null) {
 			return $assistantMessage;
@@ -1592,9 +1719,16 @@ class BotService {
 	}
 
 	/**
-	 * Determine if a user can access a bot based on visibility and groups
+	 * Determine if a user can access a bot based on visibility and groups.
+	 *
+	 * A guest has no account, so the audience of the bot says nothing about them: the bot
+	 * itself says whether it answers guests.
 	 */
 	public function userCanAccessBot(Bot $bot, string $userId): bool {
+		if (TalkActor::isGuest($userId)) {
+			return $this->guestCanUseBot($bot);
+		}
+
 		$normalizedUserId = $this->normalizeExternalUserId($userId);
 
 		// Owner is always allowed
@@ -1719,7 +1853,8 @@ class BotService {
 
 	/**
 	 * Get bots visible to a user with enriched data for public listing.
-	 * Returns bot data plus owner display name and access reason.
+	 * Returns bot data plus owner display name, access reason, tools, knowledge
+	 * source count and whether the user may edit the bot.
 	 * Includes global, matching group/team bots, and the user's own personal bots.
 	 *
 	 * @param string $userId
@@ -1748,15 +1883,7 @@ class BotService {
 				continue; // User doesn't have access
 			}
 
-			// Get owner display name
-			$ownerUser = $this->userManager->get($bot->getUserId());
-			$ownerDisplayName = $ownerUser !== null ? $ownerUser->getDisplayName() : $bot->getUserId();
-
-			$botData = $bot->jsonSerialize();
-			$botData['owner_display_name'] = $ownerDisplayName;
-			$botData['access_reason'] = $accessReason;
-
-			$result[] = $botData;
+			$result[] = $this->buildPublicBotData($bot, $userId, $accessReason);
 		}
 
 		return $result;
@@ -1786,53 +1913,58 @@ class BotService {
 			return null; // User doesn't have access
 		}
 
+		return $this->buildPublicBotData($bot, $userId, $accessReason);
+	}
+
+	/**
+	 * One entry of the public bot list, also the payload of the public bot details:
+	 * the bot plus owner name, access reason, tools, knowledge source count and
+	 * whether the user may edit it.
+	 *
+	 * @param array{type:string,names:array<string>} $accessReason
+	 * @return array<string,mixed>
+	 */
+	private function buildPublicBotData(Bot $bot, string $userId, array $accessReason): array {
 		// Get owner display name
 		$ownerUser = $this->userManager->get($bot->getUserId());
 		$ownerDisplayName = $ownerUser !== null ? $ownerUser->getDisplayName() : $bot->getUserId();
 
-		// Get tools assigned to this bot (public info only, no configs)
-		$tools = [];
-
-		// MCP tools
-		$mcpAssignments = $this->toolRegistry->getToolsForBot($botId);
-		foreach ($mcpAssignments as $entry) {
-			$tool = $entry['tool'];
-			$tools[] = [
-				'name' => $tool->getName(),
-				'description' => $tool->getDescription(),
-				'is_builtin' => false,
-			];
-		}
-
-		// Built-in tools
-		$builtInAssignments = $this->toolRegistry->getBuiltInToolsForBot($botId);
-		foreach ($builtInAssignments as $entry) {
-			$tools[] = [
-				'name' => $this->formatBuiltInToolName($entry['name']),
-				'description' => $this->getBuiltInToolDescription($entry['name']),
-				'is_builtin' => true,
-				'builtin_name' => $entry['name'],
-			];
-		}
-
-		// Count RAG sources
-		$ragSourceCount = 0;
-		if ($bot->getRagEnabled()) {
-			try {
-				$sources = $this->botSourceMapper->findByBot($botId);
-				$ragSourceCount = count($sources);
-			} catch (\Throwable $e) {
-				// Ignore
-			}
-		}
-
 		$botData = $bot->jsonSerialize();
 		$botData['owner_display_name'] = $ownerDisplayName;
 		$botData['access_reason'] = $accessReason;
-		$botData['tools'] = $tools;
-		$botData['rag_source_count'] = $ragSourceCount;
+		$botData['tools'] = $this->buildAssignedToolEntries($bot);
+		// Sources of a bot that does not use them are not advertised
+		$botData['rag_source_count'] = $bot->getRagEnabled() ? count($this->findSourcesForBot($bot->getId())) : 0;
+		$botData['can_edit'] = $this->permissionService->canEditBot($this->normalizeExternalUserId($userId), $bot);
 
 		return $botData;
+	}
+
+	/**
+	 * Tools assigned to this bot (public info only, no configs).
+	 *
+	 * @return array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>
+	 */
+	private function buildAssignedToolEntries(Bot $bot): array {
+		return $this->buildToolDisplayEntries([
+			'mcp' => $this->toolRegistry->getToolsForBot($bot->getId()),
+			'built_in' => $this->toolRegistry->getBuiltInToolsForBot($bot->getId()),
+		], null);
+	}
+
+	/**
+	 * @return array<int,BotSource>
+	 */
+	private function findSourcesForBot(int $botId): array {
+		try {
+			return $this->botSourceMapper->findByBot($botId);
+		} catch (\Throwable $e) {
+			$this->logger->warning('Failed to load knowledge sources of bot', [
+				'bot_id' => $botId,
+				'exception' => $e,
+			]);
+			return [];
+		}
 	}
 
 	/**
@@ -2069,6 +2201,7 @@ class BotService {
 	 *   temperature:?float,
 	 *   description:?string,
 	 *   rag_enabled:bool,
+	 *   allow_guests:bool,
 	 *   onboarding_questions:?array
 	 * }
 	 */
@@ -2082,6 +2215,7 @@ class BotService {
 			'temperature' => $bot->getTemperature(),
 			'description' => $bot->getDescription(),
 			'rag_enabled' => $bot->getRagEnabled(),
+			'allow_guests' => $bot->getAllowGuests(),
 			'onboarding_questions' => $bot->getOnboardingQuestionsArray(),
 		];
 
@@ -2110,6 +2244,9 @@ class BotService {
 		}
 		if (array_key_exists('rag_enabled', $pendingChanges)) {
 			$state['rag_enabled'] = (bool)$pendingChanges['rag_enabled'];
+		}
+		if (array_key_exists('allow_guests', $pendingChanges)) {
+			$state['allow_guests'] = (bool)$pendingChanges['allow_guests'];
 		}
 		if (array_key_exists('onboarding_questions', $pendingChanges)) {
 			$state['onboarding_questions'] = is_array($pendingChanges['onboarding_questions'])
@@ -2155,6 +2292,24 @@ class BotService {
 		return $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic()) !== 'personal';
 	}
 
+	/**
+	 * A bot answers guests when its guest switch is on and it is live: a personal bot,
+	 * an approved bot, or an approved bot whose change waits for review. In the last case
+	 * the stored switch is the approved one; the requested one is still in pending_changes.
+	 */
+	private function guestCanUseBot(Bot $bot): bool {
+		if (!$bot->getAllowGuests()) {
+			return false;
+		}
+
+		$status = $bot->getApprovalStatus() ?? 'approved';
+		if ($status === 'draft') {
+			return false;
+		}
+
+		return !($status === 'pending' && $this->isInitialPendingApproval($bot));
+	}
+
 	private function isInitialPendingApproval(Bot $bot): bool {
 		$status = $bot->getApprovalStatus() ?? 'approved';
 		return $status === 'pending'
@@ -2162,14 +2317,18 @@ class BotService {
 			&& $bot->getApprovedAt() === null;
 	}
 
+	/**
+	 * Turn the sender of a Talk message into a user id. Talk names senders "<actor type>/<actor id>",
+	 * and only "users/…" is an account of this instance. Every other sender (guest, e-mail guest,
+	 * bridge, user of another server) keeps its full name, so it can never equal a user id:
+	 * an e-mail guest whose address is also somebody's user id is not that user.
+	 */
 	private function normalizeExternalUserId(string $userId): string {
-		if (strpos($userId, '/') === false) {
-			return $userId;
+		if (str_starts_with($userId, 'users/')) {
+			return substr($userId, strlen('users/'));
 		}
 
-		$parts = explode('/', $userId);
-		$tail = end($parts);
-		return is_string($tail) && $tail !== '' ? $tail : $userId;
+		return $userId;
 	}
 
 	/**
@@ -2297,6 +2456,9 @@ class BotService {
 		if (array_key_exists('rag_enabled', $pendingChanges)) {
 			$targetBot->setRagEnabled((bool)$pendingChanges['rag_enabled']);
 		}
+		if (array_key_exists('allow_guests', $pendingChanges)) {
+			$targetBot->setAllowGuests((bool)$pendingChanges['allow_guests']);
+		}
 		if (array_key_exists('onboarding_questions', $pendingChanges)) {
 			$targetBot->setOnboardingQuestionsArray(
 				is_array($pendingChanges['onboarding_questions']) ? $pendingChanges['onboarding_questions'] : null
@@ -2317,8 +2479,9 @@ class BotService {
 	 *   allowed_teams:array<int,string>,
 	 *   allowed_team_names:array<int,string>,
 	 *   rag_enabled:bool,
+	 *   allow_guests:bool,
 	 *   onboarding_questions:?array,
-	 *   tools:array<int,array{name:string,description:string,is_builtin:bool}>,
+	 *   tools:array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>,
 	 *   is_update:bool
 	 * }
 	 */
@@ -2337,6 +2500,7 @@ class BotService {
 			'allowed_teams' => $allowedTeamIds,
 			'allowed_team_names' => $this->resolveTeamDisplayNames($allowedTeamIds),
 			'rag_enabled' => $targetBot->getRagEnabled(),
+			'allow_guests' => $targetBot->getAllowGuests(),
 			'onboarding_questions' => $targetBot->getOnboardingQuestionsArray(),
 			'tools' => $this->buildToolDisplayEntries($toolLoadout),
 			'is_update' => $bot->hasPendingChanges(),
@@ -2458,16 +2622,20 @@ class BotService {
 	}
 
 	/**
+	 * Names and descriptions of a tool loadout for display, without configs.
+	 *
 	 * @param SplitToolLoadout $toolLoadout
-	 * @return array<int,array{name:string,description:string,is_builtin:bool}>
+	 * @param string|null $missingDescription Description of MCP tools that have none: the review
+	 *                                        payload has always sent '', the public bot payloads null
+	 * @return array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>
 	 */
-	private function buildToolDisplayEntries(array $toolLoadout): array {
+	private function buildToolDisplayEntries(array $toolLoadout, ?string $missingDescription = ''): array {
 		$result = [];
 
 		foreach ($toolLoadout['mcp'] as $entry) {
 			$result[] = [
 				'name' => $entry['tool']->getName(),
-				'description' => $entry['tool']->getDescription() ?? '',
+				'description' => $entry['tool']->getDescription() ?? $missingDescription,
 				'is_builtin' => false,
 			];
 		}
@@ -2477,6 +2645,7 @@ class BotService {
 				'name' => $this->formatBuiltInToolName($entry['name']),
 				'description' => $this->getBuiltInToolDescription($entry['name']),
 				'is_builtin' => true,
+				'builtin_name' => $entry['name'],
 			];
 		}
 

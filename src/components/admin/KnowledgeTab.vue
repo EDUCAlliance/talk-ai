@@ -259,6 +259,45 @@
 							</select>
 						</div>
 					</div>
+					<div v-if="admin.settings.doclingApiProfile === 'docling_serve'" class="ta-grid ta-grid--follow">
+						<div class="ta-field">
+							<label for="docling-pipeline" class="ta-label">{{ t('educai', 'How documents are read') }}</label>
+							<select id="docling-pipeline"
+								v-model="admin.settings.doclingPipeline"
+								class="ta-input"
+								@change="admin.resetDoclingResults()">
+								<option value="">
+									{{ t('educai', 'As before (the Docling server decides)') }}
+								</option>
+								<option value="standard">
+									{{ t('educai', 'Standard pipeline (models on the Docling server)') }}
+								</option>
+								<option value="vlm">
+									{{ t('educai', 'Vision model from a server preset') }}
+								</option>
+							</select>
+							<p class="ta-hint">
+								{{ pipelineHint }}
+							</p>
+						</div>
+						<div v-if="admin.settings.doclingPipeline === 'vlm'" class="ta-field">
+							<label for="docling-preset" class="ta-label">{{ t('educai', 'Preset on the Docling server') }}</label>
+							<input id="docling-preset"
+								v-model.trim="admin.settings.doclingVlmPreset"
+								class="ta-input"
+								type="text"
+								name="educai-docling-preset"
+								autocomplete="off"
+								spellcheck="false"
+								maxlength="64"
+								pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*"
+								placeholder="default"
+								@input="admin.resetDoclingResults()">
+							<p class="ta-hint">
+								{{ t('educai', '“default” uses the preset the server administrator marked as default.') }}
+							</p>
+						</div>
+					</div>
 					<TestAction :label="t('educai', 'Test PDF conversion')"
 						:busy-label="t('educai', 'Testing…')"
 						:busy="admin.doclingTesting"
@@ -509,7 +548,22 @@ export default {
 			return t('educai', 'chunks {size}, overlap {overlap}, {mode}', { size: this.formatNumber(settings.ragChunkSize), overlap: this.formatNumber(settings.ragChunkOverlap), mode })
 		},
 		profileSummary() {
-			return `${doclingProfileLabel(this.admin.settings.doclingApiProfile)}, ${doclingAuthLabel(this.admin.settings.doclingAuthMode)}`
+			const parts = [doclingProfileLabel(this.admin.settings.doclingApiProfile), doclingAuthLabel(this.admin.settings.doclingAuthMode)]
+			if (this.admin.settings.doclingApiProfile === 'docling_serve' && this.admin.settings.doclingPipeline === 'vlm') {
+				parts.push(t('educai', 'vision model “{preset}”', { preset: (this.admin.settings.doclingVlmPreset || '').trim() || 'default' }))
+			} else if (this.admin.settings.doclingApiProfile === 'docling_serve' && this.admin.settings.doclingPipeline === 'standard') {
+				parts.push(t('educai', 'standard pipeline'))
+			}
+			return parts.join(', ')
+		},
+		pipelineHint() {
+			if (this.admin.settings.doclingPipeline === 'vlm') {
+				return t('educai', 'Pages are read by the vision model of the preset. The model, its address and its key are set on the Docling server, not here. If the server refuses the preset, the document is not converted another way.')
+			}
+			if (this.admin.settings.doclingPipeline === 'standard') {
+				return t('educai', 'The Docling server reads documents with its own layout and text recognition models. Large scans need a lot of memory there.')
+			}
+			return t('educai', 'No pipeline is named. A Docling server then uses its standard pipeline, even when it has a vision preset.')
 		},
 		detection() {
 			const result = this.admin.doclingDetection

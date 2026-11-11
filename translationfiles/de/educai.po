@@ -5900,3 +5900,1704 @@ msgstr "Bot „{name}“ ({mention})"
 #: src/components/EmbeddingMaintenance.vue
 msgid "Bot \"{name}\""
 msgstr "Bot „{name}“"
+
+#: src/components/BotDetailsDialog.vue
+msgid "%n source"
+msgid_plural "%n sources"
+msgstr[0] "%n Quelle"
+msgstr[1] "%n Quellen"
+
+#: src/components/BotDetailsDialog.vue
+msgid "No description yet."
+msgstr "Noch keine Beschreibung."
+
+#: src/components/BotDetailsDialog.vue
+msgid "Can"
+msgstr "Kann"
+
+#: src/components/BotDetailsDialog.vue
+msgid "Knows"
+msgstr "Kennt"
+
+#: src/components/BotDetailsDialog.vue
+msgid "For"
+msgstr "Für"
+
+#: src/components/BotDetailsDialog.vue
+msgid "Instruction"
+msgstr "Anweisung"
+
+#: src/components/BotDetailsDialog.vue
+msgid "what the bot was told to do"
+msgstr "was dem Bot aufgetragen wurde"
+
+#: src/components/BotDetailsDialog.vue
+msgid "Use in Talk"
+msgstr "In Talk verwenden"
+
+#: src/components/BotDetailsDialog.vue
+msgid "by you"
+msgstr "von dir"
+
+#: src/components/BotDetailsDialog.vue
+msgid "by {owner}"
+msgstr "von {owner}"
+
+#: src/components/BotDetailsDialog.vue
+msgid "Answer in the chat"
+msgstr "Im Chat antworten"
+
+#: src/components/BotDetailsDialog.vue
+msgid "Only files you put into the chat"
+msgstr "Nur Dateien, die du in den Chat gibst"
+
+#: src/components/BotDetailsDialog.vue
+msgid "No stored sources"
+msgstr "Keine hinterlegten Quellen"
+
+#: src/components/BotDetailsDialog.vue
+msgid "The bot only sees your own files if you put them into the chat."
+msgstr "Deine eigenen Dateien sieht der Bot nur, wenn du sie in den Chat gibst."
+
+#: src/components/BotDetailsDialog.vue
+msgid "Answers can reproduce content from its sources."
+msgstr "Antworten können Inhalte aus seinen Quellen wiedergeben."
+
+#: src/components/BotEditor.vue
+msgid "%n not readable"
+msgid_plural "%n not readable"
+msgstr[0] "%n nicht lesbar"
+msgstr[1] "%n nicht lesbar"
+
+#: src/components/BotEditor.vue
+msgid "In %n source. Stays on as long as there are sources."
+msgid_plural "In %n sources. Stays on as long as there are sources."
+msgstr[0] "In %n Quelle. Bleibt an, solange es Quellen gibt."
+msgstr[1] "In %n Quellen. Bleibt an, solange es Quellen gibt."
+
+#: src/components/BotEditor.vue
+msgid "Mention in Talk"
+msgstr "Erwähnung in Talk"
+
+#: src/components/BotEditor.vue
+msgid "This is how people mention the bot in a chat. It cannot be changed after creation."
+msgstr "So wird der Bot in einem Chat erwähnt. Das lässt sich nach dem Erstellen nicht mehr ändern."
+
+#: src/components/BotEditor.vue
+msgid "This is how people mention the bot in a chat: letters, numbers, hyphens and underscores. It cannot be changed after creation."
+msgstr "So wird der Bot in einem Chat erwähnt: Buchstaben, Ziffern, Bindestriche und Unterstriche. Das lässt sich nach dem Erstellen nicht mehr ändern."
+
+#: src/components/BotEditor.vue
+msgid "Short description"
+msgstr "Kurzbeschreibung"
+
+#: src/components/BotEditor.vue
+msgid "Shown under “Discover” and in the approval."
+msgstr "Erscheint unter „Entdecken“ und in der Freigabe."
+
+#: src/components/BotEditor.vue
+msgid "What should the bot do, and how?"
+msgstr "Was soll der Bot tun, und wie?"
+
+#: src/components/BotEditor.vue
+msgid "This is the instruction for the language model (system prompt). Write it the way you would explain the job to a new colleague."
+msgstr "Das ist die Anweisung für das Sprachmodell (System-Prompt). Schreib sie so, wie du die Aufgabe einer neuen Kollegin erklären würdest."
+
+#: src/components/BotEditor.vue
+msgid "Who uses the bot?"
+msgstr "Wer nutzt den Bot?"
+
+#: src/components/BotEditor.vue
+msgid "This decides who can use the bot and whether changes are reviewed first. It also sets the colour of the bot."
+msgstr "Das entscheidet, wer den Bot nutzen kann und ob Änderungen erst geprüft werden. Es bestimmt auch die Farbe des Bots."
+
+#: src/components/BotEditor.vue
+msgid "Search group …"
+msgstr "Gruppe suchen …"
+
+#: src/components/BotEditor.vue
+msgid "Only members of these groups can use the bot."
+msgstr "Nur Mitglieder dieser Gruppen können den Bot nutzen."
+
+#: src/components/BotEditor.vue
+msgid "Search team …"
+msgstr "Team suchen …"
+
+#: src/components/BotEditor.vue
+msgid "You are not a member of a team yet."
+msgstr "Du bist noch in keinem Team."
+
+#: src/components/BotEditor.vue
+msgid "Only members of these teams can use the bot."
+msgstr "Nur Mitglieder dieser Teams können den Bot nutzen."
+
+#: src/components/BotEditor.vue
+msgid "Create"
+msgstr "Erstellen"
+
+#: src/components/BotEditor.vue
+msgid "Test"
+msgstr "Testen"
+
+#: src/components/BotEditor.vue
+msgid "Approval"
+msgstr "Freigabe"
+
+#: src/components/BotEditor.vue
+msgid "The knowledge search is paused. The sources stay stored, but the bot does not use them."
+msgstr "Die Wissenssuche ist pausiert. Die Quellen bleiben gespeichert, der Bot nutzt sie aber nicht."
+
+#: src/components/BotEditor.vue
+msgid "Resume"
+msgstr "Fortsetzen"
+
+#: src/components/BotEditor.vue
+msgid "Files or folders from your Nextcloud"
+msgstr "Dateien oder Ordner aus deiner Nextcloud"
+
+#: src/components/BotEditor.vue
+msgid "PDF, Word, PowerPoint, Markdown, text · folders are kept up to date"
+msgstr "PDF, Word, PowerPoint, Markdown, Text · Ordner bleiben aktuell"
+
+#: src/components/BotEditor.vue
+msgid "Web page address"
+msgstr "Adresse der Webseite"
+
+#: src/components/BotEditor.vue
+msgid "Open {name}"
+msgstr "{name} öffnen"
+
+#: src/components/BotEditor.vue
+msgid "Read {name} again"
+msgstr "{name} erneut lesen"
+
+#: src/components/BotEditor.vue
+msgid "Read again"
+msgstr "Erneut lesen"
+
+#: src/components/BotEditor.vue
+msgid "No sources yet. Without sources the bot answers from the instruction and from files in the chat."
+msgstr "Noch keine Quellen. Ohne Quellen antwortet der Bot aus der Anweisung und aus Dateien im Chat."
+
+#: src/components/BotEditor.vue
+msgid "The files stay in your Nextcloud. The bot only reads what you select here. People who use the bot see its answers with the source, but get no access to the files themselves."
+msgstr "Die Dateien bleiben in deiner Nextcloud. Der Bot liest nur, was du hier auswählst. Wer den Bot nutzt, sieht seine Antworten mit Quelle, bekommt aber keinen Zugriff auf die Dateien selbst."
+
+#: src/components/BotEditor.vue
+msgid "What the bot is allowed to do in the chat."
+msgstr "Was der Bot im Chat tun darf."
+
+#: src/components/BotEditor.vue
+msgid "Not set up by the administration yet."
+msgstr "Von der Administration noch nicht eingerichtet."
+
+#: src/components/BotEditor.vue
+msgid "Recommended"
+msgstr "Empfohlen"
+
+#: src/components/BotEditor.vue
+msgid "Remove it or choose another audience before saving."
+msgstr "Entferne es oder wähle vor dem Speichern eine andere Zielgruppe."
+
+#: src/components/BotEditor.vue
+msgid "You find the exact tool list later on the bot page under “Advanced”."
+msgstr "Die genaue Werkzeugliste findest du später auf der Bot-Seite unter „Erweitert“."
+
+#: src/components/BotEditor.vue
+msgid "Model, creativity and guests. Not needed for most bots."
+msgstr "Modell, Kreativität und Gäste. Für die meisten Bots nicht nötig."
+
+#: src/components/BotEditor.vue
+msgid "Recommended by the administration"
+msgstr "Von der Administration empfohlen"
+
+#: src/components/BotEditor.vue
+msgid "The administration has set one model for all bots."
+msgstr "Die Administration hat ein Modell für alle Bots festgelegt."
+
+#: src/components/BotEditor.vue
+msgid "Uses the default of the administration: {temperature}."
+msgstr "Nutzt den Standard der Administration: {temperature}."
+
+#: src/components/BotEditor.vue
+msgid "For bots that answer from sources, “Precise” is usually best."
+msgstr "Für Bots, die aus Quellen antworten, passt „Präzise“ meist am besten."
+
+#: src/components/BotEditor.vue
+msgid "Exact tools"
+msgstr "Genaue Werkzeuge"
+
+#: src/components/BotEditor.vue
+msgid "Technical view of the capabilities. A change here changes the switches under “Capabilities” as well."
+msgstr "Technische Sicht auf die Funktionen. Eine Änderung hier ändert auch die Schalter unter „Funktionen“."
+
+#: src/components/BotEditor.vue
+msgid "Knowledge search"
+msgstr "Wissenssuche"
+
+#: src/components/BotEditor.vue
+msgid "Pause temporarily"
+msgstr "Vorübergehend pausieren"
+
+#: src/components/BotEditor.vue
+msgid "The sources stay stored."
+msgstr "Die Quellen bleiben gespeichert."
+
+#: src/components/BotEditor.vue
+msgid "There are no sources yet. Add them under “Knowledge”."
+msgstr "Es gibt noch keine Quellen. Füge sie unter „Wissen“ hinzu."
+
+#: src/components/BotEditor.vue
+msgid "Pause knowledge search"
+msgstr "Wissenssuche pausieren"
+
+#: src/components/BotEditor.vue
+msgid "Bot wiki"
+msgstr "Bot-Wiki"
+
+#: src/components/BotEditor.vue
+msgid "Greeting and starter questions"
+msgstr "Begrüßung und Einstiegsfragen"
+
+#: src/components/BotEditor.vue
+msgid "optional: questions the bot asks when it joins a chat"
+msgstr "optional: Fragen, die der Bot stellt, wenn er in einen Chat kommt"
+
+#: src/components/BotEditor.vue
+msgid "People are asked these questions when they first activate the bot in a chat. The answers are stored and given to the bot as context."
+msgstr "Diese Fragen werden gestellt, wenn jemand den Bot zum ersten Mal in einem Chat aktiviert. Die Antworten werden gespeichert und dem Bot als Kontext mitgegeben."
+
+#: src/components/BotEditor.vue
+msgid "Question {number}"
+msgstr "Frage {number}"
+
+#: src/components/BotEditor.vue
+msgid "What do you need help with?"
+msgstr "Wobei brauchst du Hilfe?"
+
+#: src/components/BotEditor.vue
+msgid "Free text answer (the reply is stored)"
+msgstr "Freitextantwort (die Antwort wird gespeichert)"
+
+#: src/components/BotEditor.vue
+msgid "Next question"
+msgstr "Nächste Frage"
+
+#: src/components/BotEditor.vue
+msgid "Remove answer"
+msgstr "Antwort entfernen"
+
+#: src/components/BotEditor.vue
+msgid "Add answer"
+msgstr "Antwort hinzufügen"
+
+#: src/components/BotEditor.vue
+msgid "Use only letters, numbers, hyphens and underscores."
+msgstr "Verwende nur Buchstaben, Ziffern, Bindestriche und Unterstriche."
+
+#: src/components/BotEditor.vue
+msgid "Another bot already uses this mention."
+msgstr "Diese Erwähnung verwendet schon ein anderer Bot."
+
+#: src/components/BotEditor.vue
+msgid "Always cite the source"
+msgstr "Immer die Quelle nennen"
+
+#: src/components/BotEditor.vue
+msgid "Always name the source of your answer."
+msgstr "Nenne immer die Quelle deiner Antwort."
+
+#: src/components/BotEditor.vue
+msgid "Ask when unclear"
+msgstr "Bei Unklarheit nachfragen"
+
+#: src/components/BotEditor.vue
+msgid "If a question is unclear, ask before you answer."
+msgstr "Wenn eine Frage unklar ist, frag nach, bevor du antwortest."
+
+#: src/components/BotEditor.vue
+msgid "Friendly tone"
+msgstr "Freundlicher Ton"
+
+#: src/components/BotEditor.vue
+msgid "Use a friendly, informal tone."
+msgstr "Antworte in einem freundlichen, lockeren Ton."
+
+#: src/components/BotEditor.vue
+msgid "Short answers"
+msgstr "Kurze Antworten"
+
+#: src/components/BotEditor.vue
+msgid "Keep answers short, three sentences at most."
+msgstr "Halte Antworten kurz, höchstens drei Sätze."
+
+#: src/components/BotEditor.vue
+msgid "Needs approval"
+msgstr "Braucht Freigabe"
+
+#: src/components/BotEditor.vue
+msgid "Active right away"
+msgstr "Sofort aktiv"
+
+#: src/components/BotEditor.vue
+msgid "Only me"
+msgstr "Nur ich"
+
+#: src/components/BotEditor.vue
+msgid "For your own chats. Nobody else sees the bot."
+msgstr "Für deine eigenen Chats. Niemand sonst sieht den Bot."
+
+#: src/components/BotEditor.vue
+msgid "Certain groups"
+msgstr "Bestimmte Gruppen"
+
+#: src/components/BotEditor.vue
+msgid "For example a degree programme or a department."
+msgstr "Zum Beispiel ein Studiengang oder eine Abteilung."
+
+#: src/components/BotEditor.vue
+msgid "Certain teams"
+msgstr "Bestimmte Teams"
+
+#: src/components/BotEditor.vue
+msgid "For example a project or a working group."
+msgstr "Zum Beispiel ein Projekt oder eine Arbeitsgruppe."
+
+#: src/components/BotEditor.vue
+msgid "Everyone in this Nextcloud"
+msgstr "Alle in dieser Nextcloud"
+
+#: src/components/BotEditor.vue
+msgid "Shown to everyone under “Discover”."
+msgstr "Erscheint für alle unter „Entdecken“."
+
+#: src/components/BotEditor.vue
+msgid "The bot is active right away. Only you see and use it."
+msgstr "Der Bot ist sofort aktiv. Nur du siehst und nutzt ihn."
+
+#: src/components/BotEditor.vue
+msgid "Changes to this bot are reviewed first. Until approval the current version stays live. Reviewed by: {reviewers}."
+msgstr "Änderungen an diesem Bot werden erst geprüft. Bis zur Freigabe bleibt die aktuelle Version aktiv. Es prüfen: {reviewers}."
+
+#: src/components/BotEditor.vue
+msgid "Until approval only you and the reviewers can use the bot. Reviewed by: {reviewers}."
+msgstr "Bis zur Freigabe können nur du und die Prüfenden den Bot nutzen. Es prüfen: {reviewers}."
+
+#: src/components/BotEditor.vue
+msgid "You administer this audience, so the bot is live for it right away."
+msgstr "Du verwaltest diese Zielgruppe, deshalb ist der Bot für sie sofort aktiv."
+
+#: src/components/BotEditor.vue
+msgid "No sources"
+msgstr "Keine Quellen"
+
+#: src/components/BotEditor.vue
+msgid "{sources} · {problems}"
+msgstr "{sources} · {problems}"
+
+#: src/components/BotEditor.vue
+msgid "Turns on by itself as soon as you add sources."
+msgstr "Schaltet sich von selbst ein, sobald du Quellen hinzufügst."
+
+#: src/components/BotEditor.vue
+msgid "Paused. The sources stay stored."
+msgstr "Pausiert. Die Quellen bleiben gespeichert."
+
+#: src/components/BotEditor.vue
+msgid "Web page · read after the bot is created"
+msgstr "Webseite · wird gelesen, sobald der Bot erstellt ist"
+
+#: src/components/BotEditor.vue
+msgid "Folder · read after the bot is created"
+msgstr "Ordner · wird gelesen, sobald der Bot erstellt ist"
+
+#: src/components/BotEditor.vue
+msgid "File · read after the bot is created"
+msgstr "Datei · wird gelesen, sobald der Bot erstellt ist"
+
+#: src/components/BotEditor.vue
+msgid "Right after creation, only for you"
+msgstr "Gleich nach dem Erstellen, nur für dich"
+
+#: src/components/BotEditor.vue
+msgid "After approval by {reviewers}"
+msgstr "Nach Freigabe durch {reviewers}"
+
+#: src/components/BotEditor.vue
+msgid "Right after creation"
+msgstr "Gleich nach dem Erstellen"
+
+#: src/components/BotEditor.vue
+msgid "Basics"
+msgstr "Grundlagen"
+
+#: src/components/BotEditor.vue
+msgid "Who uses it?"
+msgstr "Wer nutzt ihn?"
+
+#: src/components/BotEditor.vue
+msgid "Could not add “{name}” to the knowledge."
+msgstr "„{name}“ konnte nicht zum Wissen hinzugefügt werden."
+
+#: src/components/BotEditor.vue
+msgid "{kind} · last read {date}"
+msgstr "{kind} · zuletzt gelesen {date}"
+
+#: src/components/BotEditor.vue
+msgid "Reading"
+msgstr "Wird gelesen"
+
+#: src/components/BotEditor.vue
+msgid "Not readable"
+msgstr "Nicht lesbar"
+
+#: src/components/BotEditor.vue
+msgid "This source could not be read."
+msgstr "Diese Quelle konnte nicht gelesen werden."
+
+#: src/components/BotEditor.vue
+msgid "Give the bot a name."
+msgstr "Gib dem Bot einen Namen."
+
+#: src/components/BotEditor.vue
+msgid "Choose how the bot is mentioned in Talk."
+msgstr "Lege fest, wie der Bot in Talk erwähnt wird."
+
+#: src/components/BotEditor.vue
+msgid "Describe what the bot should do."
+msgstr "Beschreibe, was der Bot tun soll."
+
+#: src/components/BotEditor.vue
+msgid "Choose at least one group."
+msgstr "Wähle mindestens eine Gruppe."
+
+#: src/components/BotEditor.vue
+msgid "Choose at least one team."
+msgstr "Wähle mindestens ein Team."
+
+#: src/components/BotSubmitDialog.vue
+msgid "%n source · reviewers can open it"
+msgid_plural "%n sources · reviewers can open them"
+msgstr[0] "%n Quelle · Prüfende können sie öffnen"
+msgstr[1] "%n Quellen · Prüfende können sie öffnen"
+
+#: src/components/BotSubmitDialog.vue
+msgid "Reviewed by: {reviewers}"
+msgstr "Es prüfen: {reviewers}"
+
+#: src/components/BotSubmitDialog.vue
+msgid "Why should the bot be shared?"
+msgstr "Warum soll der Bot geteilt werden?"
+
+#: src/components/BotSubmitDialog.vue
+msgid "For example: what does the group need the bot for?"
+msgstr "Zum Beispiel: Wofür braucht die Gruppe den Bot?"
+
+#: src/components/BotSubmitDialog.vue
+msgid "Sent along automatically"
+msgstr "Geht automatisch mit"
+
+#: src/components/BotSubmitDialog.vue
+msgid "Description, instruction and capabilities"
+msgstr "Beschreibung, Anweisung und Funktionen"
+
+#: src/components/BotSubmitDialog.vue
+msgid "from your entries"
+msgstr "aus deinen Angaben"
+
+#: src/components/BotSubmitDialog.vue
+msgid "List of knowledge sources"
+msgstr "Liste der Wissensquellen"
+
+#: src/components/BotSubmitDialog.vue
+msgid "Until approval only you and the reviewers can use the bot. You can keep testing it in Talk with {mention}."
+msgstr "Bis zur Freigabe können nur du und die Prüfenden den Bot nutzen. In Talk kannst du ihn mit {mention} weiter testen."
+
+#: src/components/BotSubmitDialog.vue
+msgid "Submitting…"
+msgstr "Wird eingereicht…"
+
+#: src/components/BotSubmitDialog.vue
+msgid "Submitted for approval"
+msgstr "Zur Freigabe eingereicht"
+
+#: src/components/BotTalkDialog.vue
+msgid "Use {bot} in Talk"
+msgstr "{bot} in Talk verwenden"
+
+#: src/components/BotTalkDialog.vue
+msgid "Or mention {mention} in any chat"
+msgstr "Oder erwähne {mention} in einem beliebigen Chat"
+
+#: src/components/BotTalkDialog.vue
+msgid "Copy {mention}"
+msgstr "{mention} kopieren"
+
+#: src/components/BotTalkDialog.vue
+msgid "Name of the chat"
+msgstr "Name des Chats"
+
+#: src/components/BotTalkDialog.vue
+msgid "Send the message in my name right away"
+msgstr "Die Nachricht gleich in meinem Namen senden"
+
+#: src/components/BotTalkDialog.vue
+msgid "Questions for {bot}"
+msgstr "Fragen an {bot}"
+
+#: src/components/BotTile.vue
+msgid "Show details"
+msgstr "Details anzeigen"
+
+#: src/components/BotTile.vue
+msgid "newbot"
+msgstr "neuerbot"
+
+#: src/components/admin/BotsTab.vue
+msgid "{count} bot is waiting for approval. Approvals are handled on the {app} page under “To review”."
+msgid_plural "{count} bots are waiting for approval. Approvals are handled on the {app} page under “To review”."
+msgstr[0] "{count} Bot wartet auf Freigabe. Freigaben werden auf der {app}-Seite unter „Zur Prüfung“ bearbeitet."
+msgstr[1] "{count} Bots warten auf Freigabe. Freigaben werden auf der {app}-Seite unter „Zur Prüfung“ bearbeitet."
+
+#: src/utils/botDiff.js
+msgid "Name: {value}"
+msgstr "Name: {value}"
+
+#: src/utils/botDiff.js
+msgid "Description: {value}"
+msgstr "Beschreibung: {value}"
+
+#: src/utils/botDiff.js
+msgid "For: {value}"
+msgstr "Für: {value}"
+
+#: src/utils/botDiff.js
+msgid "Capability: {value}"
+msgstr "Funktion: {value}"
+
+#: src/utils/botDiff.js
+msgid "Knowledge search turned on"
+msgstr "Wissenssuche eingeschaltet"
+
+#: src/utils/botDiff.js
+msgid "Knowledge search turned off"
+msgstr "Wissenssuche ausgeschaltet"
+
+#: src/utils/botDiff.js
+msgid "Model: {value}"
+msgstr "Modell: {value}"
+
+#: src/utils/botDiff.js
+msgid "Creativity: default of the administration"
+msgstr "Kreativität: Standard der Administration"
+
+#: src/utils/botDiff.js
+msgid "Creativity: {value}"
+msgstr "Kreativität: {value}"
+
+#: src/utils/botDiff.js
+msgid "Starter questions changed"
+msgstr "Einstiegsfragen geändert"
+
+#: src/utils/botScope.js
+msgid "Team {names}"
+msgid_plural "Teams {names}"
+msgstr[0] "Team {names}"
+msgstr[1] "Teams {names}"
+
+#: src/utils/botScope.js
+msgid "Group {names}"
+msgid_plural "Groups {names}"
+msgstr[0] "Gruppe {names}"
+msgstr[1] "Gruppen {names}"
+
+#: src/utils/botScope.js
+msgid "the admins of the team {names}"
+msgid_plural "the admins of the teams {names}"
+msgstr[0] "die Admins des Teams {names}"
+msgstr[1] "die Admins der Teams {names}"
+
+#: src/utils/botScope.js
+msgid "the admins of the group {names}"
+msgid_plural "the admins of the groups {names}"
+msgstr[0] "die Admins der Gruppe {names}"
+msgstr[1] "die Admins der Gruppen {names}"
+
+#: src/utils/botScope.js
+msgid "Only you"
+msgstr "Nur du"
+
+#: src/utils/botScope.js
+msgid "Everyone"
+msgstr "Alle Personen"
+
+#: src/utils/botScope.js
+msgid "the administration"
+msgstr "die Administration"
+
+#: src/utils/botScope.js
+msgid "the admins of the team"
+msgstr "die Admins des Teams"
+
+#: src/utils/botScope.js
+msgid "the admins of the group"
+msgstr "die Admins der Gruppe"
+
+#: src/utils/botStatus.js
+msgid "Not submitted yet"
+msgstr "Noch nicht eingereicht"
+
+#: src/utils/botStatus.js
+msgid "Feedback"
+msgstr "Rückmeldung"
+
+#: src/utils/botStatus.js
+msgid "Change in review"
+msgstr "Änderung in Prüfung"
+
+#: src/utils/botStatus.js
+msgid "The current version stays live until approval."
+msgstr "Die aktuelle Version bleibt bis zur Freigabe aktiv."
+
+#: src/utils/botStatus.js
+msgid "In review"
+msgstr "In Prüfung"
+
+#: src/utils/botStatus.js
+msgid "Until approval only you and the reviewers can use it."
+msgstr "Bis zur Freigabe können nur du und die Prüfenden ihn nutzen."
+
+#: src/utils/botStatus.js
+msgid "Change rejected"
+msgstr "Änderung abgelehnt"
+
+#: src/utils/capabilities.js
+msgid "{name} · %n source"
+msgid_plural "{name} · %n sources"
+msgstr[0] "{name} · %n Quelle"
+msgstr[1] "{name} · %n Quellen"
+
+#: src/utils/capabilities.js
+msgid "Search the knowledge"
+msgstr "Wissen durchsuchen"
+
+#: src/utils/capabilities.js
+msgid "Answers from the sources you add and names where it found them."
+msgstr "Antwortet aus den Quellen, die du hinzufügst, und nennt die Fundstelle."
+
+#: src/utils/capabilities.js
+msgid "Documents in chat"
+msgstr "Dokumente im Chat"
+
+#: src/utils/capabilities.js
+msgid "Read documents in chat"
+msgstr "Dokumente im Chat lesen"
+
+#: src/utils/capabilities.js
+msgid "When someone puts a file into the chat."
+msgstr "Wenn jemand eine Datei in den Chat gibt."
+
+#: src/utils/capabilities.js
+msgid "Understand images"
+msgstr "Bilder verstehen"
+
+#: src/utils/capabilities.js
+msgid "Screenshots, photos and diagrams in the chat."
+msgstr "Screenshots, Fotos und Diagramme im Chat."
+
+#: src/utils/capabilities.js
+msgid "Voice"
+msgstr "Sprache"
+
+#: src/utils/capabilities.js
+msgid "Understand voice messages"
+msgstr "Sprachnachrichten verstehen"
+
+#: src/utils/capabilities.js
+msgid "Voice messages and audio files in the chat."
+msgstr "Sprachnachrichten und Audiodateien im Chat."
+
+#: src/utils/capabilities.js
+msgid "Search the course catalogue"
+msgstr "Kurskatalog durchsuchen"
+
+#: src/utils/capabilities.js
+msgid "Current courses, dates and registration."
+msgstr "Aktuelle Kurse, Termine und Anmeldung."
+
+#: src/views/App.vue
+msgid "Discover"
+msgstr "Entdecken"
+
+#: src/views/App.vue
+msgid "To review"
+msgstr "Zur Prüfung"
+
+#: src/views/App.vue
+msgid "How {appName} works"
+msgstr "So funktioniert {appName}"
+
+#: src/views/BotPage.vue
+msgid "%n source is not readable."
+msgid_plural "%n sources are not readable."
+msgstr[0] "%n Quelle ist nicht lesbar."
+msgstr[1] "%n Quellen sind nicht lesbar."
+
+#: src/views/BotPage.vue
+msgid "%n problem"
+msgid_plural "%n problems"
+msgstr[0] "%n Problem"
+msgstr[1] "%n Probleme"
+
+#: src/views/BotPage.vue
+msgid "Back to My bots"
+msgstr "Zurück zu Meine Bots"
+
+#: src/views/BotPage.vue
+msgid "Loading bot…"
+msgstr "Bot wird geladen…"
+
+#: src/views/BotPage.vue
+msgid "Breadcrumb"
+msgstr "Brotkrumenpfad"
+
+#: src/views/BotPage.vue
+msgid "More actions"
+msgstr "Weitere Aktionen"
+
+#: src/views/BotPage.vue
+msgid "Bot settings"
+msgstr "Bot-Einstellungen"
+
+#: src/views/BotPage.vue
+msgid "Fix"
+msgstr "Beheben"
+
+#: src/views/BotPage.vue
+msgid "In short"
+msgstr "Kurz gesagt"
+
+#: src/views/BotPage.vue
+msgid "History"
+msgstr "Verlauf"
+
+#: src/views/BotPage.vue
+msgid "Creation and approval of this bot."
+msgstr "Erstellung und Freigabe dieses Bots."
+
+#: src/views/BotPage.vue
+msgid "You see the version that is in review. The approved version stays live until approval."
+msgstr "Du siehst die Version, die in Prüfung ist. Die freigegebene Version bleibt bis zur Freigabe aktiv."
+
+#: src/views/BotPage.vue
+msgid "Added:"
+msgstr "Hinzugefügt:"
+
+#: src/views/BotPage.vue
+msgid "Removed:"
+msgstr "Entfernt:"
+
+#: src/views/BotPage.vue
+msgid "Reviewer: “{feedback}”"
+msgstr "Prüfende Person: „{feedback}“"
+
+#: src/views/BotPage.vue
+msgid "Save your changes first."
+msgstr "Speichere zuerst deine Änderungen."
+
+#: src/views/BotPage.vue
+msgid "Bot ID"
+msgstr "Bot-ID"
+
+#: src/views/BotPage.vue
+msgid "They only go live after a new approval."
+msgstr "Sie werden erst nach einer neuen Freigabe aktiv."
+
+#: src/views/BotPage.vue
+msgid "Delete {bot}?"
+msgstr "{bot} löschen?"
+
+#: src/views/BotPage.vue
+msgid "The bot, its knowledge index and its conversation history are deleted. Files in your Nextcloud stay unchanged."
+msgstr "Der Bot, sein Wissensindex und sein Gesprächsverlauf werden gelöscht. Dateien in deiner Nextcloud bleiben unverändert."
+
+#: src/views/BotPage.vue
+msgid "Leave without saving? Your changes will be lost."
+msgstr "Ohne Speichern verlassen? Deine Änderungen gehen verloren."
+
+#: src/views/BotPage.vue
+msgid "Access & approval"
+msgstr "Zugriff & Freigabe"
+
+#: src/views/BotPage.vue
+msgid "Save and submit"
+msgstr "Speichern und einreichen"
+
+#: src/views/BotPage.vue
+msgid "Your changes from {date} are being reviewed. Until approval the previous version keeps running."
+msgstr "Deine Änderungen vom {date} werden geprüft. Bis zur Freigabe läuft die bisherige Version weiter."
+
+#: src/views/BotPage.vue
+msgid "Your changes are being reviewed. Until approval the previous version keeps running."
+msgstr "Deine Änderungen werden geprüft. Bis zur Freigabe läuft die bisherige Version weiter."
+
+#: src/views/BotPage.vue
+msgid "Waiting for approval by {reviewers}. Until then only you and the reviewers can use the bot."
+msgstr "Wartet auf Freigabe durch {reviewers}. Bis dahin können nur du und die Prüfenden den Bot nutzen."
+
+#: src/views/BotPage.vue
+msgid "This bot is a draft: only you can use it. Test it in Talk, then submit it for approval."
+msgstr "Dieser Bot ist ein Entwurf: Nur du kannst ihn nutzen. Teste ihn in Talk und reiche ihn dann zur Freigabe ein."
+
+#: src/views/BotPage.vue
+msgid "The reviewer sent it back: “{feedback}” Revise the bot and submit it again."
+msgstr "Die Prüfung hat ihn zurückgegeben: „{feedback}“ Überarbeite den Bot und reiche ihn erneut ein."
+
+#: src/views/BotPage.vue
+msgid "Your last change was not approved: “{feedback}” The approved version stays live."
+msgstr "Deine letzte Änderung wurde nicht freigegeben: „{feedback}“ Die freigegebene Version bleibt aktiv."
+
+#: src/views/BotPage.vue
+msgid "A bot only for you needs no approval."
+msgstr "Ein Bot nur für dich braucht keine Freigabe."
+
+#: src/views/BotPage.vue
+msgid "Not submitted yet. Reviewed by: {reviewers}."
+msgstr "Noch nicht eingereicht. Es prüfen: {reviewers}."
+
+#: src/views/BotPage.vue
+msgid "Sent back by the reviewer. Revise the bot and submit it again."
+msgstr "Von der Prüfung zurückgegeben. Überarbeite den Bot und reiche ihn erneut ein."
+
+#: src/views/BotPage.vue
+msgid "Submitted on {date}. Reviewed by: {reviewers}."
+msgstr "Eingereicht am {date}. Es prüfen: {reviewers}."
+
+#: src/views/BotPage.vue
+msgid "A change was submitted on {date} and is waiting for approval. The approved version stays live."
+msgstr "Am {date} wurde eine Änderung eingereicht, sie wartet auf Freigabe. Die freigegebene Version bleibt aktiv."
+
+#: src/views/BotPage.vue
+msgid "Approved on {date}. Later changes are reviewed again."
+msgstr "Freigegeben am {date}. Spätere Änderungen werden erneut geprüft."
+
+#: src/views/BotPage.vue
+msgid "Approved. Later changes are reviewed again."
+msgstr "Freigegeben. Spätere Änderungen werden erneut geprüft."
+
+#: src/views/BotPage.vue
+msgid "Created"
+msgstr "Erstellt"
+
+#: src/views/BotPage.vue
+msgid "Change submitted"
+msgstr "Änderung eingereicht"
+
+#: src/views/BotPage.vue
+msgid "Sent back by the reviewer"
+msgstr "Von der Prüfung zurückgegeben"
+
+#: src/views/BotPage.vue
+msgid "You cannot edit this bot."
+msgstr "Du kannst diesen Bot nicht bearbeiten."
+
+#: src/views/BotPage.vue
+msgid "This bot could not be loaded."
+msgstr "Dieser Bot konnte nicht geladen werden."
+
+#: src/views/BotPage.vue
+msgid "Saved and submitted. The change goes live after approval."
+msgstr "Gespeichert und eingereicht. Die Änderung wird nach der Freigabe aktiv."
+
+#: src/views/BotPage.vue
+msgid "Saved as draft. Submit it for approval when it is ready."
+msgstr "Als Entwurf gespeichert. Reiche ihn zur Freigabe ein, wenn er fertig ist."
+
+#: src/views/BotPage.vue
+msgid "Saved"
+msgstr "Gespeichert"
+
+#: src/views/Discover.vue
+msgid "Bots you can use in Talk. Mention a bot with @ in any chat or start a conversation directly."
+msgstr "Bots, die du in Talk nutzen kannst. Erwähne einen Bot mit @ in einem beliebigen Chat oder starte direkt ein Gespräch."
+
+#: src/views/Discover.vue
+msgid "Search bots by name or topic"
+msgstr "Bots nach Name oder Thema suchen"
+
+#: src/views/Discover.vue
+msgid "Filter by who can use the bot"
+msgstr "Filtern nach dem, der den Bot nutzen kann"
+
+#: src/views/Discover.vue
+msgid "No bot matches your search."
+msgstr "Kein Bot passt zu deiner Suche."
+
+#: src/views/Discover.vue
+msgid "No bots for this filter."
+msgstr "Keine Bots für diesen Filter."
+
+#: src/views/Discover.vue
+msgid "The bots could not be loaded"
+msgstr "Die Bots konnten nicht geladen werden"
+
+#: src/views/Discover.vue
+msgid "Try again"
+msgstr "Erneut versuchen"
+
+#: src/views/Discover.vue
+msgid "No bots yet"
+msgstr "Noch keine Bots"
+
+#: src/views/Discover.vue
+msgid "Bots that are shared with you appear here, and so do the ones you create yourself."
+msgstr "Hier erscheinen Bots, die mit dir geteilt sind, und die, die du selbst erstellst."
+
+#: src/views/Discover.vue
+msgid "My groups"
+msgstr "Meine Gruppen"
+
+#: src/views/Guide.vue
+msgid "Bots answer in Talk. You use the ones that are shared with you, and you can create your own."
+msgstr "Bots antworten in Talk. Du nutzt die, die mit dir geteilt sind, und kannst eigene erstellen."
+
+#: src/views/Guide.vue
+msgid "Use a bot"
+msgstr "Einen Bot nutzen"
+
+#: src/views/Guide.vue
+msgid "In any Talk chat, mention the bot with @ and ask your question. Under “Discover” you find all bots you can use, and “Use in Talk” opens a chat with the first message already written."
+msgstr "Erwähne den Bot in einem beliebigen Talk-Chat mit @ und stell deine Frage. Unter „Entdecken“ findest du alle Bots, die du nutzen kannst, und „In Talk verwenden“ öffnet einen Chat, in dem die erste Nachricht schon steht."
+
+#: src/views/Guide.vue
+msgid "Your data"
+msgstr "Deine Daten"
+
+#: src/views/Guide.vue
+msgid "Files stay in your Nextcloud. A bot only reads the sources its creator selected and the files you put into the chat. “Activity” shows your own conversations with bots, and only you see it."
+msgstr "Dateien bleiben in deiner Nextcloud. Ein Bot liest nur die Quellen, die bei seiner Erstellung ausgewählt wurden, und die Dateien, die du in den Chat gibst. „Aktivität“ zeigt deine eigenen Gespräche mit Bots, und nur du siehst sie."
+
+#: src/views/Guide.vue
+msgid "One colour per audience"
+msgstr "Eine Farbe je Zielgruppe"
+
+#: src/views/Guide.vue
+msgid "The colour of a bot tells who can use it. The same information always stands next to it as text."
+msgstr "Die Farbe eines Bots zeigt, wer ihn nutzen kann. Dieselbe Angabe steht immer auch als Text daneben."
+
+#: src/views/Guide.vue
+msgid "From an idea to a shared bot"
+msgstr "Von der Idee zum geteilten Bot"
+
+#: src/views/Guide.vue
+msgid "A bot only for you is active right away. A bot for a group, a team or everyone is reviewed first."
+msgstr "Ein Bot nur für dich ist sofort aktiv. Ein Bot für eine Gruppe, ein Team oder alle wird erst geprüft."
+
+#: src/views/Guide.vue
+msgid "Until approval only you and the reviewers can use the bot. Later changes to an approved bot are reviewed again, and the approved version stays live in the meantime."
+msgstr "Bis zur Freigabe können nur du und die Prüfenden den Bot nutzen. Spätere Änderungen an einem freigegebenen Bot werden erneut geprüft, die freigegebene Version bleibt solange aktiv."
+
+#: src/views/Guide.vue
+msgid "Nobody else sees the bot. No approval needed."
+msgstr "Niemand sonst sieht den Bot. Keine Freigabe nötig."
+
+#: src/views/Guide.vue
+msgid "Everyone in this Nextcloud."
+msgstr "Alle in dieser Nextcloud."
+
+#: src/views/MyBots.vue
+msgid "Bots you created. See at a glance what is live, what is waiting for approval and where something needs your attention."
+msgstr "Bots, die du erstellt hast. Du siehst auf einen Blick, was aktiv ist, was auf Freigabe wartet und wo etwas deine Aufmerksamkeit braucht."
+
+#: src/views/MyBots.vue
+msgid "Bot"
+msgstr "Bot"
+
+#: src/views/MyBots.vue
+msgid "Revise"
+msgstr "Überarbeiten"
+
+#: src/views/MyBots.vue
+msgid "More actions for {bot}"
+msgstr "Weitere Aktionen für {bot}"
+
+#: src/views/MyBots.vue
+msgid "Your bots could not be loaded"
+msgstr "Deine Bots konnten nicht geladen werden"
+
+#: src/views/MyBots.vue
+msgid "You have not created a bot yet"
+msgstr "Du hast noch keinen Bot erstellt"
+
+#: src/views/MyBots.vue
+msgid "A bot answers in Talk with the knowledge and the instruction you give it. A template gets you started in a few minutes."
+msgstr "Ein Bot antwortet in Talk mit dem Wissen und der Anweisung, die du ihm gibst. Mit einer Vorlage bist du in wenigen Minuten startklar."
+
+#: src/views/MyBots.vue
+msgid "Knowledge is on"
+msgstr "Wissen ist an"
+
+#: src/views/NewBot.vue
+msgid "Choose a starting point. A template prefills the instruction and the capabilities, you can change everything afterwards."
+msgstr "Wähle einen Ausgangspunkt. Eine Vorlage füllt Anweisung und Funktionen vor, du kannst danach alles ändern."
+
+#: src/views/NewBot.vue
+msgid "Go to bot page"
+msgstr "Zur Bot-Seite"
+
+#: src/views/NewBot.vue
+msgid "Test in Talk"
+msgstr "In Talk testen"
+
+#: src/views/NewBot.vue
+msgid "Nothing is saved until you finish."
+msgstr "Bis zum Abschluss wird nichts gespeichert."
+
+#: src/views/NewBot.vue
+msgid "Step {step} of {total} · {name}"
+msgstr "Schritt {step} von {total} · {name}"
+
+#: src/views/NewBot.vue
+msgid "Back"
+msgstr "Zurück"
+
+#: src/views/NewBot.vue
+msgid "Keep as draft"
+msgstr "Als Entwurf behalten"
+
+#: src/views/NewBot.vue
+msgid "Draft · not live yet"
+msgstr "Entwurf · noch nicht aktiv"
+
+#: src/views/NewBot.vue
+msgid "How the bot appears"
+msgstr "So erscheint der Bot"
+
+#: src/views/NewBot.vue
+msgid "At a glance"
+msgstr "Auf einen Blick"
+
+#: src/views/NewBot.vue
+msgid "Goes live"
+msgstr "Wird aktiv"
+
+#: src/views/NewBot.vue
+msgid "Try it out"
+msgstr "Ausprobieren"
+
+#: src/views/NewBot.vue
+msgid "Leave without creating the bot? Your entries will be lost."
+msgstr "Verlassen, ohne den Bot zu erstellen? Deine Eingaben gehen verloren."
+
+#: src/views/NewBot.vue
+msgid "What is the bot called and what should it do? That is all you need to get started."
+msgstr "Wie heißt der Bot und was soll er tun? Mehr brauchst du für den Anfang nicht."
+
+#: src/views/NewBot.vue
+msgid "This decides whether the bot is live right away or reviewed first. It also sets the colour of the bot."
+msgstr "Das entscheidet, ob der Bot sofort aktiv ist oder erst geprüft wird. Es bestimmt auch die Farbe des Bots."
+
+#: src/views/NewBot.vue
+msgid "What should the bot know?"
+msgstr "Was soll der Bot wissen?"
+
+#: src/views/NewBot.vue
+msgid "Add files, folders or web pages. As soon as there are sources, the bot searches them. No extra switch needed."
+msgstr "Füge Dateien, Ordner oder Webseiten hinzu. Sobald es Quellen gibt, durchsucht der Bot sie. Ein zusätzlicher Schalter ist nicht nötig."
+
+#: src/views/NewBot.vue
+msgid "What should the bot be able to do?"
+msgstr "Was soll der Bot können?"
+
+#: src/views/NewBot.vue
+msgid "The template has set recommendations. Turn on only what the bot needs."
+msgstr "Die Vorlage hat Empfehlungen gesetzt. Schalte nur ein, was der Bot braucht."
+
+#: src/views/NewBot.vue
+msgid "Check & finish"
+msgstr "Prüfen & fertig"
+
+#: src/views/NewBot.vue
+msgid "Check and finish"
+msgstr "Prüfen und abschließen"
+
+#: src/views/NewBot.vue
+msgid "If everything fits, finish the creation. You can test the bot in Talk right afterwards."
+msgstr "Wenn alles passt, schließ das Erstellen ab. Du kannst den Bot gleich danach in Talk testen."
+
+#: src/views/NewBot.vue
+msgid "New bot: {name}"
+msgstr "Neuer Bot: {name}"
+
+#: src/views/NewBot.vue
+msgid "Questions from documents"
+msgstr "Fragen aus Dokumenten"
+
+#: src/views/NewBot.vue
+msgid "Answers from files, folders and web pages and names where it found the answer."
+msgstr "Antwortet aus Dateien, Ordnern und Webseiten und nennt die Fundstelle."
+
+#: src/views/NewBot.vue
+msgid "Knowledge · Documents in chat"
+msgstr "Wissen · Dokumente im Chat"
+
+#: src/views/NewBot.vue
+msgid "You answer questions from the stored documents. Answer in a friendly and concise way and always name where you found the answer. If you are not sure about something, say so."
+msgstr "Du beantwortest Fragen aus den hinterlegten Dokumenten. Antworte freundlich und knapp und nenne immer, wo du die Antwort gefunden hast. Wenn du dir bei etwas nicht sicher bist, sag das."
+
+#: src/views/NewBot.vue
+msgid "Learning companion"
+msgstr "Lernbegleiter"
+
+#: src/views/NewBot.vue
+msgid "Explains the content of a course, asks practice questions and gives feedback."
+msgstr "Erklärt die Inhalte einer Lehrveranstaltung, stellt Übungsfragen und gibt Rückmeldung."
+
+#: src/views/NewBot.vue
+msgid "Knowledge · Documents in chat · Images"
+msgstr "Wissen · Dokumente im Chat · Bilder"
+
+#: src/views/NewBot.vue
+msgid "You are a patient learning companion for a course. Explain the content step by step, ask one practice question at a time and give feedback on the answer. Rely on the stored documents."
+msgstr "Du bist ein geduldiger Lernbegleiter für eine Lehrveranstaltung. Erkläre die Inhalte Schritt für Schritt, stell immer nur eine Übungsfrage und gib Rückmeldung zur Antwort. Stütze dich auf die hinterlegten Dokumente."
+
+#: src/views/NewBot.vue
+msgid "Writing help"
+msgstr "Schreibhilfe"
+
+#: src/views/NewBot.vue
+msgid "Gives feedback on texts that are shared in the chat."
+msgstr "Gibt Rückmeldung zu Texten, die im Chat geteilt werden."
+
+#: src/views/NewBot.vue
+msgid "Documents in chat · Images"
+msgstr "Dokumente im Chat · Bilder"
+
+#: src/views/NewBot.vue
+msgid "You give constructive feedback on texts that people share in the chat: structure, style and citations. Say what works and what to improve. Do not rewrite whole passages."
+msgstr "Du gibst konstruktive Rückmeldung zu Texten, die im Chat geteilt werden: Aufbau, Stil und Zitierweise. Sag, was gelungen ist und was besser werden kann. Schreib keine ganzen Passagen um."
+
+#: src/views/NewBot.vue
+msgid "Team knowledge"
+msgstr "Team-Wissen"
+
+#: src/views/NewBot.vue
+msgid "Answers from the shared folders, decisions and runbooks of your team."
+msgstr "Antwortet aus den geteilten Ordnern, Entscheidungen und Runbooks deines Teams."
+
+#: src/views/NewBot.vue
+msgid "You answer questions of the team from its shared documents: decisions, runbooks and notes. Name the document you used. If the documents do not contain the answer, say so."
+msgstr "Du beantwortest Fragen des Teams aus seinen geteilten Dokumenten: Entscheidungen, Runbooks und Notizen. Nenne das Dokument, das du verwendet hast. Wenn die Dokumente die Antwort nicht enthalten, sag das."
+
+#: src/views/NewBot.vue
+msgid "Start from scratch"
+msgstr "Leer beginnen"
+
+#: src/views/NewBot.vue
+msgid "No defaults. You describe yourself what the bot should do."
+msgstr "Keine Vorgaben. Du beschreibst selbst, was der Bot tun soll."
+
+#: src/views/NewBot.vue
+msgid "Create and submit for approval"
+msgstr "Erstellen und zur Freigabe einreichen"
+
+#: src/views/NewBot.vue
+msgid "After creation the bot is available right away in your chats with {mention}."
+msgstr "Nach dem Erstellen ist der Bot in deinen Chats sofort mit {mention} verfügbar."
+
+#: src/views/NewBot.vue
+msgid "The bot needs approval. Reviewed by: {reviewers}. Until then you can already test it yourself in Talk with {mention}."
+msgstr "Der Bot braucht eine Freigabe. Es prüfen: {reviewers}. Bis dahin kannst du ihn in Talk schon selbst mit {mention} testen."
+
+#: src/views/NewBot.vue
+msgid "You administer this audience, so the bot is live for it right after creation."
+msgstr "Du verwaltest diese Zielgruppe, deshalb ist der Bot für sie gleich nach dem Erstellen aktiv."
+
+#: src/views/NewBot.vue
+msgid "Submitted"
+msgstr "Eingereicht"
+
+#: src/views/NewBot.vue
+msgid "Reviewed by: {reviewers}. Until approval only you and the reviewers can use the bot."
+msgstr "Es prüfen: {reviewers}. Bis zur Freigabe können nur du und die Prüfenden den Bot nutzen."
+
+#: src/views/NewBot.vue
+msgid "Saved as draft"
+msgstr "Als Entwurf gespeichert"
+
+#: src/views/NewBot.vue
+msgid "Test it in Talk with {mention} and submit it for approval when it is ready. You find it under “My bots”."
+msgstr "Teste ihn in Talk mit {mention} und reiche ihn zur Freigabe ein, wenn er fertig ist. Du findest ihn unter „Meine Bots“."
+
+#: src/views/NewBot.vue
+msgid "Your bot is ready"
+msgstr "Dein Bot ist bereit"
+
+#: src/views/NewBot.vue
+msgid "Mention {mention} in a Talk chat or start a conversation directly."
+msgstr "Erwähne {mention} in einem Talk-Chat oder starte direkt ein Gespräch."
+
+#: src/views/NewBot.vue
+msgid "The bot could not be created. Check the name and the mention, another bot may already use them."
+msgstr "Der Bot konnte nicht erstellt werden. Prüfe Name und Erwähnung, vielleicht verwendet sie schon ein anderer Bot."
+
+#: src/views/PersonalActivity.vue
+msgid "Your conversations with bots and what happened in the background. Only you see this page."
+msgstr "Deine Gespräche mit Bots und was im Hintergrund passiert ist. Nur du siehst diese Seite."
+
+#: src/views/PersonalActivity.vue
+msgid "Search activity"
+msgstr "Aktivität durchsuchen"
+
+#: src/views/PersonalActivity.vue
+msgid "Filter activity"
+msgstr "Aktivität filtern"
+
+#: src/views/PersonalActivity.vue
+msgid "Errors only"
+msgstr "Nur Fehler"
+
+#: src/views/PersonalActivity.vue
+msgid "With tools"
+msgstr "Mit Werkzeugen"
+
+#: src/views/PersonalActivity.vue
+msgid "More filters"
+msgstr "Weitere Filter"
+
+#: src/views/PersonalActivity.vue
+msgid "status, bot and period"
+msgstr "Status, Bot und Zeitraum"
+
+#: src/views/PersonalActivity.vue
+msgid "Answer from {bot}"
+msgstr "Antwort von {bot}"
+
+#: src/views/PersonalActivity.vue
+msgid "Today"
+msgstr "Heute"
+
+#: src/views/PersonalActivity.vue
+msgid "Yesterday"
+msgstr "Gestern"
+
+#: src/views/PersonalSettings.vue
+msgid "Your bots, the bots you can use and your activity now live on one page."
+msgstr "Deine Bots, die Bots, die du nutzen kannst, und deine Aktivität stehen jetzt auf einer Seite."
+
+#: src/views/PersonalSettings.vue
+msgid "Open {appName}"
+msgstr "{appName} öffnen"
+
+#: src/views/Review.vue
+msgid "Bots waiting for approval for your groups and teams. You only see what you are allowed to approve."
+msgstr "Bots, die für deine Gruppen und Teams auf Freigabe warten. Du siehst nur, was du freigeben darfst."
+
+#: src/views/Review.vue
+msgid "The reviews could not be loaded"
+msgstr "Die Prüfungen konnten nicht geladen werden"
+
+#: src/views/Review.vue
+msgid "Loading reviews…"
+msgstr "Prüfungen werden geladen…"
+
+#: src/views/Review.vue
+msgid "Everything reviewed"
+msgstr "Alles geprüft"
+
+#: src/views/Review.vue
+msgid "New requests appear here."
+msgstr "Neue Anträge erscheinen hier."
+
+#: src/views/Review.vue
+msgid "Bots to review"
+msgstr "Bots zur Prüfung"
+
+#: src/views/Review.vue
+msgid "Changed bot"
+msgstr "Geänderter Bot"
+
+#: src/views/Review.vue
+msgid "Change to an approved bot"
+msgstr "Änderung an einem freigegebenen Bot"
+
+#: src/views/Review.vue
+msgid "Test it yourself"
+msgstr "Selbst testen"
+
+#: src/views/Review.vue
+msgid "What has changed?"
+msgstr "Was hat sich geändert?"
+
+#: src/views/Review.vue
+msgid "Compared with the approved version, which stays live until you decide."
+msgstr "Im Vergleich zur freigegebenen Version, die aktiv bleibt, bis du entscheidest."
+
+#: src/views/Review.vue
+msgid "No difference in the fields this view compares. Check the instruction and the sources below."
+msgstr "Kein Unterschied in den Feldern, die diese Ansicht vergleicht. Prüfe unten die Anweisung und die Quellen."
+
+#: src/views/Review.vue
+msgid "Reason"
+msgstr "Begründung"
+
+#: src/views/Review.vue
+msgid "No reason given."
+msgstr "Keine Begründung angegeben."
+
+#: src/views/Review.vue
+msgid "How it was tested: {text}"
+msgstr "So wurde getestet: {text}"
+
+#: src/views/Review.vue
+msgid "Description and instruction"
+msgstr "Beschreibung und Anweisung"
+
+#: src/views/Review.vue
+msgid "Feedback for {owner}"
+msgstr "Rückmeldung für {owner}"
+
+#: src/views/Review.vue
+msgid "optional, sent along when you reject"
+msgstr "optional, geht beim Ablehnen mit"
+
+#: src/views/Review.vue
+msgid "Reject {bot}?"
+msgstr "{bot} ablehnen?"
+
+#: src/views/Review.vue
+msgid "The change is discarded and the approved version stays live."
+msgstr "Die Änderung wird verworfen, die freigegebene Version bleibt aktiv."
+
+#: src/views/Review.vue
+msgid "The bot goes back to {owner} as a draft."
+msgstr "Der Bot geht als Entwurf zurück an {owner}."
+
+#: src/views/Review.vue
+msgid "You have not written feedback. You can reject without it."
+msgstr "Du hast keine Rückmeldung geschrieben. Du kannst auch ohne ablehnen."
+
+#: src/views/Review.vue
+msgid "submitted by {owner} on {date}"
+msgstr "eingereicht von {owner} am {date}"
+
+#: src/views/Review.vue
+msgid "submitted by {owner}"
+msgstr "eingereicht von {owner}"
+
+#: src/views/Review.vue
+msgid "The knowledge sources could not be loaded."
+msgstr "Die Wissensquellen konnten nicht geladen werden."
+
+#: src/views/Review.vue
+msgid "Approved. The new version is live now."
+msgstr "Freigegeben. Die neue Version ist jetzt aktiv."
+
+#: src/views/Review.vue
+msgid "Approved. The bot is live now."
+msgstr "Freigegeben. Der Bot ist jetzt aktiv."
+
+#: src/views/Review.vue
+msgid "Rejected"
+msgstr "Abgelehnt"
+
+#: src/views/Review.vue
+msgid "Rejected. {owner} sees your feedback."
+msgstr "Abgelehnt. {owner} sieht deine Rückmeldung."
+
+#: src/utils/assistant.js
+msgid "Personal assistant"
+msgstr "Persönlicher Assistent"
+
+#: src/utils/assistant.js
+msgid "Your own bot. It knows the folders you choose and helps you search, summarise and write."
+msgstr "Dein eigener Bot. Er kennt die Ordner, die du auswählst, und hilft dir beim Suchen, Zusammenfassen und Formulieren."
+
+#: src/utils/assistant.js
+msgid "You are the personal assistant of one person. Help them search, summarise and write. When you use their files, name the file you took the information from. If you do not know something, say so."
+msgstr "Du bist der persönliche Assistent einer Person. Hilf ihr beim Suchen, Zusammenfassen und Formulieren. Wenn du ihre Dateien verwendest, nenne die Datei, aus der die Information stammt. Wenn du etwas nicht weißt, sag das."
+
+#: src/components/AssistantBanner.vue
+msgid "Your personal assistant"
+msgstr "Dein persönlicher Assistent"
+
+#: src/components/AssistantBanner.vue
+msgid "A bot just for you. It knows the folders you choose and helps you search, summarise and write. Set up in a minute."
+msgstr "Ein Bot nur für dich. Er kennt die Ordner, die du auswählst, und hilft dir beim Suchen, Zusammenfassen und Formulieren. In einer Minute eingerichtet."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Set up your personal assistant"
+msgstr "Persönlichen Assistenten einrichten"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "A bot just for you"
+msgstr "Ein Bot nur für dich"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "What it can do"
+msgstr "Was er kann"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Only you can use it, and it needs no approval. It knows only the folders you add."
+msgstr "Nur du kannst ihn nutzen, und er braucht keine Freigabe. Er kennt nur die Ordner, die du hinzufügst."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Next you choose the folders it may know. Afterwards you find it pinned in first place under “Discover” and “My bots”."
+msgstr "Als Nächstes wählst du die Ordner aus, die er kennen darf. Danach findest du ihn angeheftet an erster Stelle unter „Entdecken“ und „Meine Bots“."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Setting up…"
+msgstr "Wird eingerichtet…"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Your assistant is set up. Now choose the folders it may know."
+msgstr "Dein Assistent ist eingerichtet. Wähle jetzt die Ordner aus, die er kennen darf."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "The assistant could not be set up. Please try again."
+msgstr "Der Assistent konnte nicht eingerichtet werden. Bitte versuche es erneut."
+
+#: src/components/BotTile.vue
+msgid "Pinned"
+msgstr "Angeheftet"
+
+#: src/views/MyBots.vue
+msgid "Not set up yet"
+msgstr "Noch nicht eingerichtet"
+
+#: src/views/MyBots.vue
+msgid "Knows the folders you choose"
+msgstr "Kennt die Ordner, die du auswählst"
+
+#: src/views/MyBots.vue
+msgid "Set up in a minute"
+msgstr "In einer Minute eingerichtet"
+
+#: lib/Controller/BotController.php
+msgid "You already have a personal assistant. You find it under \"My bots\"."
+msgstr "Du hast bereits einen persönlichen Assistenten. Du findest ihn unter „Meine Bots“."
+
+#: src/utils/tour.js
+msgid "Welcome to {appName}"
+msgstr "Willkommen bei {appName}"
+
+#: src/utils/tour.js
+msgid "Bots answer in Talk: mention one with @ in any chat, or start a conversation with it. This short tour shows you where everything is."
+msgstr "Bots antworten in Talk: Erwähne einen mit @ in einem beliebigen Chat oder starte direkt ein Gespräch mit ihm. Dieser kurze Rundgang zeigt dir, wo du was findest."
+
+#: src/utils/tour.js
+msgid "Here you find every bot you can use: the ones shared with you and your own."
+msgstr "Hier findest du alle Bots, die du nutzen kannst: die mit dir geteilten und deine eigenen."
+
+#: src/utils/tour.js
+msgid "A bot just for you that knows the folders you choose. The invitation stays until you set it up; afterwards the assistant is pinned in first place."
+msgstr "Ein Bot nur für dich, der die Ordner kennt, die du auswählst. Die Einladung bleibt, bis du ihn eingerichtet hast; danach steht der Assistent angeheftet an erster Stelle."
+
+#: src/utils/tour.js
+msgid "Find the right bot"
+msgstr "Den passenden Bot finden"
+
+#: src/utils/tour.js
+msgid "Search by name or topic, or filter by who can use a bot."
+msgstr "Suche nach Name oder Thema oder filtere danach, wer einen Bot nutzen kann."
+
+#: src/utils/tour.js
+msgid "A bot at a glance"
+msgstr "Ein Bot auf einen Blick"
+
+#: src/utils/tour.js
+msgid "The colour and the line below say who can use the bot, the labels what it can do. “Use in Talk” opens a chat, a click on the name shows the details."
+msgstr "Die Farbe und die Zeile unten zeigen, wer den Bot nutzen kann, die Schildchen, was er kann. „In Talk verwenden“ öffnet einen Chat, ein Klick auf den Namen zeigt die Details."
+
+#: src/utils/tour.js
+msgid "Create your own bot"
+msgstr "Einen eigenen Bot erstellen"
+
+#: src/utils/tour.js
+msgid "Pick a template and follow five steps. A bot only for you is active right away. A bot for a group, a team or everyone is reviewed first."
+msgstr "Wähle eine Vorlage und folge fünf Schritten. Ein Bot nur für dich ist sofort aktiv. Ein Bot für eine Gruppe, ein Team oder alle Personen wird zuerst geprüft."
+
+#: src/utils/tour.js
+msgid "The bots you created and their state: what is live, what waits for approval and what needs your attention."
+msgstr "Die Bots, die du erstellt hast, und ihr Stand: was aktiv ist, was auf die Freigabe wartet und was deine Aufmerksamkeit braucht."
+
+#: src/utils/tour.js
+msgid "Bots that others submitted for your audience. You see what changes and approve it or send it back."
+msgstr "Bots, die andere für deinen Bereich eingereicht haben. Du siehst, was sich ändert, und gibst frei oder schickst zurück."
+
+#: src/utils/tour.js
+msgid "Your own conversations with bots, step by step. Only you see them."
+msgstr "Deine eigenen Gespräche mit Bots, Schritt für Schritt. Nur du siehst sie."
+
+#: src/utils/tour.js
+msgid "That was the tour"
+msgstr "Das war der Rundgang"
+
+#: src/utils/tour.js
+msgid "You can start it again here at any time. The guide explains the colours and the way to a shared bot."
+msgstr "Du kannst ihn hier jederzeit erneut starten. Die Anleitung erklärt die Farben und den Weg zu einem geteilten Bot."
+
+#: src/components/TalkAiTour.vue
+msgid "Step {step} of {total}"
+msgstr "Schritt {step} von {total}"
+
+#: src/components/TalkAiTour.vue
+msgid "End the tour"
+msgstr "Rundgang beenden"
+
+#: src/components/TalkAiTour.vue
+msgid "Read the guide"
+msgstr "Anleitung lesen"
+
+#: src/components/TalkAiTour.vue
+msgid "Done"
+msgstr "Fertig"
+
+#: src/components/TalkAiTour.vue
+msgid "Start the tour"
+msgstr "Rundgang starten"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "How documents are read"
+msgstr "Wie Dokumente gelesen werden"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "As before (the Docling server decides)"
+msgstr "Wie bisher (der Docling-Server entscheidet)"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Standard pipeline (models on the Docling server)"
+msgstr "Standard-Pipeline (Modelle auf dem Docling-Server)"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Vision model from a server preset"
+msgstr "Vision-Modell aus einem Server-Preset"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Preset on the Docling server"
+msgstr "Preset auf dem Docling-Server"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "“default” uses the preset the server administrator marked as default."
+msgstr "„default“ nutzt das Preset, das die Server-Administration als Standard markiert hat."
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "vision model “{preset}”"
+msgstr "Vision-Modell „{preset}“"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "standard pipeline"
+msgstr "Standard-Pipeline"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Pages are read by the vision model of the preset. The model, its address and its key are set on the Docling server, not here. If the server refuses the preset, the document is not converted another way."
+msgstr "Die Seiten liest das Vision-Modell des Presets. Modell, Adresse und Schlüssel werden auf dem Docling-Server eingestellt, nicht hier. Lehnt der Server das Preset ab, wird das Dokument nicht auf anderem Weg umgewandelt."
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "The Docling server reads documents with its own layout and text recognition models. Large scans need a lot of memory there."
+msgstr "Der Docling-Server liest Dokumente mit seinen eigenen Modellen für Layout und Texterkennung. Große Scans brauchen dort viel Arbeitsspeicher."
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "No pipeline is named. A Docling server then uses its standard pipeline, even when it has a vision preset."
+msgstr "Es wird keine Pipeline genannt. Ein Docling-Server nutzt dann seine Standard-Pipeline, auch wenn er ein Vision-Preset hat."
+
+#: lib/Service/DoclingClient.php
+msgid "Docling rejected the pipeline or the preset (HTTP %s). Check that the server knows the preset and allows it. The document was not converted another way."
+msgstr "Docling hat die Pipeline oder das Preset abgelehnt (HTTP %s). Prüfe, ob der Server das Preset kennt und erlaubt. Das Dokument wurde nicht auf anderem Weg umgewandelt."
+
+#: lib/Service/DoclingClient.php
+msgid "Invalid Docling pipeline. Check the Docling settings."
+msgstr "Ungültige Docling-Pipeline. Prüfe die Docling-Einstellungen."
+
+#: src/components/BotPreviewChat.vue
+msgid "Enter a name and an instruction first. Then you can try here how the bot answers."
+msgstr "Gib zuerst einen Namen und eine Anweisung ein. Dann kannst du hier ausprobieren, wie der Bot antwortet."
+
+#: src/components/BotPreviewChat.vue
+msgid "Preview conversation"
+msgstr "Vorschau-Gespräch"
+
+#: src/components/BotPreviewChat.vue
+msgid "Write a message to see how the bot answers."
+msgstr "Schreib eine Nachricht, um zu sehen, wie der Bot antwortet."
+
+#: src/components/BotPreviewChat.vue
+msgid "Cut off at the output limit."
+msgstr "Am Ausgabelimit abgeschnitten."
+
+#: src/components/BotPreviewChat.vue
+msgid "The bot is writing…"
+msgstr "Der Bot schreibt…"
+
+#: src/components/BotPreviewChat.vue
+msgid "Write a message"
+msgstr "Nachricht schreiben"
+
+#: src/components/BotPreviewChat.vue
+msgid "Message to the bot"
+msgstr "Nachricht an den Bot"
+
+#: src/components/BotPreviewChat.vue
+msgid "Start over"
+msgstr "Neu beginnen"
+
+#: src/components/BotPreviewChat.vue
+msgid "Send"
+msgstr "Senden"
+
+#: src/components/BotPreviewChat.vue
+msgid "Only a preview. The real chat happens in Talk once the bot is created."
+msgstr "Nur eine Vorschau. Der richtige Chat läuft in Talk, sobald der Bot erstellt ist."
+
+#: src/components/BotPreviewChat.vue
+msgid "The preview uses the instruction and the model from the form, without knowledge and capabilities."
+msgstr "Die Vorschau nutzt die Anweisung und das Modell aus dem Formular, ohne Wissen und Funktionen."
+
+#: src/components/BotPreviewChat.vue
+msgid "The preview could not answer. Try again."
+msgstr "Die Vorschau konnte nicht antworten. Versuche es erneut."
+
+#: lib/Controller/BotController.php
+msgid "The preview needs an instruction and a message. Very long conversations cannot be tried here."
+msgstr "Die Vorschau braucht eine Anweisung und eine Nachricht. Sehr lange Gespräche lassen sich hier nicht ausprobieren."
+
+#: lib/Controller/BotController.php
+msgid "The model is busy right now. Try again in a moment."
+msgstr "Das Modell ist gerade ausgelastet. Versuche es gleich noch einmal."
+
+#: lib/Controller/BotController.php
+msgid "The model gave no answer. Try again, or ask your administrator to check the model connection."
+msgstr "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Administration, die Modellverbindung zu prüfen."
+
+#: src/components/admin/ModelsTab.vue
+msgid "Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”."
+msgstr "Gilt für alle Bots ohne eigene Modellwahl. Wer einen Bot erstellt, sieht es als „Von der Administration empfohlen“."
+
+#: src/components/BotEditor.vue
+#: src/components/BotForm.vue
+msgid "Also answer guests"
+msgstr "Auch Gästen antworten"
+
+#: src/components/BotForm.vue
+msgid "People who join a public conversation without an account. The bot answers them in conversations where a signed-in person has activated it."
+msgstr "Personen, die ohne Konto an einer öffentlichen Unterhaltung teilnehmen. Der Bot antwortet ihnen in Unterhaltungen, in denen eine angemeldete Person ihn aktiviert hat."
+
+#: src/components/BotEditor.vue
+msgid "Guests"
+msgstr "Gäste"
+
+#: src/components/BotEditor.vue
+msgid "People who join a public conversation without an account."
+msgstr "Personen, die ohne Konto an einer öffentlichen Unterhaltung teilnehmen."
+
+#: src/components/BotEditor.vue
+msgid "The bot answers guests in conversations where a signed-in person has activated it. Guests get the same answers as everyone else, including what the bot knows from its sources."
+msgstr "Der Bot antwortet Gästen in Unterhaltungen, in denen eine angemeldete Person ihn aktiviert hat. Gäste erhalten dieselben Antworten wie alle anderen, auch das, was der Bot aus seinen Quellen weiß."
+
+#: src/utils/botScope.js
+msgid "{audience}, also guests"
+msgstr "{audience}, auch Gäste"
+
+#: src/utils/botDiff.js
+msgid "Also answers guests"
+msgstr "Antwortet auch Gästen"

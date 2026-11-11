@@ -30,6 +30,46 @@ sends neither an Authorization header nor X-Api-Key, even when a key is stored.
 Changing profiles does not rewrite a custom endpoint or delete a stored key;
 check both before testing or saving.
 
+### Pipeline and vision model
+
+Under **Set profile manually**, **How documents are read** chooses what Talk AI
+asks a Docling Serve server to do with a document. The legacy profile ignores
+the choice.
+
+- **No pipeline named** (default): the request is unchanged. The server uses
+  its standard pipeline, even when it has a vision preset.
+- **Standard pipeline (models on the Docling server)**: Talk AI adds
+  `pipeline=standard`. OCR, layout and table models run on the Docling server
+  and use its memory.
+- **Vision model from a server preset**: Talk AI adds `pipeline=vlm` and
+  `vlm_pipeline_preset=<name>`. Pages are read by the vision model of that
+  preset. **Preset on the Docling server** names it; `default` is the preset
+  the server administrator marked as default.
+
+A preset that calls a remote model is the way out when large scanned PDFs
+exhaust the memory of the Docling server: the server then loads no OCR model of
+its own for these documents. The model, its address and its key belong to the
+preset on the Docling server and are never entered in Talk AI, so a later
+change of model needs no change here.
+
+On the server this needs three things (checked against Docling Serve 1.38):
+
+1. Remote services are allowed: `DOCLING_SERVE_ENABLE_REMOTE_SERVICES=true`.
+2. A custom VLM preset whose engine is an API, with the model, the full
+   `/v1/chat/completions` URL and the authentication header.
+3. The default VLM preset points to it, or Talk AI names the preset.
+
+Both request fields are needed. A server-side default preset alone leaves an
+unchanged request on the standard pipeline, and `pipeline=vlm` without a preset
+can fall back to a model that runs on the Docling server.
+
+If the server refuses the pipeline or the preset (HTTP 400 or 422), the
+document is not converted another way: Talk AI reports the refusal and sends no
+second request. **Test PDF conversion** and **Detect and test** use the same
+choice, and a successful test of one choice does not count for another. The
+settings API carries the choice as `docling_pipeline` (empty, `standard` or
+`vlm`) and `docling_vlm_preset`.
+
 ## AcademicCloud / EDUC compatibility
 
 Existing installations keep **AcademicCloud / EDUC (compatibility)** with

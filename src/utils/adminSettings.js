@@ -50,6 +50,8 @@ export const SETTING_TABS = {
 	doclingApiKey: 'knowledge',
 	doclingApiProfile: 'knowledge',
 	doclingAuthMode: 'knowledge',
+	doclingPipeline: 'knowledge',
+	doclingVlmPreset: 'knowledge',
 	catalogueEnabled: 'knowledge',
 	catalogueApiEndpoint: 'knowledge',
 	catalogueReindexHours: 'knowledge',
@@ -118,7 +120,9 @@ export function settingLabel(key) {
 	case 'doclingApiEndpoint':
 	case 'doclingApiKey':
 	case 'doclingApiProfile':
-	case 'doclingAuthMode': return t('educai', 'Document conversion')
+	case 'doclingAuthMode':
+	case 'doclingPipeline':
+	case 'doclingVlmPreset': return t('educai', 'Document conversion')
 	case 'catalogueEnabled':
 	case 'catalogueApiEndpoint':
 	case 'catalogueReindexHours': return t('educai', 'Course catalogue')

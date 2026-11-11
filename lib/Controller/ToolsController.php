@@ -385,16 +385,18 @@ class ToolsController extends Controller {
         ?string $doclingApiKey = null,
         ?string $doclingApiProfile = null,
         ?string $doclingAuthMode = null,
+        ?string $doclingPipeline = null,
+        ?string $doclingVlmPreset = null,
     ): DataResponse {
         return $this->runConnectionTest(
             'Docling',
             $doclingApiEndpoint,
-            fn (): array => $this->doclingClient->testConnection($doclingApiEndpoint, $doclingApiKey, $doclingApiProfile, $doclingAuthMode),
+            fn (): array => $this->doclingClient->testConnection($doclingApiEndpoint, $doclingApiKey, $doclingApiProfile, $doclingAuthMode, $doclingPipeline, $doclingVlmPreset),
             'docling_connection_failed',
             $this->l10n->t('Docling connection test failed'),
             true, // DoclingClient returns only fixed, safe diagnostics, never upstream bodies.
             check: 'docling',
-            checkTarget: fn (): array => $this->doclingClient->connectionCheckTarget($doclingApiEndpoint, $doclingApiKey, $doclingApiProfile, $doclingAuthMode),
+            checkTarget: fn (): array => $this->doclingClient->connectionCheckTarget($doclingApiEndpoint, $doclingApiKey, $doclingApiProfile, $doclingAuthMode, false, $doclingPipeline, $doclingVlmPreset),
         );
     }
 
@@ -406,9 +408,11 @@ class ToolsController extends Controller {
         ?string $doclingApiEndpoint = null,
         ?string $doclingApiKey = null,
         bool $ignoreStoredKey = false,
+        ?string $doclingPipeline = null,
+        ?string $doclingVlmPreset = null,
     ): DataResponse {
         try {
-            $result = $this->doclingClient->detect($doclingApiEndpoint, $doclingApiKey, $ignoreStoredKey);
+            $result = $this->doclingClient->detect($doclingApiEndpoint, $doclingApiKey, $ignoreStoredKey, $doclingPipeline, $doclingVlmPreset);
         } catch (\InvalidArgumentException $e) {
             // DoclingClient validation messages are fixed and never echo the URL or key.
             return new DataResponse([
@@ -435,7 +439,7 @@ class ToolsController extends Controller {
                 'details' => $result['error'],
             ]);
         }
-        $this->rememberDetection($result, $doclingApiKey, $ignoreStoredKey);
+        $this->rememberDetection($result, $doclingApiKey, $ignoreStoredKey, $doclingPipeline, $doclingVlmPreset);
 
         return new DataResponse($result);
     }
@@ -559,7 +563,7 @@ class ToolsController extends Controller {
     /**
      * @param array{success: bool, profile: ?string, auth_mode: ?string, service: ?string, version: ?string, endpoint: string, duration_ms: ?int, error: ?string} $result
      */
-    private function rememberDetection(array $result, ?string $typedKey, bool $ignoreStoredKey = false): void {
+    private function rememberDetection(array $result, ?string $typedKey, bool $ignoreStoredKey = false, ?string $pipeline = null, ?string $vlmPreset = null): void {
         if ($this->connectionChecks === null) {
             return;
         }
@@ -576,6 +580,8 @@ class ToolsController extends Controller {
                     $result['profile'],
                     $result['auth_mode'],
                     $ignoreStoredKey,
+                    $pipeline,
+                    $vlmPreset,
                 )['fingerprint'] ?? null;
             } catch (\Throwable $e) {
             }

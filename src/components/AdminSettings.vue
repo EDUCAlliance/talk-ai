@@ -250,6 +250,9 @@ export default {
 				doclingApiKey: '',
 				doclingApiProfile: 'docling_serve',
 				doclingAuthMode: 'x_api_key',
+				// '' leaves the request to Docling Serve as it always was
+				doclingPipeline: '',
+				doclingVlmPreset: 'default',
 				visionApiEndpoint: '',
 				visionApiKey: '',
 				visionModel: '',
@@ -696,6 +699,7 @@ export default {
 					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
 					doclingApiKey: typedKey || null,
 					ignoreStoredKey: !typedKey && this.clearCredentials.includes('doclingApiKey'),
+					...this.doclingPipelineChoice(),
 				})
 				if (revision === this.doclingRevision) this.applyDoclingDetection(data)
 			} catch (error) {
@@ -1090,6 +1094,8 @@ export default {
 				this.settings.doclingApiEndpoint = data.docling_api_endpoint || ''
 				this.settings.doclingApiProfile = data.docling_api_profile || 'legacy'
 				this.settings.doclingAuthMode = data.docling_auth_mode || 'bearer'
+				this.settings.doclingPipeline = ['standard', 'vlm'].includes(data.docling_pipeline) ? data.docling_pipeline : ''
+				this.settings.doclingVlmPreset = data.docling_vlm_preset || 'default'
 				this.doclingHasStoredApiKey = data.docling_api_key === '***'
 				this.storedSecrets = Object.fromEntries(Object.entries(adminSettings.STORED_SECRET_FIELDS).map(([key, field]) => [key, data[field] === '***']))
 				this.settings.visionApiEndpoint = data.vision_api_endpoint || ''
@@ -1228,6 +1234,7 @@ export default {
 					doclingApiKey: this.settings.doclingAuthMode !== 'none' ? this.settings.doclingApiKey || null : null,
 					doclingApiProfile: this.settings.doclingApiProfile,
 					doclingAuthMode: this.settings.doclingAuthMode,
+					...this.doclingPipelineChoice(),
 					visionApiEndpoint: (this.settings.visionApiEndpoint || '').trim(),
 					visionApiKey: this.settings.visionApiKey ? this.settings.visionApiKey : null,
 					visionModel: (this.settings.visionModel || '').trim(),
@@ -1572,6 +1579,13 @@ export default {
 			this.settings.doclingAuthMode = this.settings.doclingApiProfile === 'docling_serve' ? 'x_api_key' : 'bearer'
 			this.doclingTestResult = null
 		},
+		// What is sent to the server: only Docling Serve knows pipelines, and a preset only matters for the vision pipeline.
+		doclingPipelineChoice() {
+			return {
+				doclingPipeline: this.settings.doclingApiProfile === 'docling_serve' ? this.settings.doclingPipeline : '',
+				doclingVlmPreset: (this.settings.doclingVlmPreset || '').trim() || 'default',
+			}
+		},
 		async testDoclingConnection() {
 			this.doclingTesting = true
 			this.doclingTestResult = null
@@ -1580,6 +1594,7 @@ export default {
 					doclingApiEndpoint: (this.settings.doclingApiEndpoint || '').trim(),
 					doclingApiProfile: this.settings.doclingApiProfile,
 					doclingAuthMode: this.settings.doclingAuthMode,
+					...this.doclingPipelineChoice(),
 					doclingApiKey: this.settings.doclingAuthMode === 'none'
 						? null
 						: (this.settings.doclingApiKey

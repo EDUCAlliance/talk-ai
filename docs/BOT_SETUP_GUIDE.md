@@ -34,12 +34,15 @@ If the bot doesn't respond later, this URL is the first thing to check — see [
 
 ## 4. Create a Bot
 
-In the Talk AI app, click **Create New Bot**:
+In the Talk AI app, click **New bot**, pick a template (or start empty) and follow the five steps:
 
-- **Bot Name** — display name, e.g. "Support Helper"
-- **Mention Name** — the @trigger, e.g. `@supportbot` (unique, cannot be changed later)
-- **System Prompt** — the bot's role and behavior
-- **Visibility** — personal, groups, teams, or global (shared scopes go through approval)
+1. **Basics** — name, the @mention in Talk (unique, cannot be changed later), a short description and the instruction that defines the bot's role and behavior
+2. **Who uses it?** — only you, certain groups, certain teams, or everyone (shared bots go through approval)
+3. **Knowledge** — files, folders or web pages the bot answers from
+4. **Capabilities** — for example reading documents in the chat or understanding images
+5. **Check & finish** — a summary; **Advanced** holds the model, the creativity and the guest switch
+
+The sidebar shows the bot as others will see it. Its preview chat answers with the instruction and the model of the form before the bot exists; knowledge and capabilities work once the bot is created.
 
 Then use it in any room where Talk AI is active:
 
@@ -74,15 +77,31 @@ issues and style. Provide constructive feedback with specific examples.
 
 ## Managing Bots
 
-- **Edit** — change name, prompt, model, tools; the mention name is fixed after creation.
+**My bots** lists your bots; a click opens the bot page with its tabs (Overview, Basics, Knowledge, Capabilities, Access, Advanced).
+
+- **Edit** — change name, instruction, knowledge, capabilities, model; the mention name is fixed after creation. A save bar collects the changes of all tabs.
+- **Changes to an approved shared bot** go into review first; the approved version stays live until then.
 - **Delete** — permanently removes the bot and all its conversation history.
+
+## Guests
+
+People who join a public conversation without an account are guests. A bot answers them only when **Also answer guests** is on (bot page → **Advanced**). To let guests ask a bot:
+
+1. Turn the switch on and save. For an approved shared bot the change is reviewed first.
+2. Create a public conversation in Talk and activate "Talk AI" there (section 3).
+3. Mention the bot once yourself and answer its activation question. Guests cannot activate a bot.
+4. Share the link of the conversation. Guests now get answers, in the mode you chose (on mention, or to every message).
+
+The switch does not change who can use the bot with an account. Guests get the same answers as everyone else, including what the bot knows from its sources.
+
+![The guest switch under Advanced](screenshots/guest-switch.png)
 
 ## Bot Management API
 
 ```http
 GET    /apps/educai/api/v1/bots          # list own bots
-POST   /apps/educai/api/v1/bots          # create ({botName, mentionName, systemPrompt})
-PUT    /apps/educai/api/v1/bots/{id}     # update
+POST   /apps/educai/api/v1/bots          # create ({botName, mentionName, systemPrompt, allowGuests?})
+PUT    /apps/educai/api/v1/bots/{id}     # update (allowGuests left out = unchanged)
 DELETE /apps/educai/api/v1/bots/{id}     # delete
 ```
 
@@ -97,8 +116,9 @@ The most frequent issues, in order:
 3. **Error message about the AI service** → endpoint, key, or model name wrong; test the endpoint with curl.
 4. **"Mention name already exists"** → mention names are unique per instance; pick another.
 5. **Slow responses** → normal LLM latency is 2–10 s; a smaller model helps.
-6. **Blank bot management page** → run `npm run build`, verify `js/educai-main.js` exists, hard-refresh the browser.
-7. **Migration errors after upgrade** →
+6. **Blank bot management page** → run `npm run build`, verify `js/educai-main.mjs` exists, hard-refresh the browser.
+7. **A guest gets no answer** → the bot's guest switch is off or its change still waits for review, the bot has not been activated in this conversation by a signed-in person, or "Talk AI" is not active in the conversation.
+8. **Migration errors after upgrade** →
    ```bash
    sudo -u www-data php occ app:enable educai
    sudo -u www-data php occ upgrade --no-interaction

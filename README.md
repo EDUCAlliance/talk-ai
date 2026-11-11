@@ -19,12 +19,13 @@ Talk AI turns Nextcloud Talk into a home for **multiple** AI bots instead of one
 It connects Talk messages, per-bot system prompts, any **OpenAI-compatible** model endpoint, file knowledge (RAG), and agentic tool calls (built-in + MCP) into one app-managed workflow — with admin control over providers, credentials, rate limits, fallback behaviour and tool access.
 
 <div align="center">
-<img src="docs/screenshots/bot-discovery.png" width="820" alt="Browsing available Talk AI bots">
+<img src="docs/screenshots/discover.png" width="820" alt="Discover: the bots a user may use, one colour per audience">
 </div>
 
 ## Highlights
 
-- **Governance-first scoping.** Every bot has a visibility scope — *personal*, *group*, *team*, or *global* — with an approval workflow for shared bots. Users only see and use the bots they're entitled to.
+- **Governance-first scoping.** Every bot has a visibility scope — *personal*, *group*, *team*, or *global* — with an approval workflow for shared bots. Users only see and use the bots they're entitled to, and a bot answers guests of a public conversation only when its owner turns that on.
+- **One page for bots.** Discover what you may use, create a bot in five guided steps with a preview chat, edit it on its own page, review changes with a list of what they alter, and follow your activity. A tour explains it on the real pages.
 - **Multi-bot by design.** Unlimited bots, each with a stable `@mention`, own system prompt, temperature, and model selection.
 - **Bring your own model.** Any OpenAI-compatible chat / model-list / embedding / vision / speech endpoint. Primary + optional secondary endpoint, plus an automatic fallback model on eligible timeouts or connection failures.
 - **Knowledge (RAG).** Index Nextcloud files and folders; optional Docling conversion for PDF, Office and image formats. Bots answer from your documents.
@@ -34,13 +35,17 @@ It connects Talk messages, per-bot system prompts, any **OpenAI-compatible** mod
 
 ## Screenshots
 
-| Multi-bot manager (owner view) | Create a bot |
+| New bot: five steps and a preview chat | Bot page: overview and history |
 |---|---|
-| ![Multi-bot manager](docs/screenshots/multi-bot-manager.png) | ![Create a bot](docs/screenshots/create-bot.png) |
+| ![New bot](docs/screenshots/new-bot.png) | ![Bot page](docs/screenshots/bot-page.png) |
 
-| Admin settings (overview) | Bot discovery (member view) |
+| To review: what a change alters | Tour over the real pages |
 |---|---|
-| ![Admin settings](docs/screenshots/admin-settings.png) | ![Bot discovery](docs/screenshots/bot-discovery.png) |
+| ![To review](docs/screenshots/review.png) | ![Tour](docs/screenshots/tour.png) |
+
+| My bots: every state at a glance | Admin settings (overview) |
+|---|---|
+| ![My bots](docs/screenshots/my-bots.png) | ![Admin settings](docs/screenshots/admin-settings.png) |
 
 ## Quick Start
 
@@ -79,7 +84,7 @@ sudo -u www-data php occ talk:bot:install \
   "https://your-nextcloud.example/index.php/apps/educai/webhook/talk"
 ```
 
-Then create your first bot in the **Talk AI** app, mention it in any Talk conversation, and chat.
+Then create your first bot in the **Talk AI** app with **New bot**, mention it in any Talk conversation, and chat.
 
 <a name="model-providers"></a>
 ## Model providers

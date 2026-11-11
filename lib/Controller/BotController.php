@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace OCA\EducAI\Controller;
 
 use Exception;
+use OCA\EducAI\Exception\AssistantExistsException;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
+use OCA\EducAI\Exception\PreviewUnavailableException;
 use OCA\EducAI\OpenApi\ApiToolAssignmentException;
+use OCA\EducAI\Service\AssistantService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\PermissionService;
@@ -26,6 +29,7 @@ class BotController extends Controller {
 	private LoggerInterface $logger;
 	private IL10N $l10n;
 	private BuiltInToolUiService $builtInToolUiService;
+	private ?AssistantService $assistantService;
 
 	public function __construct(
 		string $appName,
@@ -36,6 +40,7 @@ class BotController extends Controller {
 		LoggerInterface $logger,
 		IL10N $l10n,
 		BuiltInToolUiService $builtInToolUiService,
+		?AssistantService $assistantService = null,
 	) {
 		parent::__construct($appName, $request);
 		$this->botService = $botService;
@@ -44,6 +49,7 @@ class BotController extends Controller {
 		$this->logger = $logger;
 		$this->l10n = $l10n;
 		$this->builtInToolUiService = $builtInToolUiService;
+		$this->assistantService = $assistantService;
 	}
 
 	/**
@@ -52,8 +58,8 @@ class BotController extends Controller {
 	 */
 	public function index(): DataResponse {
 		try {
-			$bots = $this->botService->getBotsByUser($this->userId);
-			return new DataResponse($bots);
+			$bots = $this->markAssistant($this->botService->getBotsByUserEnriched($this->userId));
+			return new DataResponse(array_map(fn (array $bot): array => $this->localizeToolList($bot), $bots));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list bots: ' . $e->getMessage());
 			return $this->errorResponse('bots_load_failed', $this->l10n->t('Failed to load bots'), 500);
@@ -68,8 +74,8 @@ class BotController extends Controller {
 		try {
 			$bot = $this->botService->getBot($id);
 
-			// Verify ownership
-			if ($bot->getUserId() !== $this->userId) {
+			// Whoever may save the bot may also load it
+			if ($this->userId === null || !$this->permissionService->canEditBot($this->userId, $bot)) {
 				return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
 			}
 
@@ -85,7 +91,8 @@ class BotController extends Controller {
 
 	/**
 	 * @NoAdminRequired
-	 * Create a new bot
+	 * Create a new bot. With `assistant` it becomes the personal assistant of the user:
+	 * a personal bot with a mention name of its own, pinned in first place.
 	 */
 	public function create(
 		string $botName,
@@ -101,10 +108,35 @@ class BotController extends Controller {
 		?array $tools = null,
 		?string $description = null,
 		?array $onboardingQuestions = null,
+		$assistant = null,
+		$allowGuests = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
+		$allowGuests = $this->optionalBool($allowGuests);
 		try {
+			if (is_scalar($assistant) && $this->normalizeBool($assistant) === true) {
+				if ($this->assistantService === null || $this->userId === null) {
+					return $this->errorResponse('bot_create_failed', $this->l10n->t('Failed to create bot'), 400);
+				}
+				$bot = $this->assistantService->createAssistant(
+					$this->userId,
+					$botName,
+					$systemPrompt,
+					$model,
+					$temperature,
+					$ragEnabled,
+					$tools,
+					$description,
+					$onboardingQuestions,
+					$allowGuests
+				);
+				$botData = $bot->jsonSerialize();
+				$botData['is_assistant'] = true;
+
+				return new DataResponse($botData, 201);
+			}
+
 			$bot = $this->botService->createBot(
 				$this->userId,
 				$botName,
@@ -119,10 +151,17 @@ class BotController extends Controller {
 				$ragEnabled,
 				$tools,
 				$description,
-				$onboardingQuestions
+				$onboardingQuestions,
+				$allowGuests
 			);
 
 			return new DataResponse($bot, 201);
+		} catch (AssistantExistsException $e) {
+			return $this->errorResponse(
+				'assistant_exists',
+				$this->l10n->t('You already have a personal assistant. You find it under "My bots".'),
+				409,
+			);
 		} catch (ApiToolAssignmentException $e) {
 			return $this->apiToolNotAssignableResponse($e);
 		} catch (ModelNotReleasedException $e) {
@@ -130,6 +169,40 @@ class BotController extends Controller {
 		} catch (Exception $e) {
 			$this->logger->error('Failed to create bot: ' . $e->getMessage());
 			return $this->errorResponse('bot_create_failed', $this->l10n->t('Failed to create bot'), 400);
+		}
+	}
+
+	/**
+	 * @NoAdminRequired
+	 * Try the instruction of a bot that is not created yet: one answer to a short conversation.
+	 * Nothing is stored; tools and knowledge are not part of a draft.
+	 */
+	public function preview(
+		string $systemPrompt = '',
+		?string $model = null,
+		$temperature = null,
+		?array $messages = null,
+	): DataResponse {
+		if ($this->userId === null) {
+			return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
+		}
+		try {
+			return new DataResponse($this->botService->previewReply($systemPrompt, $model, $temperature, $messages ?? []));
+		} catch (ModelNotReleasedException $e) {
+			return $this->modelNotReleasedResponse($e);
+		} catch (\InvalidArgumentException $e) {
+			return $this->errorResponse(
+				'preview_invalid',
+				$this->l10n->t('The preview needs an instruction and a message. Very long conversations cannot be tried here.'),
+				400,
+			);
+		} catch (PreviewUnavailableException $e) {
+			return $e->reason === PreviewUnavailableException::RATE_LIMITED
+				? $this->errorResponse('preview_rate_limited', $this->l10n->t('The model is busy right now. Try again in a moment.'), 429)
+				: $this->errorResponse('preview_failed', $this->l10n->t('The model gave no answer. Try again, or ask your administrator to check the model connection.'), 502);
+		} catch (Exception $e) {
+			$this->logger->error('Bot preview failed unexpectedly', ['exception_class' => get_class($e)]);
+			return $this->errorResponse('preview_failed', $this->l10n->t('The model gave no answer. Try again, or ask your administrator to check the model connection.'), 502);
 		}
 	}
 
@@ -151,9 +224,12 @@ class BotController extends Controller {
 		?array $tools = null,
 		?string $description = null,
 		?array $onboardingQuestions = null,
+		$allowGuests = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
+		// Not sent means unchanged
+		$allowGuests = $this->optionalBool($allowGuests);
 
 		try {
 			$bot = $this->botService->updateBot(
@@ -170,7 +246,8 @@ class BotController extends Controller {
 				$ragEnabled,
 				$tools,
 				$description,
-				$onboardingQuestions
+				$onboardingQuestions,
+				$allowGuests
 			);
 
 			return new DataResponse($bot);
@@ -225,8 +302,8 @@ class BotController extends Controller {
 	 */
 	public function listPublic(): DataResponse {
 		try {
-			$bots = $this->botService->getAvailableBotsForUserEnriched((string)$this->userId);
-			return new DataResponse($bots);
+			$bots = $this->markAssistant($this->botService->getAvailableBotsForUserEnriched((string)$this->userId));
+			return new DataResponse(array_map(fn (array $bot): array => $this->localizeToolList($bot), $bots));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list public bots: ' . $e->getMessage());
 			return $this->errorResponse('public_bots_load_failed', $this->l10n->t('Failed to load public bots'), 500);
@@ -247,10 +324,7 @@ class BotController extends Controller {
 					404,
 				);
 			}
-			if (isset($botDetails['tools']) && is_array($botDetails['tools'])) {
-				$botDetails['tools'] = $this->localizeBuiltInTools($botDetails['tools']);
-			}
-			return new DataResponse($botDetails);
+			return new DataResponse($this->localizeToolList($botDetails));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to get public bot details: ' . $e->getMessage());
 			return $this->errorResponse('public_bots_load_failed', $this->l10n->t('Failed to load public bot details'), 500);
@@ -264,6 +338,7 @@ class BotController extends Controller {
 	public function destroy(int $id): DataResponse {
 		try {
 			$this->botService->deleteBot($id, $this->userId);
+			$this->assistantService?->forget((string)$this->userId, $id);
 			return new DataResponse(['success' => true]);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to delete bot: ' . $e->getMessage());
@@ -388,6 +463,13 @@ class BotController extends Controller {
 	public function pendingApprovals(): DataResponse {
 		try {
 			$bots = $this->botService->getPendingApprovals($this->userId);
+			foreach ($bots as &$bot) {
+				$bot = $this->localizeToolList($bot, 'live_tools');
+				if (isset($bot['review_target']) && is_array($bot['review_target'])) {
+					$bot['review_target'] = $this->localizeToolList($bot['review_target']);
+				}
+			}
+			unset($bot);
 			return new DataResponse(['bots' => $bots]);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to list pending approvals: ' . $e->getMessage());
@@ -494,7 +576,8 @@ class BotController extends Controller {
 				$this->request->getParam('ragEnabled'),
 				$this->request->getParam('tools'),
 				$this->request->getParam('description'),
-				$this->request->getParam('onboardingQuestions')
+				$this->request->getParam('onboardingQuestions'),
+				$this->optionalBool($this->request->getParam('allowGuests'))
 			);
 
 			return new DataResponse($bot);
@@ -510,6 +593,28 @@ class BotController extends Controller {
 			]);
 			return $this->errorResponse('bot_update_failed', $this->l10n->t('Failed to update bot'), 400);
 		}
+	}
+
+	/**
+	 * Say which of the listed bots is the personal assistant of the current user.
+	 *
+	 * @param array<int,array<string,mixed>> $bots
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function markAssistant(array $bots): array {
+		if ($this->assistantService === null || $this->userId === null) {
+			return $bots;
+		}
+
+		return $this->assistantService->markAssistant($this->userId, $bots);
+	}
+
+	/**
+	 * Read a switch that a request may leave out: anything that is not a boolean, a number
+	 * or a string counts as "not sent".
+	 */
+	private function optionalBool(mixed $value): ?bool {
+		return is_bool($value) || is_int($value) || is_string($value) ? $this->normalizeBool($value) : null;
 	}
 
 	/**
@@ -532,6 +637,20 @@ class BotController extends Controller {
 			return true;
 		}
 		return (bool)$value;
+	}
+
+	/**
+	 * Localize the built-in tools in one tool list of a bot payload.
+	 *
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	private function localizeToolList(array $payload, string $key = 'tools'): array {
+		if (isset($payload[$key]) && is_array($payload[$key])) {
+			$payload[$key] = $this->localizeBuiltInTools($payload[$key]);
+		}
+
+		return $payload;
 	}
 
 	/**

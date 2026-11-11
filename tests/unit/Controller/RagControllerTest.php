@@ -15,9 +15,12 @@ use OCA\EducAI\Service\KnowledgeSourceStatus;
 use OCA\EducAI\Service\PermissionService;
 use OCA\EducAI\Service\RagIngestionService;
 use OCA\EducAI\Service\UrlContentFetcher;
+use OCP\App\IAppManager;
 use OCP\Files\IRootFolder;
+use OCP\IGroupManager;
 use OCP\IL10N;
 use OCP\IRequest;
+use OCP\IUserManager;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -184,6 +187,122 @@ class RagControllerTest extends TestCase {
 		$this->assertStringNotContainsString('SQLSTATE', json_encode($payload));
 	}
 
+	/**
+	 * @return array<string,array{0:string}>
+	 */
+	public static function editors(): array {
+		return [
+			'owner' => ['owner'],
+			'admin of the bot group' => ['bob'],
+			'Nextcloud administrator' => ['admin'],
+		];
+	}
+
+	#[DataProvider('editors')]
+	public function testWhoeverMayEditTheBotListsAndChangesItsSources(string $userId): void {
+		$botSourceMapper = $this->sourceMapperWithStoredSource();
+		$botSourceMapper->expects($this->once())->method('deleteById')->with(8);
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$embeddingMapper->expects($this->once())->method('deleteBySource')->with(8);
+		$queued = [];
+		$ragIngestionService = $this->createMock(RagIngestionService::class);
+		$ragIngestionService->method('enqueueSource')->willReturnCallback(static function (int $sourceId, bool $force = false) use (&$queued): void {
+			$queued[] = [$sourceId, $force];
+		});
+		$controller = $this->createController($this->botServiceFor($this->pendingGroupBot()), $botSourceMapper, $userId, $ragIngestionService, $embeddingMapper);
+
+		$listed = $controller->index(42);
+		$added = $controller->store(42, 55, 'folder');
+		$reindexed = $controller->reindex(42, 8);
+		$removed = $controller->destroy(42, 8);
+
+		$this->assertSame(200, $listed->getStatus());
+		$this->assertSame([8], array_column($listed->getData()['sources'], 'id'));
+		$this->assertSame(201, $added->getStatus());
+		$this->assertSame(9, $added->getData()['id']);
+		// The files of a source are read as the user who attached it
+		$this->assertSame($userId, $added->getData()['owner_uid']);
+		$this->assertSame(200, $reindexed->getStatus());
+		$this->assertSame(200, $removed->getStatus());
+		$this->assertSame([[9, false], [8, true]], $queued);
+	}
+
+	public function testReviewerOfAPendingBotListsItsSourcesButCannotChangeThem(): void {
+		$botSourceMapper = $this->sourceMapperWithStoredSource();
+		$botSourceMapper->expects($this->never())->method('insert');
+		$botSourceMapper->expects($this->never())->method('deleteById');
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$embeddingMapper->expects($this->never())->method('deleteBySource');
+		$ragIngestionService = $this->createMock(RagIngestionService::class);
+		$ragIngestionService->expects($this->never())->method('enqueueSource');
+		$controller = $this->createController($this->botServiceFor($this->pendingGroupBot()), $botSourceMapper, 'reviewer', $ragIngestionService, $embeddingMapper);
+
+		$listed = $controller->index(42);
+
+		$this->assertSame(200, $listed->getStatus());
+		$this->assertSame([8], array_column($listed->getData()['sources'], 'id'));
+		foreach ([$controller->store(42, 55, 'folder'), $controller->reindex(42, 8), $controller->destroy(42, 8)] as $response) {
+			$this->assertSame(403, $response->getStatus());
+			$this->assertSame(['error' => 'Unauthorized', 'errorCode' => 'forbidden'], $response->getData());
+		}
+	}
+
+	/**
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public static function outsiders(): array {
+		return [
+			'plain member of the bot group' => ['alice', 'groups'],
+			'admin of another group' => ['carol', 'groups'],
+			// Nobody but the owner may save a personal bot, so no group admin touches its sources
+			'group admin and a foreign personal bot' => ['bob', 'personal'],
+		];
+	}
+
+	public function testNextcloudAdministratorListsTheSourcesOfAForeignPersonalBotButCannotChangeThem(): void {
+		$bot = $this->pendingGroupBot();
+		$bot->setVisibility('personal');
+		$bot->setApprovalStatus('personal');
+		$botSourceMapper = $this->sourceMapperWithStoredSource();
+		$botSourceMapper->expects($this->never())->method('insert');
+		$botSourceMapper->expects($this->never())->method('deleteById');
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$embeddingMapper->expects($this->never())->method('deleteBySource');
+		$ragIngestionService = $this->createMock(RagIngestionService::class);
+		$ragIngestionService->expects($this->never())->method('enqueueSource');
+		$controller = $this->createController($this->botServiceFor($bot), $botSourceMapper, 'admin', $ragIngestionService, $embeddingMapper);
+
+		// The admin settings list every bot with its sources; saving such a bot is refused, and so is changing its sources
+		$listed = $controller->index(42);
+		$this->assertSame(200, $listed->getStatus());
+		$this->assertSame([8], array_column($listed->getData()['sources'], 'id'));
+		foreach ([$controller->store(42, 55, 'folder'), $controller->reindex(42, 8), $controller->destroy(42, 8)] as $response) {
+			$this->assertSame(403, $response->getStatus());
+			$this->assertSame(['error' => 'Unauthorized', 'errorCode' => 'forbidden'], $response->getData());
+		}
+	}
+
+	#[DataProvider('outsiders')]
+	public function testUsersWhoMayNotEditTheBotAreRefusedItsSources(string $userId, string $visibility): void {
+		$bot = $this->pendingGroupBot();
+		$bot->setVisibility($visibility);
+		$bot->setApprovalStatus($visibility === 'personal' ? 'personal' : 'approved');
+		$botSourceMapper = $this->sourceMapperWithStoredSource();
+		$botSourceMapper->expects($this->never())->method('findByBot');
+		$botSourceMapper->expects($this->never())->method('insert');
+		$botSourceMapper->expects($this->never())->method('deleteById');
+		$embeddingMapper = $this->createMock(EmbeddingMapper::class);
+		$embeddingMapper->expects($this->never())->method('deleteBySource');
+		$ragIngestionService = $this->createMock(RagIngestionService::class);
+		$ragIngestionService->expects($this->never())->method('enqueueSource');
+		$controller = $this->createController($this->botServiceFor($bot), $botSourceMapper, $userId, $ragIngestionService, $embeddingMapper);
+
+		foreach ([$controller->index(42), $controller->store(42, 55, 'folder'), $controller->reindex(42, 8), $controller->destroy(42, 8)] as $response) {
+			$this->assertSame(403, $response->getStatus());
+			$this->assertSame(['error' => 'Unauthorized', 'errorCode' => 'forbidden'], $response->getData());
+		}
+	}
+
 	private function folderSource(string $status, ?string $errorMessage): BotSource {
 		$source = new BotSource();
 		$source->setId(8);
@@ -216,6 +335,9 @@ class RagControllerTest extends TestCase {
 	private function createController(
 		BotService $botService,
 		?BotSourceMapper $botSourceMapper = null,
+		?string $userId = 'alice',
+		?RagIngestionService $ragIngestionService = null,
+		?EmbeddingMapper $embeddingMapper = null,
 	): RagController {
 		$l10nBuilder = $this->getMockBuilder(IL10N::class);
 		if (!method_exists(IL10N::class, 't')) {
@@ -229,14 +351,80 @@ class RagControllerTest extends TestCase {
 			$this->createMock(IRequest::class),
 			$botService,
 			$botSourceMapper ?? $this->createMock(BotSourceMapper::class),
-			$this->createMock(EmbeddingMapper::class),
-			$this->createMock(RagIngestionService::class),
+			$embeddingMapper ?? $this->createMock(EmbeddingMapper::class),
+			$ragIngestionService ?? $this->createMock(RagIngestionService::class),
 			$this->createMock(UrlContentFetcher::class),
-			$this->createMock(PermissionService::class),
+			$this->createScopedPermissionService($l10n),
 			new KnowledgeSourcePresenter($this->createMock(IRootFolder::class), $l10n, $this->createMock(LoggerInterface::class)),
-			'alice',
+			$userId,
 			$this->createMock(LoggerInterface::class),
 			$l10n,
 		);
+	}
+
+	/**
+	 * The real permission rules: "admin" is a Nextcloud administrator, bob administers
+	 * group-a, carol group-b, everyone else nothing.
+	 */
+	private function createScopedPermissionService(IL10N $l10n): PermissionService {
+		$service = $this->getMockBuilder(PermissionService::class)
+			->setConstructorArgs([
+				$this->createMock(IGroupManager::class),
+				$this->createMock(IUserManager::class),
+				$this->createMock(IAppManager::class),
+				$this->createMock(LoggerInterface::class),
+				$l10n,
+			])
+			->onlyMethods(['isAdmin', 'getAdminGroups', 'getAdminTeams'])
+			->getMock();
+		$service->method('isAdmin')->willReturnCallback(static fn (string $userId): bool => $userId === 'admin');
+		$service->method('getAdminGroups')->willReturnCallback(
+			static fn (string $userId): array => ['bob' => ['group-a'], 'carol' => ['group-b']][$userId] ?? []
+		);
+		$service->method('getAdminTeams')->willReturn([]);
+
+		return $service;
+	}
+
+	/**
+	 * A bot of "owner" for group-a that waits for review.
+	 */
+	private function pendingGroupBot(): Bot {
+		$bot = new Bot();
+		$bot->setId(42);
+		$bot->setUserId('owner');
+		$bot->setVisibility('groups');
+		$bot->setAllowedGroups(json_encode(['group-a']) ?: '[]');
+		$bot->setApprovalStatus('pending');
+
+		return $bot;
+	}
+
+	/**
+	 * A bot service that knows one bot; "reviewer" may inspect it while it is pending.
+	 */
+	private function botServiceFor(Bot $bot): BotService {
+		$botService = $this->createMock(BotService::class);
+		$botService->method('getBot')->with(42)->willReturn($bot);
+		$botService->method('canInspectPendingReviewContext')->willReturnCallback(
+			static fn (Bot $candidate, string $userId): bool => $candidate === $bot && $userId === 'reviewer'
+		);
+
+		return $botService;
+	}
+
+	/**
+	 * A source mapper holding source 8 of bot 42; inserted sources get ID 9.
+	 */
+	private function sourceMapperWithStoredSource(): BotSourceMapper {
+		$botSourceMapper = $this->createMock(BotSourceMapper::class);
+		$botSourceMapper->method('findByBot')->with(42)->willReturn([$this->folderSource('ready', null)]);
+		$botSourceMapper->method('findById')->with(8)->willReturn($this->folderSource('ready', null));
+		$botSourceMapper->method('insert')->willReturnCallback(static function (BotSource $source): BotSource {
+			$source->setId(9);
+			return $source;
+		});
+
+		return $botSourceMapper;
 	}
 }

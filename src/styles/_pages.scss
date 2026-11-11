@@ -1,0 +1,132 @@
+// Parts that belong to one page only.
+
+// How Talk AI works
+.talkai-guide__scopes {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 14px 24px;
+	list-style: none;
+}
+
+.talkai-guide__scope {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	font-size: 14.5px;
+}
+
+@container talkai-app (max-width: 759px) {
+
+	.talkai-guide__scopes {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+// To review: the queue on one side, the submitted bot on the other
+.talkai-review {
+	display: grid;
+	grid-template-columns: 300px minmax(0, 1fr);
+	align-items: start;
+	gap: 24px;
+}
+
+.talkai-queue {
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	overflow: hidden;
+}
+
+.talkai-queue__item {
+	display: flex;
+	gap: 12px;
+	width: 100%;
+	padding: 14px 16px;
+	border-block-start: 1px solid var(--talkai-surface-3);
+	color: var(--talkai-ink);
+
+	&:first-child {
+		border-block-start: 0;
+	}
+
+	&[aria-current='true'] {
+		background-color: var(--talkai-surface-2);
+		box-shadow: inset 4px 0 0 var(--talkai-ink);
+	}
+}
+
+.talkai-queue__name {
+	display: block;
+	font-size: 14.5px;
+}
+
+.talkai-queue__sub {
+	display: block;
+	color: var(--talkai-ink-3);
+	font-size: 12.5px;
+}
+
+.talkai-review__head {
+	margin-block-end: 12px;
+}
+
+.talkai-review__title {
+	font-size: 21px;
+	font-weight: 700;
+	line-height: 1.2;
+	overflow-wrap: anywhere;
+}
+
+.talkai-review__quote {
+	margin-block: 6px 0;
+	padding-inline-start: 14px;
+	border-inline-start: 3px solid var(--talkai-violet);
+	font-size: 14.5px;
+	overflow-wrap: anywhere;
+}
+
+.talkai-review__sources {
+	margin-block-start: 8px;
+}
+
+// The decision stays in view while the reviewer reads
+.talkai-decision {
+	display: grid;
+	position: sticky;
+	inset-block-end: 16px;
+	z-index: 4;
+	gap: 10px;
+	padding: 16px 18px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-lg);
+}
+
+.talkai-decision__actions {
+	justify-content: flex-end;
+}
+
+// Personal settings: a pointer to the app page
+.talkai-pointer {
+	max-width: 720px;
+	padding: 24px;
+}
+
+.talkai-pointer__title {
+	margin-block-end: 6px;
+	font-size: 20px;
+	font-weight: 700;
+}
+
+.talkai-pointer__text {
+	margin-block-end: 16px;
+	color: var(--talkai-ink-3);
+}
+
+@container talkai-app (max-width: 1099px) {
+
+	.talkai-review {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

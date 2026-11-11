@@ -112,6 +112,95 @@ class PermissionServiceTest extends TestCase {
 		$this->assertFalse($service->canEditBot('reviewer', $bot));
 	}
 
+	public function testCanEditBotAllowsOwnersAndAdminsOfTheWholeScopeOnly(): void {
+		$service = $this->createScopedPermissionService(
+			static fn (string $userId): bool => $userId === 'admin',
+			static fn (string $userId): array => $userId === 'bob' ? ['group-a'] : [],
+			static fn (string $userId): array => $userId === 'dave' ? ['team-1'] : []
+		);
+		$groupBot = $this->createBot('owner', 'groups', ['group-a']);
+		$twoGroupBot = $this->createBot('owner', 'groups', ['group-a', 'group-b']);
+		$teamBot = $this->createBot('owner', 'teams', [], ['team-1']);
+		$globalBot = $this->createBot('owner', 'global');
+		$personalBot = $this->createBot('owner', 'personal');
+
+		// A plain member (alice) never edits; scope admins edit without owning the bot
+		$this->assertFalse($service->canEditBot('alice', $groupBot));
+		$this->assertTrue($service->canEditBot('bob', $groupBot));
+		$this->assertFalse($service->canEditBot('bob', $twoGroupBot));
+		$this->assertFalse($service->canEditBot('bob', $teamBot));
+		$this->assertTrue($service->canEditBot('dave', $teamBot));
+		$this->assertFalse($service->canEditBot('dave', $groupBot));
+		$this->assertFalse($service->canEditBot('bob', $globalBot));
+		foreach ([$groupBot, $twoGroupBot, $teamBot, $globalBot] as $sharedBot) {
+			$this->assertTrue($service->canEditBot('admin', $sharedBot));
+		}
+		// Personal bots belong to their owner alone, even towards Nextcloud administrators
+		$this->assertTrue($service->canEditBot('owner', $personalBot));
+		$this->assertFalse($service->canEditBot('admin', $personalBot));
+	}
+
+	public function testAdminGroupsAreLookedUpOncePerRequestHoweverManyBotsAreChecked(): void {
+		$user = $this->createMock(IUser::class);
+		$group = new class {
+			public function getGID(): string {
+				return 'group-a';
+			}
+		};
+		$subAdmin = $this->createSubAdmin();
+		$subAdmin->expects($this->once())->method('getSubAdminsGroups')->with($user)->willReturn([$group]);
+		$userManager = $this->createMock(IUserManager::class);
+		$userManager->method('get')->with('bob')->willReturn($user);
+		$service = $this->getMockBuilder(PermissionService::class)
+			->setConstructorArgs([
+				$this->createMock(IGroupManager::class),
+				$userManager,
+				$this->createMock(IAppManager::class),
+				$this->createMock(LoggerInterface::class),
+				$this->createL10n(),
+				$subAdmin,
+			])
+			->onlyMethods(['isAdmin'])
+			->getMock();
+		$service->method('isAdmin')->willReturn(false);
+
+		$this->assertTrue($service->canEditBot('bob', $this->createBot('owner', 'groups', ['group-a'])));
+		$this->assertTrue($service->canEditBot('bob', $this->createBot('carol', 'groups', ['group-a'])));
+		$this->assertFalse($service->canEditBot('bob', $this->createBot('owner', 'groups', ['group-b'])));
+		$this->assertSame(['group-a'], $service->getAdminGroups('bob'));
+		$this->assertSame(['group-a'], $service->getPermissionSummary('bob')['adminGroups']);
+	}
+
+	public function testAdminTeamsAreLookedUpOncePerUserAndRequest(): void {
+		// The team lookup itself needs the Circles app, so only its result is given here
+		$service = $this->getMockBuilder(PermissionService::class)
+			->setConstructorArgs([
+				$this->createMock(IGroupManager::class),
+				$this->createMock(IUserManager::class),
+				$this->createMock(IAppManager::class),
+				$this->createMock(LoggerInterface::class),
+				$this->createL10n(),
+			])
+			->onlyMethods(['isAdmin', 'loadAdminTeams'])
+			->getMock();
+		$service->method('isAdmin')->willReturn(false);
+		$lookups = [];
+		$service->method('loadAdminTeams')->willReturnCallback(static function (string $userId) use (&$lookups): array {
+			$lookups[] = $userId;
+			return $userId === 'dave' ? ['team-1'] : [];
+		});
+
+		$this->assertTrue($service->canEditBot('dave', $this->createBot('owner', 'teams', [], ['team-1'])));
+		$this->assertFalse($service->canEditBot('dave', $this->createBot('owner', 'teams', [], ['team-2'])));
+		$this->assertTrue($service->isTeamAdminOrHigher('dave'));
+		$this->assertSame(['team-1'], $service->getPermissionSummary('dave')['adminTeams']);
+		// A user without teams is remembered as well, and separately from dave
+		$this->assertFalse($service->canEditBot('alice', $this->createBot('owner', 'teams', [], ['team-1'])));
+		$this->assertFalse($service->canEditBot('alice', $this->createBot('owner', 'teams', [], ['team-2'])));
+
+		$this->assertSame(['dave', 'alice'], $lookups);
+	}
+
 	public function testCanApproveBotUsesPendingTargetScopeForVersionedChanges(): void {
 		$service = $this->createPermissionService(false, ['group-a'], []);
 		$bot = $this->createBot('owner', 'groups', ['group-a']);

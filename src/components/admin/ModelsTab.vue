@@ -84,7 +84,7 @@
 						:empty-label="t('educai', 'Choose a default model')"
 						allow-manual />
 					<p class="ta-hint">
-						{{ t('educai', 'Used by every bot without its own model choice.') }}
+						{{ t('educai', 'Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”.') }}
 					</p>
 				</div>
 				<div class="ta-field">

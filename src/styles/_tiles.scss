@@ -1,0 +1,460 @@
+// Bot tiles (Discover, preview in the sidebar) and the rows of "My bots".
+
+.talkai-tile {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 18px 20px 16px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-sm);
+	transition: border-radius var(--talkai-ease), box-shadow var(--talkai-ease), border-color var(--talkai-ease);
+}
+
+.talkai-tile--link {
+	cursor: pointer;
+
+	&:hover {
+		border-color: var(--talkai-ink);
+		border-radius: 0;
+		box-shadow: var(--talkai-shadow-lg);
+	}
+}
+
+.talkai-tile__top {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-width: 0;
+}
+
+.talkai-tile__id {
+	flex: 1;
+	min-width: 0;
+}
+
+.talkai-tile__state {
+	align-self: flex-start;
+}
+
+// The personal assistant is pinned in first place and carries the colour of "Only me".
+.talkai-tile--pinned {
+	border-color: var(--talkai-scope-personal);
+	background-color: var(--talkai-pinned-surface);
+}
+
+.talkai-tile__pin {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	align-self: flex-start;
+	gap: 4px;
+	color: var(--talkai-pinned-text);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.talkai-tile__name {
+	font-size: 17px;
+	font-weight: 700;
+	line-height: 1.25;
+	overflow-wrap: anywhere;
+}
+
+// The name opens the details: one keyboard path for the whole tile
+.talkai-tile__open {
+	color: inherit;
+	font: inherit;
+	text-align: start;
+
+	&:hover {
+		text-decoration: underline;
+		text-underline-offset: 4px;
+	}
+}
+
+.talkai-tile__mention {
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+}
+
+.talkai-tile__text {
+	display: -webkit-box;
+	min-height: 42px;
+	color: var(--talkai-ink-2);
+	font-size: 14px;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+}
+
+.talkai-tile__text--empty {
+	color: var(--talkai-ink-3);
+}
+
+.talkai-tile__foot {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 12px 16px;
+	margin-block-start: auto;
+	padding-block-start: 12px;
+	border-block-start: 1px solid var(--talkai-ink);
+}
+
+// Who can use the bot: icon plus words, never the colour alone
+.talkai-who {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+}
+
+.talkai-who__text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.talkai-tile__foot > .talkai-who {
+	flex: 1 0 100%;
+}
+
+.talkai-tile__foot > .talkai-who:not(:last-child) {
+	padding-block-end: 12px;
+	border-block-end: 1px solid var(--talkai-ink);
+}
+
+.talkai-tile__edit {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--talkai-ink-2);
+	font-size: 14px;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+
+	&:hover {
+		color: var(--talkai-ink);
+		text-decoration: underline;
+	}
+}
+
+// Capability chips
+.talkai-caps {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	min-height: 24px;
+}
+
+.talkai-cap {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	padding: 1px 8px;
+	border: 1px solid var(--talkai-line-2);
+	border-radius: 999px;
+	background-color: var(--talkai-surface-3);
+	color: var(--talkai-ink);
+	font-size: 12px;
+}
+
+.talkai-cap__text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.talkai-grid__empty {
+	grid-column: 1 / -1;
+	margin-block-start: 8px;
+	color: var(--talkai-ink-3);
+}
+
+// Invitation to set up the personal assistant, above the bots on Discover.
+// Measures and shapes are those of the design: a card with the EDUC shapes on its start side.
+.talkai-assist {
+	display: flex;
+	align-items: stretch;
+	margin-block-end: 24px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-sm);
+	overflow: hidden;
+}
+
+.talkai-assist__art {
+	position: relative;
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 170px;
+	min-height: 112px;
+	background-color: var(--talkai-pink);
+	color: #fff;
+	overflow: hidden;
+}
+
+.talkai-assist__blob {
+	position: absolute;
+	display: block;
+	border-radius: 50%;
+}
+
+.talkai-assist__blob--violet {
+	inset-block-start: -40px;
+	inset-inline-start: -70px;
+	width: 230px;
+	height: 230px;
+	background-color: var(--talkai-violet);
+}
+
+.talkai-assist__blob--orange {
+	inset-block-start: -45px;
+	inset-inline-start: -45px;
+	width: 110px;
+	height: 110px;
+	background-color: var(--talkai-orange);
+}
+
+.talkai-assist__blob--green {
+	inset-block-end: -70px;
+	inset-inline-start: -55px;
+	width: 120px;
+	height: 120px;
+	background-color: var(--talkai-green);
+}
+
+.talkai-assist__spark {
+	position: relative;
+}
+
+.talkai-assist__body {
+	flex: 1;
+	align-self: center;
+	min-width: 0;
+	padding: 20px 24px;
+}
+
+.talkai-assist__title {
+	font-size: 19px;
+	font-weight: 700;
+	line-height: 1.5;
+}
+
+.talkai-assist__text {
+	margin-block-start: 4px;
+	color: var(--talkai-ink-2);
+	font-size: 14px;
+}
+
+.talkai-assist__actions {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding-block: 20px;
+	padding-inline: 0 24px;
+}
+
+// Set-up dialog of the personal assistant
+.talkai-assist-setup__sub {
+	margin-block-start: 0;
+}
+
+.talkai-assist-setup__next {
+	margin-block-start: 14px;
+	color: var(--talkai-ink-2);
+	font-size: 13.5px;
+}
+
+// My bots: table-like list
+.talkai-list {
+	border-block-end: 1px solid var(--talkai-line);
+}
+
+.talkai-list__head,
+.talkai-list__row {
+	display: grid;
+	grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.5fr) minmax(0, 1.3fr) 210px;
+	gap: 16px;
+}
+
+.talkai-list__head {
+	padding: 10px 16px;
+	border-block-start: 2px solid var(--talkai-ink);
+	border-block-end: 1px solid var(--talkai-ink);
+	font-size: 15px;
+	font-weight: 700;
+}
+
+.talkai-list__row {
+	align-items: center;
+	padding: 16px;
+	border-block-start: 1px solid var(--talkai-line);
+
+	&:hover {
+		background-color: var(--talkai-surface-2);
+	}
+}
+
+.talkai-list__head + .talkai-list__row {
+	border-block-start: 0;
+}
+
+.talkai-list__row--pinned,
+.talkai-list__row--pinned:hover {
+	background-color: var(--talkai-pinned-surface);
+}
+
+.talkai-list__name {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-width: 0;
+}
+
+.talkai-list__title {
+	display: block;
+	font-size: 15.5px;
+	font-weight: 700;
+	overflow-wrap: anywhere;
+}
+
+.talkai-list__sub {
+	display: block;
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+}
+
+.talkai-list__meta {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	color: var(--talkai-ink-2);
+	font-size: 14px;
+}
+
+.talkai-list__note {
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+}
+
+.talkai-list__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 10px;
+}
+
+.talkai-feedback {
+	margin-block-start: 4px;
+	padding: 4px 8px;
+	border: 1px solid var(--talkai-pink);
+	border-radius: var(--talkai-radius-sm);
+	background-color: var(--talkai-pink-soft);
+	color: var(--talkai-ink);
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+// Templates for a new bot
+.talkai-tpl {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 20px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-xs);
+	color: var(--talkai-ink);
+	text-decoration: none;
+	transition: border-radius var(--talkai-ease), border-color var(--talkai-ease);
+
+	&:hover {
+		border-color: var(--talkai-ink);
+		border-radius: 0;
+	}
+}
+
+.talkai-tpl--blank {
+	border-style: dashed;
+	border-color: var(--talkai-line-2);
+	background-color: var(--talkai-surface-2);
+	box-shadow: none;
+}
+
+.talkai-tpl__icon {
+	display: grid;
+	place-items: center;
+	width: 46px;
+	height: 46px;
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface-3);
+}
+
+.talkai-tpl__title {
+	margin-block-start: 4px;
+	font-size: 17px;
+	font-weight: 700;
+}
+
+.talkai-tpl__text {
+	color: var(--talkai-ink-2);
+	font-size: 14px;
+}
+
+.talkai-tpl__includes {
+	margin-block-start: auto;
+	padding-block-start: 10px;
+	border-block-start: 1px solid var(--talkai-line);
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+}
+
+@container talkai-app (max-width: 759px) {
+
+	.talkai-list__head {
+		display: none;
+	}
+
+	.talkai-list__row {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 8px;
+	}
+
+	.talkai-list__actions {
+		justify-content: flex-start;
+	}
+
+	.talkai-assist {
+		flex-wrap: wrap;
+	}
+
+	.talkai-assist__art {
+		width: 100%;
+		min-height: 84px;
+	}
+
+	.talkai-assist__body {
+		flex: 1 1 100%;
+		padding: 16px 20px 12px;
+	}
+
+	.talkai-assist__actions {
+		padding-block: 0 20px;
+		padding-inline: 20px;
+	}
+}

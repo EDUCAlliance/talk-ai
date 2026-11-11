@@ -768,6 +768,131 @@ class DoclingClientTest extends TestCase {
 		return ['status' => 'success', 'document' => ['md_content' => '# Test'], 'errors' => []];
 	}
 
+	public function testAPipelineChoiceAddsItsFormFieldsOnlyForDoclingServe(): void {
+		$serve = ['docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'none', 'docling_api_endpoint' => 'https://docling.example'];
+		$base = [['name' => 'to_formats', 'contents' => 'md'], ['name' => 'target_type', 'contents' => 'inbody']];
+		foreach ([
+			'unchanged request' => [$serve, $base],
+			'explicitly unchanged' => [$serve + ['docling_pipeline' => ''], $base],
+			'standard' => [$serve + ['docling_pipeline' => 'standard'], array_merge($base, [['name' => 'pipeline', 'contents' => 'standard']])],
+			'vlm with the default preset' => [$serve + ['docling_pipeline' => 'vlm', 'docling_vlm_preset' => 'default'],
+				array_merge($base, [['name' => 'pipeline', 'contents' => 'vlm'], ['name' => 'vlm_pipeline_preset', 'contents' => 'default']])],
+			'vlm with a named preset' => [$serve + ['docling_pipeline' => 'vlm', 'docling_vlm_preset' => 'uni-gemma'],
+				array_merge($base, [['name' => 'pipeline', 'contents' => 'vlm'], ['name' => 'vlm_pipeline_preset', 'contents' => 'uni-gemma']])],
+			'vlm never goes without a preset' => [$serve + ['docling_pipeline' => 'vlm', 'docling_vlm_preset' => ' '],
+				array_merge($base, [['name' => 'pipeline', 'contents' => 'vlm'], ['name' => 'vlm_pipeline_preset', 'contents' => 'default']])],
+			'legacy endpoint keeps its request' => [['docling_api_profile' => 'legacy', 'docling_auth_mode' => 'bearer', 'docling_pipeline' => 'vlm', 'docling_vlm_preset' => 'default'], []],
+		] as $case => [$config, $expected]) {
+			$sent = null;
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->exactly(2))->method('post')->willReturnCallback(function (string $url, array $options) use (&$sent, $config): IResponse {
+				$sent = array_slice($options['multipart'], 1);
+				return $this->response(($config['docling_api_profile'] ?? '') === 'docling_serve'
+					? ['status' => 'success', 'document' => ['md_content' => '# Converted'], 'errors' => []]
+					: ['markdown' => '# Converted']);
+			});
+			$docling = $this->createDoclingClient($client, $config);
+
+			// A real conversion and the connection test send the same fields.
+			$this->assertSame('# Converted', $docling->convertBinaryToMarkdown('scan.pdf', '%PDF', 'application/pdf'), $case);
+			$this->assertSame($expected, $sent, $case);
+			$sent = null;
+			$this->assertSame(['success' => true], $docling->testConnection(), $case);
+			$this->assertSame($expected, $sent, $case);
+		}
+	}
+
+	public function testARefusedPipelineOrPresetIsReportedAndNothingIsConvertedAnotherWay(): void {
+		foreach ([400, 422] as $status) {
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->once())->method('post')->willReturn($this->response(['detail' => 'unknown preset'], $status));
+			$docling = $this->createDoclingClient($client, [
+				'docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'none', 'docling_api_endpoint' => 'https://docling.example',
+				'docling_pipeline' => 'vlm', 'docling_vlm_preset' => 'missing',
+			]);
+
+			try {
+				$docling->convertBinaryToMarkdown('scan.pdf', '%PDF', 'application/pdf');
+				$this->fail('A refused preset must not convert');
+			} catch (Exception $e) {
+				$this->assertStringContainsString('rejected the pipeline or the preset (HTTP ' . $status . ')', $e->getMessage());
+				$this->assertStringNotContainsString('unknown preset', $e->getMessage(), 'the answer of the server is not passed on');
+			}
+		}
+
+		// Without a pipeline choice the old explanation of HTTP 422 stays.
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())->method('post')->willReturn($this->response(['detail' => 'x'], 422));
+		$docling = $this->createDoclingClient($client, ['docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'none', 'docling_api_endpoint' => 'https://docling.example']);
+		try {
+			$docling->convertBinaryToMarkdown('scan.pdf', '%PDF', 'application/pdf');
+			$this->fail('HTTP 422 must not convert');
+		} catch (Exception $e) {
+			$this->assertStringContainsString('rejected the upload (HTTP 422)', $e->getMessage());
+		}
+	}
+
+	public function testAnUnknownPipelineIsRefusedBeforeAnythingIsSent(): void {
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->never())->method('post');
+		$docling = $this->createDoclingClient($client, [
+			'docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'none', 'docling_api_endpoint' => 'https://docling.example',
+			'docling_pipeline' => 'asr',
+		]);
+
+		$this->assertSame(['success' => false, 'error' => 'Invalid Docling pipeline. Check the Docling settings.'], $docling->testConnection());
+	}
+
+	public function testAConnectionCheckOfOnePipelineDoesNotCountForAnother(): void {
+		$serve = ['docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'x_api_key', 'docling_api_endpoint' => 'https://docling.example'];
+		$target = fn (array $config): array => $this->createDoclingClient($this->createMock(IClient::class), $config)->connectionCheckTarget();
+
+		$unchanged = $target($serve);
+		$standard = $target($serve + ['docling_pipeline' => 'standard']);
+		$vlm = $target($serve + ['docling_pipeline' => 'vlm', 'docling_vlm_preset' => 'default']);
+		$otherPreset = $target($serve + ['docling_pipeline' => 'vlm', 'docling_vlm_preset' => 'uni-gemma']);
+
+		$this->assertSame(
+			\OCA\EducAI\Service\ConnectionCheckStore::fingerprint('docling', ['https://docling.example/v1/convert/file', 'docling_serve', 'x_api_key'], 'docling-key'),
+			$unchanged['fingerprint'],
+			'installations that choose no pipeline keep the result of their last check',
+		);
+		$this->assertSame('Docling Serve · x_api_key', $unchanged['summary']);
+		$this->assertCount(4, array_unique([$unchanged['fingerprint'], $standard['fingerprint'], $vlm['fingerprint'], $otherPreset['fingerprint']]));
+		$this->assertSame('Docling Serve · x_api_key · vlm default', $vlm['summary']);
+		$this->assertSame('Docling Serve · x_api_key · standard', $standard['summary']);
+	}
+
+	public function testDetectionConvertsItsTestDocumentWithTheChosenPipeline(): void {
+		$requested = [];
+		$settings = $this->createMock(SettingsService::class);
+		$settings->method('getDoclingConfig')->willReturnCallback(static function (?string $profile = null, ?string $auth = null, ?string $pipeline = null, ?string $preset = null) use (&$requested): array {
+			$requested[] = [$profile, $auth, $pipeline, $preset];
+			return [
+				'docling_enabled' => true, 'docling_api_endpoint' => '', 'docling_api_profile' => (string)$profile,
+				'docling_auth_mode' => (string)$auth, 'docling_pipeline' => (string)$pipeline, 'docling_vlm_preset' => (string)$preset, 'api_key' => '',
+			];
+		});
+		$sent = null;
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $options) use (&$sent): IResponse {
+			$sent = array_slice($options['multipart'], 1);
+			return $this->response(['status' => 'success', 'document' => ['md_content' => '# ok'], 'errors' => []]);
+		});
+
+		$result = $this->createDoclingClient($client, [], $settings)->detect('https://docling.example/v1/convert/file', null, false, 'vlm', 'uni-gemma');
+
+		$this->assertTrue($result['success']);
+		$this->assertSame('docling_serve', $result['profile']);
+		$this->assertSame([['docling_serve', 'x_api_key', 'vlm', 'uni-gemma']], $requested);
+		$this->assertSame([
+			['name' => 'to_formats', 'contents' => 'md'],
+			['name' => 'target_type', 'contents' => 'inbody'],
+			['name' => 'pipeline', 'contents' => 'vlm'],
+			['name' => 'vlm_pipeline_preset', 'contents' => 'uni-gemma'],
+		], $sent);
+	}
+
 	private function response(mixed $payload, int $status = 200): IResponse {
 		$response = $this->createMock(IResponse::class);
 		$response->method('getStatusCode')->willReturn($status);

@@ -1342,6 +1342,62 @@ class SettingsControllerTest extends TestCase {
 		return $request;
 	}
 
+	public function testManuallyProcessedRequestOfASenderWhoLostAccessEndsWithoutRunOrReply(): void {
+		$request = new QueuedRequest();
+		$request->setId(99);
+		$request->setBotId(7);
+		$request->setRoomToken('room-token');
+		$request->setUserId('guests/3f2a9c');
+		$request->setMessage('Hello');
+		$request->setOriginalMessage('@bot Hello');
+		$request->setReplyToMessageId(123);
+		$request->setAttempts(1);
+		$request->setCreatedAt(time());
+
+		$bot = new Bot();
+		$bot->setId(7);
+		$bot->setIsActive(true);
+		$bot->setMentionName('@bot');
+
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectLeaseRecovery($rateLimitService);
+		$rateLimitService->expects($this->once())->method('getResponseReadyRequests')->with(10)->willReturn([]);
+		$rateLimitService->expects($this->once())->method('isEnabled')->willReturn(true);
+		$rateLimitService->expects($this->exactly(2))
+			->method('getQueueStats')
+			->willReturnOnConsecutiveCalls(
+				['pending' => 1, 'processing' => 0, 'completed' => 0, 'failed' => 0, 'total' => 1],
+				['pending' => 0, 'processing' => 0, 'completed' => 0, 'failed' => 1, 'total' => 1]
+			);
+		$rateLimitService->expects($this->once())->method('canProcess')->willReturn(true);
+		$rateLimitService->expects($this->once())->method('getNextPending')->willReturn($request);
+		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
+		$rateLimitService->expects($this->once())->method('markProcessingFailed')->with($request, 'Sender may no longer use this bot');
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
+		$rateLimitService->expects($this->never())->method('markResponseReady');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('userCanAccessBot')->with($bot, 'guests/3f2a9c')->willReturn(false);
+		$botService->expects($this->never())->method('processMessage');
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+		$talkHandler->expects($this->never())->method('sendReplyToTalk');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->never())->method('startRun');
+
+		$controller = $this->createController($rateLimitService, $botService, $botMapper, $talkHandler, $traceService);
+
+		$this->assertSame([
+			'success' => true,
+			'processed' => 0,
+			'remaining' => 0,
+			'errors' => [],
+			'errorCodes' => [],
+		], $controller->processQueue()->getData());
+	}
+
 	private function createController(
 		RateLimitService $rateLimitService,
 		BotService $botService,
@@ -1355,6 +1411,15 @@ class SettingsControllerTest extends TestCase {
 		?EmbeddingAdminService $embeddingAdmin = null,
 	): SettingsController {
 		$l10n ??= $this->createL10n();
+		// Unless a test says otherwise, the sender may still use the bot when the queue is processed.
+		if ($botService instanceof \PHPUnit\Framework\MockObject\MockObject) {
+			$botService->method('userCanAccessBot')->willReturn(true);
+		}
+		// The settings payload names the Docling pipeline; the real service always returns both keys.
+		$settingsService ??= $this->createMock(SettingsService::class);
+		if ($settingsService instanceof \PHPUnit\Framework\MockObject\MockObject) {
+			$settingsService->method('getDoclingPipelineOptions')->willReturn(['pipeline' => '', 'vlm_preset' => 'default']);
+		}
 		return new SettingsController(
 			'educai',
 			$this->createMock(IRequest::class),

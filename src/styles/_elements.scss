@@ -1,0 +1,513 @@
+// Small building blocks used on every page. Recipes follow the EDUC Component Library:
+// pill shapes that turn square on hover, one border colour for "selected" (ink), status colours only for status.
+
+// Layout helpers
+.talkai-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+}
+
+.talkai-spread {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.talkai-muted {
+	color: var(--talkai-ink-3);
+}
+
+.talkai-mono {
+	font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	font-size: 12.5px;
+}
+
+.talkai-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 20px;
+}
+
+.talkai-grid2 {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 16px;
+}
+
+.talkai-crumbs {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-block-end: 16px;
+	color: var(--talkai-ink-3);
+	font-size: 14px;
+}
+
+.talkai-crumbs__link {
+	color: var(--talkai-ink-2);
+	font-weight: 600;
+	text-decoration: underline;
+
+	&:hover {
+		color: var(--talkai-ink);
+	}
+}
+
+// Buttons: filled, outlined (default), ghost. Heights 36 px, 24 px (small), 48 px (big).
+.talkai-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	height: 36px;
+	padding: 0 16px;
+	border: 1px solid var(--talkai-ink);
+	border-radius: 18px;
+	background-color: var(--talkai-surface-2);
+	color: var(--talkai-ink);
+	font-size: 14px;
+	font-weight: 400;
+	line-height: 1;
+	text-decoration: none;
+	white-space: nowrap;
+	transition: border-radius var(--talkai-ease), background-color var(--talkai-ease);
+
+	&:hover {
+		border-radius: 0;
+		background-color: var(--talkai-surface-3);
+	}
+
+	&:disabled,
+	&[aria-disabled='true'] {
+		opacity: 0.5;
+		pointer-events: none;
+	}
+}
+
+.talkai-btn--filled {
+	background-color: var(--talkai-ink);
+	color: var(--talkai-on-ink);
+
+	&:hover {
+		background-color: var(--talkai-ink);
+	}
+}
+
+.talkai-btn--danger {
+	border-color: var(--talkai-danger);
+	background-color: var(--talkai-surface);
+	color: var(--talkai-danger);
+
+	&:hover {
+		background-color: var(--talkai-danger-soft);
+	}
+}
+
+.talkai-btn--ghost {
+	padding: 0 4px;
+	border-color: transparent;
+	border-radius: 0;
+	background-color: transparent;
+
+	&:hover {
+		background-color: transparent;
+		text-decoration: underline;
+	}
+}
+
+// Icon-only button
+.talkai-btn--icon {
+	width: 36px;
+	padding: 0;
+	border-color: transparent;
+	border-radius: 50%;
+	background-color: transparent;
+
+	&:hover {
+		border-radius: 50%;
+		background-color: var(--talkai-surface-3);
+	}
+}
+
+.talkai-btn--small {
+	gap: 6px;
+	height: 24px;
+	padding: 0 12px;
+	border-radius: 12px;
+	font-size: 12px;
+
+	&.talkai-btn--ghost {
+		padding: 0 2px;
+	}
+
+	&.talkai-btn--icon {
+		width: 30px;
+		height: 30px;
+		padding: 0;
+	}
+}
+
+.talkai-btn--big {
+	height: 48px;
+	padding: 0 24px;
+	border-radius: 24px;
+	font-size: 16px;
+}
+
+// Text link with an arrow, the main action of a tile
+.talkai-go {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--talkai-ink);
+	font-size: 14px;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+
+	&:hover {
+		text-decoration: underline;
+	}
+}
+
+.talkai-linkish {
+	color: inherit;
+	font-size: inherit;
+	text-decoration: underline;
+	text-underline-offset: 4px;
+}
+
+// Badges: tinted, or white with a status dot
+.talkai-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 24px;
+	padding: 0 8px;
+	border: 1px solid var(--talkai-line-2);
+	border-radius: 999px;
+	background-color: var(--talkai-surface-3);
+	color: var(--talkai-ink);
+	font-size: 12px;
+	font-weight: 500;
+	white-space: nowrap;
+}
+
+.talkai-chip--ok {
+	border-color: var(--talkai-green);
+	background-color: var(--talkai-green-soft);
+}
+
+.talkai-chip--warn {
+	border-color: var(--talkai-orange);
+	background-color: var(--talkai-orange-soft);
+}
+
+.talkai-chip--err {
+	border-color: var(--talkai-pink);
+	background-color: var(--talkai-pink-soft);
+}
+
+.talkai-chip--info {
+	border-color: var(--talkai-violet);
+	background-color: var(--talkai-violet-soft);
+}
+
+.talkai-chip--dot {
+	border-color: var(--talkai-line);
+	background-color: var(--talkai-surface);
+
+	&::before {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background-color: var(--talkai-line-3);
+		content: '';
+	}
+
+	&.talkai-chip--ok::before {
+		background-color: var(--talkai-green);
+	}
+
+	&.talkai-chip--warn::before {
+		background-color: var(--talkai-orange);
+	}
+
+	&.talkai-chip--err::before {
+		background-color: var(--talkai-pink);
+	}
+
+	&.talkai-chip--info::before {
+		background-color: var(--talkai-violet);
+	}
+}
+
+// Notes
+.talkai-note {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 12px 16px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	color: var(--talkai-ink);
+	font-size: 14px;
+}
+
+.talkai-note--info {
+	border-color: var(--talkai-violet);
+	background-color: var(--talkai-violet-soft);
+}
+
+.talkai-note--warn {
+	border-color: var(--talkai-yellow);
+	background-color: var(--talkai-yellow-soft);
+}
+
+.talkai-note--ok {
+	border-color: var(--talkai-green);
+	background-color: var(--talkai-green-soft);
+}
+
+.talkai-note--err {
+	border-color: var(--talkai-pink);
+	background-color: var(--talkai-pink-soft);
+}
+
+.talkai-warn-text {
+	color: var(--talkai-orange-text);
+	font-weight: 600;
+}
+
+.talkai-ok-text {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	color: var(--talkai-green-text);
+	font-size: 14px;
+	font-weight: 600;
+}
+
+// Card with a title
+.talkai-section {
+	margin-block-end: 16px;
+	padding: 20px 24px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-xs);
+}
+
+.talkai-section__title {
+	margin-block-end: 4px;
+	font-size: 18px;
+	font-weight: 700;
+}
+
+.talkai-section__lead {
+	margin-block-end: 16px;
+	color: var(--talkai-ink-3);
+	font-size: 14px;
+}
+
+.talkai-section--danger {
+	border-color: var(--talkai-pink);
+}
+
+.talkai-sub {
+	margin-block: 20px 8px;
+	color: var(--talkai-ink-2);
+	font-size: 13px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+// Description list
+.talkai-dl {
+	display: grid;
+	grid-template-columns: 140px minmax(0, 1fr);
+	margin: 0;
+	border-block-end: 1px solid var(--talkai-line-2);
+	font-size: 14px;
+}
+
+.talkai-dl__term,
+.talkai-dl__value {
+	float: none;
+	width: auto;
+	margin: 0;
+	padding: 9px 0;
+	border-block-start: 1px solid var(--talkai-line-2);
+	text-align: start;
+	white-space: normal;
+}
+
+.talkai-dl__term {
+	font-weight: 700;
+}
+
+.talkai-dl__value {
+	padding-inline-start: 12px;
+	overflow-wrap: anywhere;
+}
+
+.talkai-dl--narrow {
+	grid-template-columns: 96px minmax(0, 1fr);
+	font-size: 13.5px;
+}
+
+// Accordion
+.talkai-disclosure {
+	margin-block-start: 20px;
+	border-block: 1px solid var(--talkai-ink);
+
+	&[open] {
+		padding-block-end: 16px;
+	}
+}
+
+.talkai-disclosure__summary {
+	display: block;
+	position: relative;
+	padding: 12px 0;
+	padding-inline-end: 36px;
+	font-weight: 700;
+	list-style: none;
+	cursor: pointer;
+
+	&::-webkit-details-marker {
+		display: none;
+	}
+
+	&::after {
+		position: absolute;
+		inset-block-start: 50%;
+		inset-inline-end: 2px;
+		font-size: 22px;
+		font-weight: 400;
+		line-height: 1;
+		content: '+';
+		translate: 0 -50%;
+	}
+}
+
+.talkai-disclosure[open] > .talkai-disclosure__summary::after {
+	content: '\2212';
+}
+
+.talkai-disclosure__aside {
+	margin-inline-start: 2px;
+	color: var(--talkai-ink-3);
+	font-size: 14px;
+	font-weight: 400;
+}
+
+// Loading and empty states
+.talkai-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 56px 20px;
+	color: var(--talkai-ink-3);
+	text-align: center;
+}
+
+.talkai-state__icon {
+	display: grid;
+	place-items: center;
+	width: 60px;
+	height: 60px;
+	margin-block-end: 4px;
+	border-radius: 50%;
+	background-color: var(--talkai-surface-3);
+	color: var(--talkai-ink-2);
+}
+
+.talkai-state__icon--ok {
+	background-color: var(--talkai-green-soft);
+	color: var(--talkai-green-text);
+}
+
+.talkai-state__title {
+	color: var(--talkai-ink);
+	font-size: 17px;
+	font-weight: 700;
+}
+
+.talkai-state__text {
+	max-width: 520px;
+	margin-block-end: 8px;
+}
+
+// Progress bar
+.talkai-bar {
+	width: 160px;
+	height: 6px;
+	margin-block-start: 6px;
+	border-radius: 3px;
+	background-color: var(--talkai-surface-3);
+	overflow: hidden;
+}
+
+.talkai-bar__fill {
+	display: block;
+	height: 100%;
+	background-color: var(--talkai-green);
+	transition: width 0.4s linear;
+}
+
+@container talkai-app (max-width: 1099px) {
+
+	.talkai-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@container talkai-app (max-width: 759px) {
+
+	.talkai-grid,
+	.talkai-grid2 {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+// Steps of the approval path
+.talkai-flow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+}
+
+.talkai-flow__step {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 1px 10px;
+	border: 1px solid var(--talkai-line);
+	border-radius: 999px;
+	background-color: var(--talkai-surface);
+	color: var(--talkai-ink-2);
+
+	&.is-current {
+		border-color: var(--talkai-ink);
+		background-color: var(--talkai-ink);
+		color: var(--talkai-on-ink);
+	}
+
+	&.is-done {
+		border-color: var(--talkai-green);
+		background-color: var(--talkai-green-soft);
+		color: var(--talkai-ink);
+	}
+}
+
+.talkai-flow__arrow {
+	color: var(--talkai-line-2);
+}

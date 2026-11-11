@@ -11,6 +11,7 @@ return [
 		['name' => 'bot#index', 'url' => '/api/v1/bots', 'verb' => 'GET'],
 		['name' => 'bot#show', 'url' => '/api/v1/bots/{id}', 'verb' => 'GET'],
 		['name' => 'bot#create', 'url' => '/api/v1/bots', 'verb' => 'POST'],
+		['name' => 'bot#preview', 'url' => '/api/v1/bots/preview', 'verb' => 'POST'],
 		['name' => 'bot#update', 'url' => '/api/v1/bots/{id}', 'verb' => 'PUT'],
 		['name' => 'bot#destroy', 'url' => '/api/v1/bots/{id}', 'verb' => 'DELETE'],
 		['name' => 'bot#tools', 'url' => '/api/v1/bots/{id}/tools', 'verb' => 'GET'],

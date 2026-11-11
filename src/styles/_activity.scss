@@ -1,0 +1,159 @@
+// Activity: the runs of the user on one side, what happened in the selected one on the other.
+
+.talkai-act {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+	align-items: start;
+	gap: 24px;
+}
+
+.talkai-act__more {
+	margin-block: -8px 20px;
+}
+
+.talkai-act__filters {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.talkai-act__gap {
+	margin-block: 12px;
+}
+
+.talkai-act__day {
+	margin-block: 16px 8px;
+	color: var(--talkai-ink-2);
+	font-size: 13px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+
+	&:first-child {
+		margin-block-start: 0;
+	}
+}
+
+.talkai-run {
+	display: grid;
+	grid-template-columns: max-content 32px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	margin-block-end: 8px;
+	padding: 10px 12px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface);
+	transition: border-radius var(--talkai-ease);
+
+	&:hover {
+		border-radius: 0;
+	}
+
+	&[aria-pressed='true'] {
+		border-color: var(--talkai-ink);
+		box-shadow: inset 0 0 0 1px var(--talkai-ink);
+	}
+}
+
+.talkai-run__time {
+	min-width: 40px;
+	color: var(--talkai-ink-3);
+	white-space: nowrap;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.talkai-run__text {
+	min-width: 0;
+	font-size: 14px;
+}
+
+.talkai-run__bot {
+	display: block;
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.talkai-run__message {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.talkai-act__pages {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-block-start: 16px;
+	font-size: 13px;
+}
+
+.talkai-act__clear {
+	margin-block-start: 16px;
+	color: var(--talkai-ink-3);
+}
+
+.talkai-act__detail {
+	position: sticky;
+	inset-block-start: 16px;
+	max-height: calc(100vh - 110px);
+	overflow: auto;
+}
+
+.talkai-act__event {
+	min-width: 0;
+}
+
+.talkai-act__error {
+	margin-block-start: 4px;
+	color: var(--talkai-danger);
+	overflow-wrap: anywhere;
+}
+
+.talkai-act__tech {
+	margin-block-start: 6px;
+	font-size: 13px;
+}
+
+.talkai-act__label {
+	display: block;
+	margin-block: 8px 4px;
+}
+
+.talkai-act__pre {
+	max-height: 280px;
+	margin: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface-2);
+	font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	font-size: 12.5px;
+	white-space: pre-wrap;
+	overflow: auto;
+	overflow-wrap: anywhere;
+}
+
+@container talkai-app (max-width: 1099px) {
+
+	.talkai-act {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.talkai-act__detail {
+		position: static;
+		max-height: none;
+	}
+}
+
+@container talkai-app (max-width: 759px) {
+
+	.talkai-act__filters {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}

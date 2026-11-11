@@ -167,6 +167,8 @@ class SettingsController extends Controller {
 		?string $catalogueLinkField = null,
 		?string $catalogueLinkTemplate = null,
 		?array $catalogueLinkOrigins = null,
+		?string $doclingPipeline = null,
+		?string $doclingVlmPreset = null,
 	): DataResponse {
 		if ($catalogueLinkField !== null || $catalogueLinkTemplate !== null || $catalogueLinkOrigins !== null) {
 			try {
@@ -180,6 +182,7 @@ class SettingsController extends Controller {
 				return $this->errorResponse('default_model_required', $this->l10n->t('Choose a default model before saving.'), 400);
 			}
 			$this->settingsService->validateDoclingOptions($doclingApiProfile, $doclingAuthMode);
+			$this->settingsService->validateDoclingPipelineOptions($doclingPipeline, $doclingVlmPreset);
 			$this->settingsService->validateOutputTokenOptions($maxOutputTokens, $modelOutputTokenLimits);
 			$cleared = SettingsService::validateClearCredentials($clearCredentials);
 			$this->logger->info('EducAI Settings Update - catalogueApiEndpoint: ' . var_export($catalogueApiEndpoint, true) . ', catalogueEnabled: ' . var_export($catalogueEnabled, true));
@@ -264,6 +267,9 @@ class SettingsController extends Controller {
 			if ($catalogueLinkField !== null || $catalogueLinkTemplate !== null || $catalogueLinkOrigins !== null) {
 				$this->settingsService->updateCatalogueLinkConfig($catalogueLinkField, $catalogueLinkTemplate, $catalogueLinkOrigins);
 				$settings = $this->settingsService->getSettings();
+			}
+			if ($doclingPipeline !== null || $doclingVlmPreset !== null) {
+				$this->settingsService->updateDoclingPipelineOptions($doclingPipeline, $doclingVlmPreset);
 			}
 
 			$afterRateLimitConfig = $this->extractRateLimitConfig($settings);
@@ -729,6 +735,13 @@ class SettingsController extends Controller {
 
 			if (!$bot->getIsActive()) {
 				throw new Exception('Bot is no longer active');
+			}
+
+			// Same rule as in the background job: a sender who lost access since the request was queued
+			// (guest switch off, bot no longer live, group left) gets no run, no retry and no reply.
+			if (!$this->botService->userCanAccessBot($bot, $request->getUserId())) {
+				$this->failProcessingIfOwned($request, 'Sender may no longer use this bot');
+				return ['success' => true, 'skipped' => true];
 			}
 
 			$traceRunId = $this->startQueuedTrace($request, $bot);
@@ -1206,6 +1219,9 @@ class SettingsController extends Controller {
 			'white' => $this->urlGenerator->linkToRoute('educai.app_icon.preview', ['variant' => 'white']),
 		];
 		$data['app_icon_runtime_urls'] = $this->appIconService->getRuntimeIconUrls();
+		$pipeline = $this->settingsService->getDoclingPipelineOptions();
+		$data['docling_pipeline'] = $pipeline['pipeline'];
+		$data['docling_vlm_preset'] = $pipeline['vlm_preset'];
 
 		return $data;
 	}

@@ -235,7 +235,8 @@ class Application extends App implements IBootstrap {
 				$c->get(CredentialService::class),
 				$c->get(TalkBotRegistrationService::class),
 				$c->get(\Psr\Log\LoggerInterface::class),
-				$c->get(\OCA\EducAI\Service\EmbeddingConfigurationService::class)
+				$c->get(\OCA\EducAI\Service\EmbeddingConfigurationService::class),
+				$c->get(\OCP\IConfig::class),
 			);
 		});
 

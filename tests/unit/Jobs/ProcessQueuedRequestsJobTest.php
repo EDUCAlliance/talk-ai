@@ -655,6 +655,33 @@ class ProcessQueuedRequestsJobTest extends TestCase {
 		return $bot;
 	}
 
+	public function testQueuedRequestOfASenderWhoLostAccessEndsWithoutRunRetryOrReply(): void {
+		// A guest asked while the bot answered guests; the owner turned the switch off before the queue ran.
+		$request = $this->createRequest(1);
+		$request->setUserId('guests/3f2a9c');
+		$bot = $this->createActiveBot();
+		$rateLimitService = $this->createMock(RateLimitService::class);
+		$this->expectSinglePendingRequest($rateLimitService, $request);
+		$rateLimitService->expects($this->once())->method('markProcessing')->with($request);
+		$rateLimitService->expects($this->once())->method('markProcessingFailed')->with($request, 'Sender may no longer use this bot');
+		$rateLimitService->expects($this->never())->method('markProcessingRetry');
+		$rateLimitService->expects($this->never())->method('markResponseReady');
+		$rateLimitService->expects($this->never())->method('markCompleted');
+
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->expects($this->once())->method('findById')->with(7)->willReturn($bot);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('userCanAccessBot')->with($bot, 'guests/3f2a9c')->willReturn(false);
+		$botService->expects($this->never())->method('processMessage');
+		$talkHandler = $this->createMock(TalkHandler::class);
+		$talkHandler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+		$talkHandler->expects($this->never())->method('sendReplyToTalk');
+		$traceService = $this->createMock(TraceService::class);
+		$traceService->expects($this->never())->method('startRun');
+
+		$this->createJob($rateLimitService, $botService, $botMapper, $talkHandler, $traceService)->runNow();
+	}
+
 	private function createJob(
 		RateLimitService $rateLimitService,
 		BotService $botService,
@@ -662,6 +689,11 @@ class ProcessQueuedRequestsJobTest extends TestCase {
 		TalkHandler $talkHandler,
 		TraceService $traceService,
 	): TestableProcessQueuedRequestsJob {
+		// Unless a test says otherwise, the sender may still use the bot when the queue runs.
+		if ($botService instanceof \PHPUnit\Framework\MockObject\MockObject) {
+			$botService->method('userCanAccessBot')->willReturn(true);
+		}
+
 		return new TestableProcessQueuedRequestsJob(
 			$this->createMock(ITimeFactory::class),
 			$rateLimitService,

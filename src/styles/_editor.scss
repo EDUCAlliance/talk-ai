@@ -1,0 +1,666 @@
+// Creating and editing a bot: the wizard, the bot page and the sections both share.
+
+.talkai-editor__small {
+	margin-block-start: 2px;
+	font-size: 13.5px;
+}
+
+.talkai-editor__gap {
+	margin-block-start: 16px;
+}
+
+.talkai-editor__gap-below {
+	margin-block: 0 14px;
+}
+
+.talkai-editor__picker {
+	margin-block-start: 18px;
+}
+
+.talkai-editor__select {
+	width: 100%;
+}
+
+.talkai-editor__audience-note {
+	margin-block-start: 6px;
+}
+
+.talkai-editor__flow {
+	margin-block-end: 6px;
+}
+
+.talkai-editor__knowledge-head {
+	margin-block-end: 16px;
+}
+
+.talkai-editor__custom {
+	margin-block-start: 12px;
+}
+
+.talkai-editor__onboarding {
+	margin-block-end: 16px;
+}
+
+.talkai-input--short {
+	min-height: 64px;
+}
+
+// The model selector is a shared component with its own markup
+.talkai-model select,
+.talkai-model input[type='text'] {
+	width: 100%;
+	height: 42px;
+	min-height: 0;
+	margin: 0;
+	padding: 0 16px;
+	border: 1px solid var(--talkai-line-2);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-xs);
+	color: var(--talkai-ink);
+	font-size: 14px;
+}
+
+// Sentences to add to the instruction
+.talkai-suggest {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-block-start: 8px;
+}
+
+.talkai-suggest__btn {
+	height: 28px;
+	padding: 0 12px;
+	border: 1px dashed var(--talkai-line-2);
+	border-radius: 999px;
+	background-color: var(--talkai-surface-2);
+	color: var(--talkai-ink-2);
+	font-size: 13px;
+	transition: border-radius var(--talkai-ease);
+
+	&:hover {
+		border-style: solid;
+		border-color: var(--talkai-ink);
+		border-radius: 0;
+		color: var(--talkai-ink);
+	}
+}
+
+// Who uses the bot: one card per audience, the chosen one has the ink border
+.talkai-rcards {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.talkai-rcard {
+	display: flex;
+	align-items: flex-start;
+	gap: 14px;
+	padding: 16px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	color: var(--talkai-ink);
+	transition: border-radius var(--talkai-ease), border-color var(--talkai-ease);
+
+	&:hover {
+		border-color: var(--talkai-line-2);
+		border-radius: 0;
+	}
+
+	&[aria-pressed='true'] {
+		border-color: var(--talkai-ink);
+		background-color: var(--talkai-surface-2);
+		box-shadow: inset 0 0 0 1px var(--talkai-ink);
+	}
+}
+
+.talkai-rcard__icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	border-start-end-radius: 50%;
+	border-end-end-radius: 50%;
+}
+
+@each $key in personal, group, team, everyone {
+
+	.talkai-rcard__icon--#{$key} {
+		background-color: var(--talkai-scope-#{$key});
+		color: var(--talkai-scope-#{$key}-text);
+	}
+}
+
+.talkai-rcard__title {
+	display: block;
+	font-size: 15px;
+}
+
+.talkai-rcard__text {
+	display: block;
+	margin-block-start: 2px;
+	color: var(--talkai-ink-3);
+	font-size: 13.5px;
+}
+
+.talkai-rcard__tag {
+	display: inline-block;
+	margin-block-start: 8px;
+	padding: 1px 8px;
+	border: 1px solid var(--talkai-line-2);
+	border-radius: 999px;
+	background-color: var(--talkai-surface-3);
+	font-size: 12px;
+}
+
+// Knowledge
+.talkai-drop {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 20px;
+	border: 1px dashed var(--talkai-line-2);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	transition: border-radius var(--talkai-ease);
+
+	&:hover {
+		border-radius: 0;
+	}
+}
+
+.talkai-drop__text {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+
+.talkai-drop__icon {
+	display: grid;
+	place-items: center;
+	width: 44px;
+	height: 44px;
+	color: var(--talkai-line-2);
+}
+
+.talkai-url-row {
+	display: flex;
+	gap: 8px;
+	margin-block-start: 10px;
+}
+
+.talkai-sources {
+	margin-block-start: 16px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	list-style: none;
+	overflow: hidden;
+}
+
+.talkai-src {
+	display: grid;
+	grid-template-columns: 36px minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	border-block-start: 1px solid var(--talkai-surface-3);
+	font-size: 14px;
+
+	&:first-child {
+		border-block-start: 0;
+	}
+}
+
+.talkai-src__icon {
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface-3);
+	color: var(--talkai-ink-2);
+}
+
+.talkai-src__main {
+	min-width: 0;
+}
+
+.talkai-src__name {
+	display: block;
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.talkai-src__sub {
+	display: block;
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.talkai-src__actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+// Capabilities
+.talkai-capcards {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.talkai-capc {
+	display: flex;
+	align-items: flex-start;
+	gap: 14px;
+	padding: 16px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+
+	&.is-on {
+		border-color: var(--talkai-ink);
+		box-shadow: inset 0 0 0 1px var(--talkai-ink);
+	}
+
+	&.is-off {
+		opacity: 0.6;
+	}
+}
+
+.talkai-capc__icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface-3);
+	color: var(--talkai-ink-2);
+}
+
+.talkai-capc.is-on .talkai-capc__icon {
+	background-color: var(--talkai-ink);
+	color: var(--talkai-on-ink);
+}
+
+.talkai-capc__text {
+	flex: 1;
+	min-width: 0;
+}
+
+.talkai-capc__title {
+	display: block;
+	font-size: 15px;
+	overflow-wrap: anywhere;
+}
+
+.talkai-capc__sub {
+	display: block;
+	margin-block-start: 2px;
+	color: var(--talkai-ink-3);
+	font-size: 13.5px;
+}
+
+.talkai-capc__rec {
+	display: inline-block;
+	margin-block-start: 8px;
+	padding: 0 8px;
+	border: 1px solid var(--talkai-green);
+	border-radius: 999px;
+	background-color: var(--talkai-green-soft);
+	font-size: 12px;
+}
+
+.talkai-capc__rec--plain {
+	border-color: var(--talkai-line-2);
+	background-color: var(--talkai-surface-3);
+}
+
+// Summary before finishing
+.talkai-sum {
+	display: grid;
+	gap: 10px;
+}
+
+.talkai-sum__row {
+	display: grid;
+	grid-template-columns: 26px 150px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface);
+	font-size: 14px;
+}
+
+.talkai-sum__tick {
+	display: grid;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	background-color: var(--talkai-green);
+	color: #3d3d3b;
+}
+
+.talkai-sum__tick--warn {
+	background-color: var(--talkai-orange);
+}
+
+.talkai-sum__key {
+	color: var(--talkai-ink-3);
+}
+
+.talkai-sum__value {
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+// Exact tools
+.talkai-techtools {
+	display: grid;
+	gap: 8px;
+}
+
+.talkai-techtools__row {
+	display: grid;
+	grid-template-columns: 20px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface);
+	font-size: 14px;
+}
+
+// Starter questions
+.talkai-question {
+	display: grid;
+	gap: 8px;
+	margin-block-end: 14px;
+	padding-inline-start: 14px;
+	border-inline-start: 2px solid var(--talkai-line);
+	font-size: 14px;
+}
+
+.talkai-question__free {
+	font-size: 14px;
+}
+
+.talkai-question__answer {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1fr) 150px auto;
+	align-items: center;
+	gap: 8px;
+}
+
+.talkai-question__letter {
+	color: var(--talkai-ink-3);
+	font-size: 12.5px;
+	font-weight: 700;
+}
+
+// Wizard frame
+.talkai-wiz {
+	max-width: 1000px;
+	container: talkai-wiz / inline-size;
+}
+
+.talkai-wiz__top {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	margin-block-end: 12px;
+}
+
+.talkai-wiz__back {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--talkai-ink-3);
+	font-size: 14px;
+	text-decoration: none;
+
+	&:hover {
+		color: var(--talkai-ink);
+		text-decoration: underline;
+	}
+}
+
+.talkai-wiz__note {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-inline-start: auto;
+	color: var(--talkai-ink-3);
+	font-size: 13px;
+}
+
+.talkai-wiz__toggle {
+	height: 34px;
+	padding: 0 12px;
+	border-radius: 8px;
+
+	&:hover,
+	&[aria-expanded='true'] {
+		border-radius: 8px;
+		background-color: var(--talkai-surface-3);
+		text-decoration: none;
+	}
+}
+
+.talkai-stepper {
+	display: flex;
+	margin-block: 8px 28px;
+	list-style: none;
+}
+
+.talkai-stepper__item {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	padding-inline-end: 10px;
+	color: var(--talkai-ink-3);
+	font-size: 14px;
+	font-weight: 600;
+
+	&::after {
+		flex: 1;
+		min-width: 12px;
+		height: 1px;
+		margin-inline-start: 6px;
+		background-color: var(--talkai-line-2);
+		content: '';
+	}
+
+	&:last-child {
+		flex: none;
+		padding-inline-end: 0;
+
+		&::after {
+			display: none;
+		}
+	}
+
+	&.is-done,
+	&.is-current {
+		color: var(--talkai-ink);
+	}
+
+	&.is-done::after {
+		height: 2px;
+		background-color: var(--talkai-green);
+	}
+}
+
+.talkai-stepper__link {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	color: inherit;
+	font: inherit;
+	white-space: nowrap;
+}
+
+.talkai-stepper__num {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	border: 1px solid var(--talkai-line-2);
+	border-radius: 50%;
+	background-color: var(--talkai-surface);
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.talkai-stepper__item.is-done .talkai-stepper__num {
+	border-color: var(--talkai-green);
+	background-color: var(--talkai-green);
+	color: #3d3d3b;
+}
+
+.talkai-stepper__item.is-current .talkai-stepper__num {
+	border-color: var(--talkai-ink);
+	background-color: var(--talkai-ink);
+	color: var(--talkai-on-ink);
+}
+
+.talkai-stepper__caption {
+	display: none;
+	margin-block: -14px 20px;
+	font-weight: 600;
+}
+
+.talkai-step__title {
+	margin-block-end: 4px;
+	font-size: 24px;
+	font-weight: 700;
+}
+
+.talkai-step__lead {
+	margin-block-end: 22px;
+	color: var(--talkai-ink-3);
+	font-size: 15px;
+}
+
+.talkai-wiz__nav {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-block-start: 28px;
+	padding-block-start: 16px;
+	border-block-start: 1px solid var(--talkai-ink);
+}
+
+.talkai-wiz__final {
+	margin-block-start: 16px;
+}
+
+.talkai-wiz__try {
+	margin-block-end: 20px;
+}
+
+// Finished: created or submitted
+.talkai-done {
+	max-width: 640px;
+	margin: 40px auto;
+	padding: 44px 28px 48px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface-2);
+	text-align: center;
+}
+
+.talkai-done__title {
+	margin-block: 12px 8px;
+	font-size: 28px;
+	font-weight: 700;
+}
+
+.talkai-done__text {
+	margin-block-end: 20px;
+	color: var(--talkai-ink-3);
+}
+
+.talkai-done__flow {
+	justify-content: center;
+	margin-block-end: 24px;
+}
+
+.talkai-done__actions {
+	justify-content: center;
+}
+
+@container talkai-wiz (max-width: 739px) {
+
+	.talkai-stepper__label {
+		display: none;
+	}
+
+	.talkai-stepper__caption {
+		display: block;
+	}
+}
+
+@container talkai-wiz (max-width: 599px) {
+
+	.talkai-rcards,
+	.talkai-capcards {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.talkai-sum__row {
+		grid-template-columns: 26px minmax(0, 1fr) auto;
+	}
+
+	.talkai-sum__key {
+		display: none;
+	}
+
+	.talkai-src {
+		grid-template-columns: 36px minmax(0, 1fr) auto;
+		row-gap: 6px;
+	}
+
+	.talkai-src__actions {
+		grid-column: 2 / 4;
+		justify-self: end;
+	}
+
+	.talkai-question__answer {
+		grid-template-columns: 34px minmax(0, 1fr) auto;
+	}
+
+	.talkai-question__next {
+		grid-column: 2;
+	}
+}
+
+// On the bot page the cards sit in a section; the wizard has its own container above.
+@container talkai-app (max-width: 759px) {
+
+	.talkai-section .talkai-rcards,
+	.talkai-section .talkai-capcards {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}

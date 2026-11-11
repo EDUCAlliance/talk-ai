@@ -1149,6 +1149,121 @@ class TalkHandlerTest extends TestCase {
 		$this->assertSame('Ask {mention-user1} about https://example.invalid/docs', $this->invokePrivateMethod($handler, 'removeBotMention', [$incoming->getText(), '@docs']));
 	}
 
+	public function testAGuestCannotResetABot(): void {
+		$bots = $this->createMock(BotService::class);
+		$bots->expects($this->never())->method('findByMentionName');
+		$bots->expects($this->never())->method('userCanAccessBot');
+		$onboarding = $this->createMock(OnboardingService::class);
+		$onboarding->expects($this->never())->method('resetRoom');
+		$onboarding->expects($this->never())->method('getAllBotsWithStateForRoom');
+		$documents = $this->createMock(RoomDocumentIngestionService::class);
+		$documents->expects($this->never())->method('deleteRoomDocuments');
+		$handler = $this->createGuestTalkHandler($bots, $onboarding, $documents);
+		$handler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+
+		$this->invokePrivateMethod($handler, 'handleResetCommand', ['room-a', 'guests/3f2a9c', 1234, '((RESET)) @bot']);
+		$this->invokePrivateMethod($handler, 'handleResetCommand', ['room-a', 'emails/7b1d', 1234, '((RESET))']);
+	}
+
+	public function testAGuestNeitherActivatesABotNorAnswersItsActivationQuestions(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$bot->setMentionName('@bot');
+		$unfinished = new \OCA\EducAI\Db\ChatRoom();
+		$unfinished->setOnboardingStatus('awaiting_mode');
+		$this->assertFalse($unfinished->isOnboardingComplete());
+
+		foreach ([null, $unfinished] as $room) {
+			$bots = $this->createMock(BotService::class);
+			$bots->method('userCanAccessBot')->willReturn(true);
+			$bots->method('getEffectiveBotForUser')->willReturn($bot);
+			$bots->expects($this->never())->method('processMessage');
+			$onboarding = $this->createMock(OnboardingService::class);
+			$onboarding->method('getRoomState')->willReturn($room);
+			$onboarding->expects($this->never())->method('initializeRoom');
+			$onboarding->expects($this->never())->method('handleOnboardingResponse');
+			// Without a mention a guest's message is no answer to a bot that is being set up either.
+			$onboarding->expects($this->never())->method('getOnboardingInProgressBotsForRoom');
+			$onboarding->method('getAlwaysModeBotsForRoom')->willReturn([]);
+			$documents = $this->createMock(RoomDocumentIngestionService::class);
+			$documents->expects($this->never())->method('ingestAttachment');
+			$handler = $this->createGuestTalkHandler($bots, $onboarding, $documents);
+			$handler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+			$message = new IncomingTalkMessage('@bot hello', '@bot hello', 'room-a', 'guests/3f2a9c', 5, null, []);
+
+			$this->invokePrivateMethod($handler, 'handleMentionedBot', [$bot, 'room-a', 'guests/3f2a9c', '@bot hello', 5, 5, null, $message]);
+			$this->invokePrivateMethod($handler, 'handleAlwaysModeMessage', ['room-a', 'guests/3f2a9c', 'B', 6, 6, null, $message]);
+		}
+	}
+
+	#[DataProvider('guestMessageModes')]
+	public function testAGuestIsAnsweredWhereASignedInPersonSetTheBotUp(bool $always): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$bot->setMentionName('@bot');
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$bots = $this->createMock(BotService::class);
+		$bots->expects($this->atLeastOnce())->method('userCanAccessBot')->with($bot, 'guests/3f2a9c')->willReturn(true);
+		$bots->method('getEffectiveBotForUser')->willReturn($bot);
+		$bots->method('getEffectiveBuiltInToolNames')->willReturn([]);
+		$bots->expects($this->once())->method('processMessage')->willReturnCallback(function (...$arguments): string {
+			$this->assertSame('guests/3f2a9c', $arguments[3], 'the run is recorded under the guest, not under an account');
+			return 'Lunch is at 12:30.';
+		});
+		$onboarding = $this->createMock(OnboardingService::class);
+		$onboarding->method('getRoomState')->willReturn($room);
+		$onboarding->method('getAlwaysModeBotsForRoom')->willReturn([['bot' => $bot, 'room' => $room]]);
+		$onboarding->method('buildOnboardingContext')->willReturn('');
+		$handler = $this->createGuestTalkHandler($bots, $onboarding, $this->createMock(RoomDocumentIngestionService::class));
+		$handler->method('sendReplyToTalkWithOutcome')->willReturn(['status' => TalkHandler::DELIVERY_SUCCESS, 'error' => null, 'http_status' => 201]);
+		$text = $always ? 'When is lunch?' : '@bot When is lunch?';
+		$message = new IncomingTalkMessage($text, $text, 'room-a', 'guests/3f2a9c', 5, null, []);
+		$arguments = ['room-a', 'guests/3f2a9c', $text, 5, 5, null, $message];
+		if (!$always) {
+			array_unshift($arguments, $bot);
+		}
+
+		$this->invokePrivateMethod($handler, $always ? 'handleAlwaysModeMessage' : 'handleMentionedBot', $arguments);
+	}
+
+	public static function guestMessageModes(): array {
+		return ['answers every message' => [true], 'answers mentions' => [false]];
+	}
+
+	public function testAGuestIsIgnoredByABotThatDoesNotAnswerGuests(): void {
+		$bot = new \OCA\EducAI\Db\Bot();
+		$bot->setId(7);
+		$bot->setMentionName('@bot');
+		$room = new \OCA\EducAI\Db\ChatRoom();
+		$room->setOnboardingStatus('completed');
+		$bots = $this->createMock(BotService::class);
+		$bots->method('userCanAccessBot')->willReturn(false);
+		$bots->method('getEffectiveBotForUser')->willReturn($bot);
+		$bots->expects($this->never())->method('processMessage');
+		$onboarding = $this->createMock(OnboardingService::class);
+		$onboarding->method('getRoomState')->willReturn($room);
+		$onboarding->method('getAlwaysModeBotsForRoom')->willReturn([['bot' => $bot, 'room' => $room]]);
+		$handler = $this->createGuestTalkHandler($bots, $onboarding, $this->createMock(RoomDocumentIngestionService::class));
+		$handler->expects($this->never())->method('sendReplyToTalkWithOutcome');
+		$message = new IncomingTalkMessage('@bot hello', '@bot hello', 'room-a', 'guests/3f2a9c', 5, null, []);
+
+		$this->invokePrivateMethod($handler, 'handleMentionedBot', [$bot, 'room-a', 'guests/3f2a9c', '@bot hello', 5, 5, null, $message]);
+		$this->invokePrivateMethod($handler, 'handleAlwaysModeMessage', ['room-a', 'guests/3f2a9c', 'hello', 6, 6, null, $message]);
+	}
+
+	/**
+	 * @return TalkHandler&\PHPUnit\Framework\MockObject\MockObject
+	 */
+	private function createGuestTalkHandler(BotService $bots, OnboardingService $onboarding, RoomDocumentIngestionService $documents) {
+		return $this->getMockBuilder(TalkHandler::class)->setConstructorArgs([
+			$bots, $this->createMock(SettingsService::class), $onboarding,
+			$this->createMock(TalkMessageParser::class), $documents,
+			$this->createMock(RoomImageIngestionService::class), $this->createMock(IClientService::class),
+			$this->createMock(IDBConnection::class), $this->createMock(IURLGenerator::class), $this->createMock(LoggerInterface::class),
+		])->onlyMethods(['sendReplyToTalkWithOutcome'])->getMock();
+	}
+
 	private function createTalkHandler(
 		?BotService $botService = null,
 		?SettingsService $settingsService = null,

@@ -1,0 +1,16 @@
+// Colours by sharing scope: who can use a bot. They are the four colours of the EDUC logo.
+// Single source for the stylesheet, the avatar and tests/frontend/botScope.test.mjs,
+// which checks every background against its text colour (WCAG AA, 4.5:1).
+// The text colours are literal on purpose: they belong to the scope colour, not to the theme,
+// so the colours are the same in the light and in the dark theme.
+
+@mixin tokens {
+	--talkai-scope-personal: #7e4bdd;
+	--talkai-scope-personal-text: #fff;
+	--talkai-scope-group: #28be7f;
+	--talkai-scope-group-text: #3d3d3b;
+	--talkai-scope-team: #ff9880;
+	--talkai-scope-team-text: #3d3d3b;
+	--talkai-scope-everyone: #f96e99;
+	--talkai-scope-everyone-text: #2e2e2c;
+}

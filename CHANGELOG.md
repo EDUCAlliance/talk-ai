@@ -4,6 +4,38 @@ All notable changes to Talk AI (`educai`) are documented in this file. The forma
 
 ## [Unreleased]
 
+## 3.0.0 – 2026-11-11
+
+**Requires Nextcloud 32–35.** Talk AI gets a new app page: finding, creating, editing and reviewing bots moved there from the personal settings. The upgrade adds one database migration, the guest switch of a bot. Bots that are shared with everyone keep answering guests, and no other bot starts to. Reload open Talk AI pages once after the upgrade.
+
+### Added
+
+- The app page is the one place for bots, with its own navigation: Discover, My bots, To review (for people with approval rights), Activity and a short guide. Every view has a link of its own.
+- New bot: a template and five steps (basics, who uses it, knowledge, capabilities, check and finish) with a preview in a sidebar. Sources chosen on the way are attached when the bot is created. A bot that needs approval can be created and submitted in one go.
+- Bot page with an overview, the history of creation and approval, and the settings in tabs. A save bar collects the changes and says when they go into review first.
+- Reviews show what a change to an approved bot alters, the reason, the instruction and the knowledge sources. Feedback is written next to the decision.
+- Bots show who can use them by one colour per audience, always together with an icon and the words. The colours are the four of the EDUC logo: violet for only you, green for a group, orange for a team and pink for everyone. Group and team admins get "Edit" on bots of their audience.
+- A tour behind "How Talk AI works": it walks through the real pages, highlights one element per step and explains it, in the words for what this user has (no step for "To review" without approval rights). Enter and the arrow keys move, Escape ends it; on small screens the explanation sits at the bottom. The short guide stays reachable from the tour.
+- Preview chat while creating a bot: the sidebar answers a few messages with the instruction and the model of the form, before the bot exists. Nothing is stored. Knowledge and capabilities work once the bot is created, and the real conversation happens in Talk.
+- Docling Serve: administrators choose how documents are read: the unchanged request, the standard pipeline, or the vision model of a preset that is configured on the Docling server (`pipeline=vlm` with `vlm_pipeline_preset`). Model, address and key stay on the Docling server. Connection test and detection use the same choice, a result for one choice does not count for another, and a refused preset is reported without converting the document another way.
+- Personal assistant: Discover and My bots invite every user to set up one bot of their own, whatever other personal bots they have. Once it exists, the invitation disappears and the assistant is pinned in first place. It is an ordinary personal bot with a mention name of its own (`@assistant-<user>`); its folders are added on its page.
+- Guests: every bot has the switch "Also answer guests", on its page under "Advanced" and under "Advanced" in the last step of "New bot". Guests are people who take part in a public conversation without being signed in. The switch is independent of the audience and opens nothing for signed-in users. For a shared bot it is reviewed like every other change, and the review, the overview and the bot details name the guests next to the audience.
+
+### Changed
+
+- The personal settings point to the app page. Creating, editing and reviewing bots, and the activity, moved there.
+- Capabilities are switches named after what they do (documents in chat, images, voice messages); the exact tool list stays under "Advanced". The knowledge search turns on with the first source and can be paused there.
+- Submitting a bot for approval asks one question instead of four.
+- A bot answers guests only when its guest switch is on. Until now exactly the bots that are shared with everyone did; the upgrade turns the switch on for them, so they keep answering. A new bot for everyone starts with the switch off.
+- Guests use a bot in conversations where a signed-in person has activated it. They can no longer activate a bot, answer its activation questions or reset it with `((RESET))`.
+- A request that waited in the queue is not answered when its sender has lost access to the bot in the meantime, for example because the guest switch was turned off.
+- Knowledge sources follow the same rule as saving: administrators can no longer add or remove sources of other people's personal bots, which they could never save. They can still read them.
+- API: `GET /api/v1/bots`, `/public-bots` and `/approvals` return additional fields (`can_edit`, `tools`, source counts, `live_tools`, `is_assistant`). Whoever may save a bot may now also load it, its tools and its sources. `POST /api/v1/bots` accepts `assistant: true` to create the personal assistant of the user and answers 409 (`assistant_exists`) when there already is one. `POST /api/v1/bots/preview` answers a short conversation with the instruction and model of a draft. The settings carry `docling_pipeline` and `docling_vlm_preset`; they are stored as app configuration, without a database migration. Bots carry `allow_guests`; `POST` and `PUT /api/v1/bots` accept `allowGuests` (left out means unchanged), and the review target of `/approvals` contains it.
+
+### Security
+
+- Hardening: only senders that are accounts of this instance (`users/…`) are matched against the owner, the tester and the reviewers of a bot. Before, the part after the last slash of any Talk sender name was compared, so a sender of another kind (a guest invited by e-mail, a user of another server) whose name equals a user id would have been taken for that user.
+
 ## 2.45.0 – 2026-11-02
 
 **Requires Nextcloud 32–35.** Installations on Nextcloud 30 or 31 stay on 2.43.2. The upgrade adds two database migrations (course link settings and the API connection tables); nothing is approved, assigned or reindexed by it.

@@ -107,3 +107,43 @@ test('Docling test shows the safe server diagnostic', async () => {
 	assert.equal(state.doclingTestResult.error, 'Use /v1/convert/file.')
 	assert.equal(state.doclingTesting, false)
 })
+
+test('the Docling pipeline choice is loaded, sent with test and detection, and only for Docling Serve', async () => {
+	const sent = []
+	const state = admin({
+		get: async () => ({ data: { docling_api_profile: 'docling_serve', docling_auth_mode: 'none',
+			docling_api_endpoint: 'https://docling.example', docling_pipeline: 'vlm', docling_vlm_preset: 'uni-gemma' } }),
+		post: async (url, payload) => {
+			sent.push([url, payload])
+			return { data: { success: true } }
+		},
+	})
+	// Before anything is loaded the request stays as it always was.
+	assert.deepEqual({ ...state.doclingPipelineChoice() }, { doclingPipeline: '', doclingVlmPreset: 'default' })
+
+	await state.loadSettings()
+	assert.equal(state.settings.doclingPipeline, 'vlm')
+	assert.equal(state.settings.doclingVlmPreset, 'uni-gemma')
+
+	await state.testDoclingConnection()
+	await state.detectDocling()
+	assert.equal(sent.length, 2)
+	for (const [url, payload] of sent) {
+		assert.equal(payload.doclingPipeline, 'vlm', url)
+		assert.equal(payload.doclingVlmPreset, 'uni-gemma', url)
+	}
+
+	// An emptied preset field means the default preset, and the legacy endpoint never gets a pipeline.
+	state.settings.doclingVlmPreset = '  '
+	assert.deepEqual({ ...state.doclingPipelineChoice() }, { doclingPipeline: 'vlm', doclingVlmPreset: 'default' })
+	state.settings.doclingApiProfile = 'legacy'
+	assert.deepEqual({ ...state.doclingPipelineChoice() }, { doclingPipeline: '', doclingVlmPreset: 'default' })
+})
+
+test('an unknown saved pipeline falls back to the unchanged request', async () => {
+	const state = admin({ get: async () => ({ data: { docling_api_profile: 'docling_serve', docling_auth_mode: 'none', docling_pipeline: 'asr' } }) })
+	await state.loadSettings()
+	assert.equal(state.settings.doclingPipeline, '')
+	assert.equal(state.settings.doclingVlmPreset, 'default')
+	assert.equal(adminSettings.FIELD_SECTIONS?.doclingPipeline ?? 'knowledge', 'knowledge')
+})

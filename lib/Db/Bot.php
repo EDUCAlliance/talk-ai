@@ -37,6 +37,7 @@ use OCP\AppFramework\Db\Entity;
  * @method void setAllowedTeams(?string $allowedTeams)
  * @method bool getRagEnabled()
  * @method void setRagEnabled(bool $ragEnabled)
+ * @method void setAllowGuests(?bool $allowGuests)
  * @method ?string getDescription()
  * @method void setDescription(?string $description)
  * @method ?string getApprovalReason()
@@ -81,6 +82,8 @@ class Bot extends Entity implements JsonSerializable {
 	protected ?string $allowedGroups = null;
 	protected ?string $allowedTeams = null;
 	protected bool $ragEnabled = false;
+	// Whether the bot also answers guests: people in a public conversation who are not signed in.
+	protected ?bool $allowGuests = false;
 	protected ?string $description = null;
 	protected ?string $approvalReason = null;
 	protected ?string $botCapabilities = null;
@@ -104,6 +107,7 @@ class Bot extends Entity implements JsonSerializable {
 		$this->addType('isActive', 'bool');
 		$this->addType('isPublic', 'bool');
 		$this->addType('ragEnabled', 'bool');
+		$this->addType('allowGuests', 'bool');
 		$this->addType('submittedAt', 'integer');
 		$this->addType('approvedAt', 'integer');
 		$this->addType('createdAt', 'integer');
@@ -125,6 +129,7 @@ class Bot extends Entity implements JsonSerializable {
 			'allowed_groups' => $this->normalizeAllowedGroups(),
 			'allowed_teams' => $this->normalizeAllowedTeams(),
 			'rag_enabled' => (bool)$this->ragEnabled,
+			'allow_guests' => $this->getAllowGuests(),
 			'description' => $this->description,
 			'approval_reason' => $this->approvalReason,
 			'bot_capabilities' => $this->botCapabilities,
@@ -143,6 +148,13 @@ class Bot extends Entity implements JsonSerializable {
 			'created_at' => $this->createdAt,
 			'updated_at' => $this->updatedAt,
 		];
+	}
+
+	/**
+	 * The column is nullable for the sake of Oracle; a missing value means "no".
+	 */
+	public function getAllowGuests(): bool {
+		return (bool)$this->allowGuests;
 	}
 
 	/**
@@ -223,6 +235,9 @@ class Bot extends Entity implements JsonSerializable {
 		}
 		if (isset($changes['rag_enabled'])) {
 			$this->setRagEnabled($changes['rag_enabled']);
+		}
+		if (array_key_exists('allow_guests', $changes)) {
+			$this->setAllowGuests((bool)$changes['allow_guests']);
 		}
 		if (array_key_exists('onboarding_questions', $changes)) {
 			$this->setOnboardingQuestionsArray($changes['onboarding_questions']);
