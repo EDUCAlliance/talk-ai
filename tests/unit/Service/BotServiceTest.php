@@ -8,6 +8,7 @@ use Exception;
 use OCA\EducAI\AppInfo\Application;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\BotToolMapper;
 use OCA\EducAI\Db\ChatRoomMapper;
@@ -15,6 +16,7 @@ use OCA\EducAI\Db\Conversation;
 use OCA\EducAI\Db\ConversationMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\Settings;
+use OCA\EducAI\Db\Tool;
 use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
@@ -520,6 +522,127 @@ class BotServiceTest extends TestCase {
 		$this->assertSame([], $service->getAvailableBotsForUserEnriched('audience'));
 	}
 
+	public function testPublicListTellsWhoMayEditABotAndWhatItCanDo(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setRagEnabled(true);
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findAllActive')->willReturn([$bot]);
+		$botSourceMapper = $this->createMock(BotSourceMapper::class);
+		$botSourceMapper->method('findByBot')->with(7)->willReturn([$this->createSource('ready'), $this->createSource('error')]);
+		$service = $this->createBotService(
+			$botMapper,
+			// bob administers the group of the bot, alice is only a member of it
+			$this->createScopedPermissionService(adminGroups: ['bob' => ['group-a']]),
+			$this->createGroupManagerMock(['alice' => ['group-a'], 'bob' => ['group-a']]),
+			$this->createUserManagerWith(['owner' => 'Owner User', 'alice' => 'Alice', 'bob' => 'Bob']),
+			toolRegistry: $this->createToolRegistryMock(7),
+			botSourceMapper: $botSourceMapper,
+		);
+
+		$member = $service->getAvailableBotsForUserEnriched('alice');
+		$scopeAdmin = $service->getAvailableBotsForUserEnriched('bob');
+		$owner = $service->getAvailableBotsForUserEnriched('owner');
+
+		$this->assertFalse($member[0]['can_edit']);
+		$this->assertTrue($scopeAdmin[0]['can_edit']);
+		$this->assertTrue($owner[0]['can_edit']);
+		foreach ([$member, $scopeAdmin, $owner] as $list) {
+			$this->assertCount(1, $list);
+			$this->assertSame($this->expectedToolEntries(null), $list[0]['tools']);
+			$this->assertSame(2, $list[0]['rag_source_count']);
+			// Everything the list returned before is still there
+			$this->assertSame($bot->jsonSerialize(), array_intersect_key($list[0], $bot->jsonSerialize()));
+			$this->assertSame('Owner User', $list[0]['owner_display_name']);
+		}
+		$this->assertSame(['type' => 'group', 'names' => ['Group group-a']], $member[0]['access_reason']);
+		$this->assertSame(['type' => 'owner', 'names' => []], $owner[0]['access_reason']);
+	}
+
+	public function testPublicDetailsCarryTheSamePayloadAsTheListEntry(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setRagEnabled(true);
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findAllActive')->willReturn([$bot]);
+		$botMapper->method('findById')->with(7)->willReturn($bot);
+		$botSourceMapper = $this->createMock(BotSourceMapper::class);
+		$botSourceMapper->method('findByBot')->with(7)->willReturn([$this->createSource('ready')]);
+		$service = $this->createBotService(
+			$botMapper,
+			$this->createScopedPermissionService(adminGroups: ['bob' => ['group-a']]),
+			$this->createGroupManagerMock(['alice' => ['group-a'], 'bob' => ['group-a']]),
+			$this->createUserManagerWith(['owner' => 'Owner User', 'alice' => 'Alice', 'bob' => 'Bob']),
+			toolRegistry: $this->createToolRegistryMock(7),
+			botSourceMapper: $botSourceMapper,
+		);
+
+		foreach (['alice' => false, 'bob' => true] as $userId => $canEdit) {
+			$details = $service->getPublicBotDetails(7, $userId);
+
+			$this->assertSame($service->getAvailableBotsForUserEnriched($userId)[0], $details);
+			$this->assertSame($canEdit, $details['can_edit']);
+			$this->assertSame($this->expectedToolEntries(null), $details['tools']);
+			$this->assertSame(1, $details['rag_source_count']);
+		}
+	}
+
+	public function testPublicListDoesNotAdvertiseSourcesOfABotThatDoesNotUseThem(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setRagEnabled(false);
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findAllActive')->willReturn([$bot]);
+		$botSourceMapper = $this->createMock(BotSourceMapper::class);
+		$botSourceMapper->expects($this->never())->method('findByBot');
+		$service = $this->createBotService(
+			$botMapper,
+			$this->createScopedPermissionService(),
+			userManager: $this->createUserManagerWith(['owner' => 'Owner User']),
+			botSourceMapper: $botSourceMapper,
+		);
+
+		$result = $service->getAvailableBotsForUserEnriched('owner');
+
+		$this->assertSame(0, $result[0]['rag_source_count']);
+		$this->assertSame([], $result[0]['tools']);
+	}
+
+	public function testOwnBotListAddsToolsSourceStatusAndTheEditFlagToEveryBotField(): void {
+		$bot = $this->createPersonalBot();
+		// The sources stay attached while the bot does not use them
+		$bot->setRagEnabled(false);
+		$botWithoutExtras = $this->createPersonalBot();
+		$botWithoutExtras->setId(8);
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findByUserId')->with('owner')->willReturn([$bot, $botWithoutExtras]);
+		$botSourceMapper = $this->createMock(BotSourceMapper::class);
+		$botSourceMapper->method('findByBot')->willReturnCallback(fn (int $botId): array => $botId === 7 ? [
+			$this->createSource('ready'),
+			$this->createSource('pending'),
+			$this->createSource('error'),
+			$this->createSource('unavailable'),
+		] : []);
+		$service = $this->createBotService(
+			$botMapper,
+			$this->createMock(PermissionService::class),
+			toolRegistry: $this->createToolRegistryMock(7),
+			botSourceMapper: $botSourceMapper,
+		);
+
+		$result = $service->getBotsByUserEnriched('owner');
+
+		$this->assertCount(2, $result);
+		$this->assertSame($bot->jsonSerialize(), array_intersect_key($result[0], $bot->jsonSerialize()));
+		$this->assertSame($this->expectedToolEntries(null), $result[0]['tools']);
+		$this->assertSame(4, $result[0]['rag_source_count']);
+		$this->assertSame(2, $result[0]['rag_source_problem_count']);
+		$this->assertTrue($result[0]['can_edit']);
+		$this->assertSame(
+			['tools' => [], 'rag_source_count' => 0, 'rag_source_problem_count' => 0, 'can_edit' => true],
+			array_diff_key($result[1], $botWithoutExtras->jsonSerialize())
+		);
+		// The plain list other callers may rely on is unchanged
+		$this->assertSame([$bot, $botWithoutExtras], $service->getBotsByUser('owner'));
+	}
+
 	public function testPendingUpdateKeepsApprovedLiveBotAccessible(): void {
 		$bot = $this->createApprovedBot();
 		$bot->setVisibility('global');
@@ -652,6 +775,62 @@ class BotServiceTest extends TestCase {
 		$this->assertCount(1, $result);
 		$this->assertSame(7, $result[0]['id']);
 		$this->assertSame('Owner User', $result[0]['owner_name']);
+	}
+
+	public function testPendingApprovalsNameBuiltInToolsAndCarryTheLiveToolsForComparison(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setApprovalStatus('pending');
+		$bot->setPendingChangesArray([
+			'bot_name' => 'Pending v2',
+			'tools' => [
+				['is_builtin' => true, 'builtin_name' => 'catalogue_search_courses'],
+				['is_builtin' => true, 'builtin_name' => BuiltInToolProvider::TOOL_ATTACHMENT_IMAGE],
+			],
+		]);
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findByApprovalStatus')->with('pending')->willReturn([$bot]);
+		$permissionService = $this->createMock(PermissionService::class);
+		$permissionService->method('hasApprovalRights')->willReturn(true);
+		$permissionService->method('canApproveBot')->willReturn(true);
+		$service = $this->createBotService($botMapper, $permissionService, toolRegistry: $this->createToolRegistryMock(7));
+
+		$result = $service->getPendingApprovals('reviewer');
+
+		$this->assertSame([
+			[
+				'name' => 'Course Catalogue Search',
+				'description' => 'Search the course catalogue for training programs and learning content.',
+				'is_builtin' => true,
+				'builtin_name' => 'catalogue_search_courses',
+			],
+			[
+				'name' => 'Image Attachment Analysis',
+				'description' => 'Analyze image attachments from the current Talk message.',
+				'is_builtin' => true,
+				'builtin_name' => BuiltInToolProvider::TOOL_ATTACHMENT_IMAGE,
+			],
+		], $result[0]['review_target']['tools']);
+		// The version that is live until the update is approved, in the same shape
+		$this->assertSame($this->expectedToolEntries(''), $result[0]['live_tools']);
+	}
+
+	public function testFirstSubmissionReportsItsStoredToolsAsLiveAndAsReviewTarget(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setApprovalStatus('pending');
+		$bot->setApprovedBy(null);
+		$bot->setApprovedAt(null);
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findByApprovalStatus')->with('pending')->willReturn([$bot]);
+		$permissionService = $this->createMock(PermissionService::class);
+		$permissionService->method('hasApprovalRights')->willReturn(true);
+		$permissionService->method('canApproveBot')->willReturn(true);
+		$service = $this->createBotService($botMapper, $permissionService, toolRegistry: $this->createToolRegistryMock(7));
+
+		$result = $service->getPendingApprovals('reviewer');
+
+		$this->assertFalse($result[0]['review_target']['is_update']);
+		$this->assertSame($this->expectedToolEntries(''), $result[0]['review_target']['tools']);
+		$this->assertSame($result[0]['review_target']['tools'], $result[0]['live_tools']);
 	}
 
 	public function testPendingApiToolsOfAPublishedBotWaitForApprovalEvenForOwnerAndTester(): void {
@@ -1304,7 +1483,7 @@ class BotServiceTest extends TestCase {
 		$botMapper = $this->createMock(BotMapper::class);
 		$botMapper->method('findById')->with(7)->willReturn($this->createApprovedBot());
 		$permissions = $this->createMock(PermissionService::class);
-		$permissions->method('isAdmin')->willReturn(false);
+		$permissions->method('canEditBot')->willReturn(true);
 		$toolRegistry = $this->createMock(ToolRegistry::class);
 		$toolRegistry->method('getToolsForBot')->willReturn([]);
 		$toolRegistry->method('getBuiltInToolsForBot')->with(7)->willReturn([
@@ -1319,6 +1498,48 @@ class BotServiceTest extends TestCase {
 
 		$this->assertSame(['Courses: Search courses', null], array_column($tools, 'label'));
 		$this->assertSame(['api_3_9', 'api_4_1'], array_column($tools, 'builtin_name'));
+	}
+
+	public function testBotToolsCanBeLoadedByExactlyThoseWhoMayEditTheBot(): void {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->with(7)->willReturn($this->createApprovedBot());
+		$service = $this->createBotService(
+			$botMapper,
+			// bob administers the bot's group, carol another one, alice none
+			$this->createScopedPermissionService(admins: ['admin'], adminGroups: ['bob' => ['group-a'], 'carol' => ['group-b']]),
+			toolRegistry: $this->createToolRegistryMock(7),
+		);
+
+		foreach (['owner', 'bob', 'admin'] as $editor) {
+			$tools = $service->getBotTools(7, $editor);
+
+			$this->assertSame([3, null, null], array_column($tools, 'tool_id'), $editor);
+			$this->assertSame([null, BuiltInToolProvider::TOOL_ROOM_SEARCH, 'catalogue_search_courses'], array_column($tools, 'builtin_name'), $editor);
+		}
+		foreach (['alice', 'carol'] as $other) {
+			try {
+				$service->getBotTools(7, $other);
+				$this->fail($other . ' must not load the tools of a bot they may not edit');
+			} catch (AuthorizationException $e) {
+				$this->assertSame('You do not have permission to view this bot', $e->getMessage());
+			}
+		}
+	}
+
+	public function testToolsOfAPersonalBotAreForItsOwnerAndNextcloudAdministrators(): void {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->with(7)->willReturn($this->createPersonalBot());
+		$service = $this->createBotService(
+			$botMapper,
+			$this->createScopedPermissionService(admins: ['admin']),
+			toolRegistry: $this->createToolRegistryMock(7),
+		);
+
+		$this->assertCount(3, $service->getBotTools(7, 'owner'));
+		// The admin settings list every bot: administrators keep reading what they cannot save
+		$this->assertCount(3, $service->getBotTools(7, 'admin'));
+		$this->expectException(AuthorizationException::class);
+		$service->getBotTools(7, 'bob');
 	}
 
 	public function testApiToolsAreCheckedBeforeANewBotIsStored(): void {
@@ -2833,6 +3054,7 @@ class BotServiceTest extends TestCase {
 		?IFactory $l10nFactory = null,
 		?LLMClient $llmClient = null,
 		?ApiToolAccess $apiToolAccess = null,
+		?BotSourceMapper $botSourceMapper = null,
 	): BotService {
 		return new BotService(
 			$botMapper,
@@ -2842,7 +3064,7 @@ class BotServiceTest extends TestCase {
 			$groupManager ?? $this->createMock(IGroupManager::class),
 			$userManager ?? $this->createUserManagerMock(),
 			$appManager ?? $this->createMock(IAppManager::class),
-			$this->createMock(BotSourceMapper::class),
+			$botSourceMapper ?? $this->createMock(BotSourceMapper::class),
 			$embeddingMapper ?? $this->createMock(EmbeddingMapper::class),
 			$this->createMock(BotToolMapper::class),
 			$this->createMock(ToolMapper::class),
@@ -2891,5 +3113,131 @@ class BotServiceTest extends TestCase {
 
 	private function createUserMock(): \OCP\IUser {
 		return $this->createMock(\OCP\IUser::class);
+	}
+
+	/**
+	 * @param array<string,string> $displayNames Display name per known user ID
+	 */
+	private function createUserManagerWith(array $displayNames): IUserManager {
+		$userManager = $this->createUserManagerMock();
+		$userManager->method('get')->willReturnCallback(function (string $uid) use ($displayNames): ?\OCP\IUser {
+			if (!isset($displayNames[$uid])) {
+				return null;
+			}
+			$user = $this->createUserMock();
+			$user->method('getUID')->willReturn($uid);
+			$user->method('getDisplayName')->willReturn($displayNames[$uid]);
+			return $user;
+		});
+
+		return $userManager;
+	}
+
+	/**
+	 * @param array<string,list<string>> $memberships Group IDs per user ID
+	 */
+	private function createGroupManagerMock(array $memberships): IGroupManager {
+		$builder = $this->getMockBuilder(IGroupManager::class);
+		if (!method_exists(IGroupManager::class, 'getUserGroups')) {
+			$builder->addMethods(['getUserGroups']);
+		}
+		$groupManager = $builder->getMock();
+		$groupManager->method('getUserGroups')->willReturnCallback(
+			static fn (\OCP\IUser $user): array => array_map(
+				static fn (string $groupId): object => new class($groupId) {
+					public function __construct(
+						private string $groupId,
+					) {
+					}
+
+					public function getGID(): string {
+						return $this->groupId;
+					}
+
+					public function getDisplayName(): string {
+						return 'Group ' . $this->groupId;
+					}
+				},
+				$memberships[$user->getUID()] ?? []
+			)
+		);
+
+		return $groupManager;
+	}
+
+	/**
+	 * The real permission rules, with the roles of the users given by the test.
+	 *
+	 * @param list<string> $admins Nextcloud administrators
+	 * @param array<string,list<string>> $adminGroups Group IDs a user administers
+	 * @param array<string,list<string>> $adminTeams Team IDs a user moderates, administers or owns
+	 */
+	private function createScopedPermissionService(array $admins = [], array $adminGroups = [], array $adminTeams = []): PermissionService {
+		$service = $this->getMockBuilder(PermissionService::class)
+			->setConstructorArgs([
+				$this->createMock(IGroupManager::class),
+				$this->createMock(IUserManager::class),
+				$this->createMock(IAppManager::class),
+				$this->createMock(LoggerInterface::class),
+				$this->createMock(IL10N::class),
+			])
+			->onlyMethods(['isAdmin', 'getAdminGroups', 'getAdminTeams'])
+			->getMock();
+		$service->method('isAdmin')->willReturnCallback(static fn (string $userId): bool => in_array($userId, $admins, true));
+		$service->method('getAdminGroups')->willReturnCallback(static fn (string $userId): array => $adminGroups[$userId] ?? []);
+		$service->method('getAdminTeams')->willReturnCallback(static fn (string $userId): array => $adminTeams[$userId] ?? []);
+
+		return $service;
+	}
+
+	/**
+	 * Tools of one bot: an MCP tool without description and two built-in tools, each with a config.
+	 */
+	private function createToolRegistryMock(int $botId): ToolRegistry {
+		$mcpTool = new Tool();
+		$mcpTool->setId(3);
+		$mcpTool->setName('Library search');
+		$registry = $this->createMock(ToolRegistry::class);
+		$registry->method('getToolsForBot')->willReturnCallback(static fn (int $id): array => $id === $botId ? [
+			['tool' => $mcpTool, 'config' => ['api_key' => 'secret']],
+		] : []);
+		$registry->method('getBuiltInToolsForBot')->willReturnCallback(static fn (int $id): array => $id === $botId ? [
+			['name' => BuiltInToolProvider::TOOL_ROOM_SEARCH, 'config' => ['limit' => 5]],
+			['name' => 'catalogue_search_courses', 'config' => []],
+		] : []);
+
+		return $registry;
+	}
+
+	/**
+	 * What bot payloads show of the tools from createToolRegistryMock(): never the configs.
+	 *
+	 * @param string|null $missingDescription null in the public bot payloads, '' in the review payload
+	 * @return list<array<string,mixed>>
+	 */
+	private function expectedToolEntries(?string $missingDescription): array {
+		return [
+			['name' => 'Library search', 'description' => $missingDescription, 'is_builtin' => false],
+			[
+				'name' => 'Room Document Search',
+				'description' => 'Search documents uploaded in the current Nextcloud Talk room. Can be used together with the bot\'s global document search.',
+				'is_builtin' => true,
+				'builtin_name' => BuiltInToolProvider::TOOL_ROOM_SEARCH,
+			],
+			[
+				'name' => 'Course Catalogue Search',
+				'description' => 'Search the course catalogue for training programs and learning content.',
+				'is_builtin' => true,
+				'builtin_name' => 'catalogue_search_courses',
+			],
+		];
+	}
+
+	private function createSource(string $status): BotSource {
+		$source = new BotSource();
+		$source->setBotId(7);
+		$source->setStatus($status);
+
+		return $source;
 	}
 }

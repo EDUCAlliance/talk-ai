@@ -7,6 +7,7 @@ namespace OCA\EducAI\Service;
 use Exception;
 use OCA\EducAI\Db\Bot;
 use OCA\EducAI\Db\BotMapper;
+use OCA\EducAI\Db\BotSource;
 use OCA\EducAI\Db\BotSourceMapper;
 use OCA\EducAI\Db\BotTool;
 use OCA\EducAI\Db\BotToolMapper;
@@ -194,6 +195,39 @@ class BotService {
 	}
 
 	/**
+	 * A user's own bots with what the bot list shows next to them: tools,
+	 * knowledge source counts and the edit flag.
+	 *
+	 * @param string $userId
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function getBotsByUserEnriched(string $userId): array {
+		$result = [];
+
+		foreach ($this->getBotsByUser($userId) as $bot) {
+			// Owners see every attached source, whether or not the bot currently uses them
+			$sources = $this->findSourcesForBot($bot->getId());
+
+			$botData = $bot->jsonSerialize();
+			$botData['tools'] = $this->buildAssignedToolEntries($bot);
+			$botData['rag_source_count'] = count($sources);
+			$botData['rag_source_problem_count'] = count(array_filter(
+				$sources,
+				static fn (BotSource $source): bool => in_array(
+					$source->getStatus(),
+					[KnowledgeSourceStatus::ERROR, KnowledgeSourceStatus::UNAVAILABLE],
+					true
+				)
+			));
+			$botData['can_edit'] = true;
+
+			$result[] = $botData;
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Get a specific bot
 	 *
 	 * @param int $id
@@ -214,8 +248,9 @@ class BotService {
 		}
 
 		$bot = $this->botMapper->findById($botId);
-		// Allow owner or admin to view bot tools
-		if ($bot->getUserId() !== $userId && !$this->permissionService->isAdmin($userId)) {
+		// Whoever may save the bot may also load its tool assignments. Nextcloud admins keep
+		// their read access to every bot, which the admin settings rely on.
+		if (!$this->permissionService->canEditBot($userId, $bot) && !$this->permissionService->isAdmin($userId)) {
 			throw new AuthorizationException('You do not have permission to view this bot');
 		}
 		$visibility = $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic());
@@ -781,6 +816,8 @@ class BotService {
 
 			$botData = $bot->jsonSerialize();
 			$botData['review_target'] = $this->buildReviewTarget($bot);
+			// Counterpart of review_target.tools, so the review can show which tools change
+			$botData['live_tools'] = $this->buildToolDisplayEntries($this->resolveToolLoadout($bot, false));
 
 			// Get owner display name
 			$owner = $this->userManager->get($bot->getUserId());
@@ -1719,7 +1756,8 @@ class BotService {
 
 	/**
 	 * Get bots visible to a user with enriched data for public listing.
-	 * Returns bot data plus owner display name and access reason.
+	 * Returns bot data plus owner display name, access reason, tools, knowledge
+	 * source count and whether the user may edit the bot.
 	 * Includes global, matching group/team bots, and the user's own personal bots.
 	 *
 	 * @param string $userId
@@ -1748,15 +1786,7 @@ class BotService {
 				continue; // User doesn't have access
 			}
 
-			// Get owner display name
-			$ownerUser = $this->userManager->get($bot->getUserId());
-			$ownerDisplayName = $ownerUser !== null ? $ownerUser->getDisplayName() : $bot->getUserId();
-
-			$botData = $bot->jsonSerialize();
-			$botData['owner_display_name'] = $ownerDisplayName;
-			$botData['access_reason'] = $accessReason;
-
-			$result[] = $botData;
+			$result[] = $this->buildPublicBotData($bot, $userId, $accessReason);
 		}
 
 		return $result;
@@ -1786,53 +1816,58 @@ class BotService {
 			return null; // User doesn't have access
 		}
 
+		return $this->buildPublicBotData($bot, $userId, $accessReason);
+	}
+
+	/**
+	 * One entry of the public bot list, also the payload of the public bot details:
+	 * the bot plus owner name, access reason, tools, knowledge source count and
+	 * whether the user may edit it.
+	 *
+	 * @param array{type:string,names:array<string>} $accessReason
+	 * @return array<string,mixed>
+	 */
+	private function buildPublicBotData(Bot $bot, string $userId, array $accessReason): array {
 		// Get owner display name
 		$ownerUser = $this->userManager->get($bot->getUserId());
 		$ownerDisplayName = $ownerUser !== null ? $ownerUser->getDisplayName() : $bot->getUserId();
 
-		// Get tools assigned to this bot (public info only, no configs)
-		$tools = [];
-
-		// MCP tools
-		$mcpAssignments = $this->toolRegistry->getToolsForBot($botId);
-		foreach ($mcpAssignments as $entry) {
-			$tool = $entry['tool'];
-			$tools[] = [
-				'name' => $tool->getName(),
-				'description' => $tool->getDescription(),
-				'is_builtin' => false,
-			];
-		}
-
-		// Built-in tools
-		$builtInAssignments = $this->toolRegistry->getBuiltInToolsForBot($botId);
-		foreach ($builtInAssignments as $entry) {
-			$tools[] = [
-				'name' => $this->formatBuiltInToolName($entry['name']),
-				'description' => $this->getBuiltInToolDescription($entry['name']),
-				'is_builtin' => true,
-				'builtin_name' => $entry['name'],
-			];
-		}
-
-		// Count RAG sources
-		$ragSourceCount = 0;
-		if ($bot->getRagEnabled()) {
-			try {
-				$sources = $this->botSourceMapper->findByBot($botId);
-				$ragSourceCount = count($sources);
-			} catch (\Throwable $e) {
-				// Ignore
-			}
-		}
-
 		$botData = $bot->jsonSerialize();
 		$botData['owner_display_name'] = $ownerDisplayName;
 		$botData['access_reason'] = $accessReason;
-		$botData['tools'] = $tools;
-		$botData['rag_source_count'] = $ragSourceCount;
+		$botData['tools'] = $this->buildAssignedToolEntries($bot);
+		// Sources of a bot that does not use them are not advertised
+		$botData['rag_source_count'] = $bot->getRagEnabled() ? count($this->findSourcesForBot($bot->getId())) : 0;
+		$botData['can_edit'] = $this->permissionService->canEditBot($this->normalizeExternalUserId($userId), $bot);
 
 		return $botData;
+	}
+
+	/**
+	 * Tools assigned to this bot (public info only, no configs).
+	 *
+	 * @return array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>
+	 */
+	private function buildAssignedToolEntries(Bot $bot): array {
+		return $this->buildToolDisplayEntries([
+			'mcp' => $this->toolRegistry->getToolsForBot($bot->getId()),
+			'built_in' => $this->toolRegistry->getBuiltInToolsForBot($bot->getId()),
+		], null);
+	}
+
+	/**
+	 * @return array<int,BotSource>
+	 */
+	private function findSourcesForBot(int $botId): array {
+		try {
+			return $this->botSourceMapper->findByBot($botId);
+		} catch (\Throwable $e) {
+			$this->logger->warning('Failed to load knowledge sources of bot', [
+				'bot_id' => $botId,
+				'exception' => $e,
+			]);
+			return [];
+		}
 	}
 
 	/**
@@ -2318,7 +2353,7 @@ class BotService {
 	 *   allowed_team_names:array<int,string>,
 	 *   rag_enabled:bool,
 	 *   onboarding_questions:?array,
-	 *   tools:array<int,array{name:string,description:string,is_builtin:bool}>,
+	 *   tools:array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>,
 	 *   is_update:bool
 	 * }
 	 */
@@ -2458,16 +2493,20 @@ class BotService {
 	}
 
 	/**
+	 * Names and descriptions of a tool loadout for display, without configs.
+	 *
 	 * @param SplitToolLoadout $toolLoadout
-	 * @return array<int,array{name:string,description:string,is_builtin:bool}>
+	 * @param string|null $missingDescription Description of MCP tools that have none: the review
+	 *                                        payload has always sent '', the public bot payloads null
+	 * @return array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>
 	 */
-	private function buildToolDisplayEntries(array $toolLoadout): array {
+	private function buildToolDisplayEntries(array $toolLoadout, ?string $missingDescription = ''): array {
 		$result = [];
 
 		foreach ($toolLoadout['mcp'] as $entry) {
 			$result[] = [
 				'name' => $entry['tool']->getName(),
-				'description' => $entry['tool']->getDescription() ?? '',
+				'description' => $entry['tool']->getDescription() ?? $missingDescription,
 				'is_builtin' => false,
 			];
 		}
@@ -2477,6 +2516,7 @@ class BotService {
 				'name' => $this->formatBuiltInToolName($entry['name']),
 				'description' => $this->getBuiltInToolDescription($entry['name']),
 				'is_builtin' => true,
+				'builtin_name' => $entry['name'],
 			];
 		}
 

@@ -198,32 +198,25 @@ class RagController extends Controller {
             + $source->jsonSerialize();
     }
 
+    /**
+     * Editors of the bot, Nextcloud admins (the admin settings list every bot),
+     * plus reviewers while the bot is pending.
+     */
     private function canViewSources(Bot $bot): bool {
         if ($this->userId === null) {
             return false;
         }
 
-        if ($bot->getUserId() === $this->userId) {
-            return true;
-        }
-
-        if ($this->permissionService->isAdmin($this->userId)) {
-            return true;
-        }
-
-        return $this->botService->canInspectPendingReviewContext($bot, $this->userId);
+        return $this->canManageSources($bot)
+            || $this->permissionService->isAdmin($this->userId)
+            || $this->botService->canInspectPendingReviewContext($bot, $this->userId);
     }
 
+    /**
+     * Sources are part of the bot: whoever may save the bot may change them.
+     */
     private function canManageSources(Bot $bot): bool {
-        if ($this->userId === null) {
-            return false;
-        }
-
-        if ($bot->getUserId() === $this->userId) {
-            return true;
-        }
-
-        return $this->permissionService->isAdmin($this->userId);
+        return $this->userId !== null && $this->permissionService->canEditBot($this->userId, $bot);
     }
 
     /**

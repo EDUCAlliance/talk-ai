@@ -31,6 +31,12 @@ class PermissionService {
     /** @var array<string, array<string, mixed>> Cache for user permissions */
     private array $permissionCache = [];
 
+    /** @var array<string, array<string>> Admin group IDs per user, resolved once per request */
+    private array $adminGroupsCache = [];
+
+    /** @var array<string, array<string>> Admin team IDs per user, resolved once per request */
+    private array $adminTeamsCache = [];
+
     public function __construct(
         IGroupManager $groupManager,
         IUserManager $userManager,
@@ -75,10 +81,18 @@ class PermissionService {
 
     /**
      * Get list of group IDs where user is an admin (subadmin).
+     * Bot lists check every bot against this list, so it is resolved once per request.
      *
      * @return array<string>
      */
     public function getAdminGroups(string $userId): array {
+        return $this->adminGroupsCache[$userId] ??= $this->loadAdminGroups($userId);
+    }
+
+    /**
+     * @return array<string>
+     */
+    protected function loadAdminGroups(string $userId): array {
         $user = $this->userManager->get($userId);
         if ($user === null) {
             return [];
@@ -116,10 +130,18 @@ class PermissionService {
 
     /**
      * Get list of team IDs where user is moderator, admin, or owner.
+     * Resolved once per request, like the admin groups.
      *
      * @return array<string>
      */
     public function getAdminTeams(string $userId): array {
+        return $this->adminTeamsCache[$userId] ??= $this->loadAdminTeams($userId);
+    }
+
+    /**
+     * @return array<string>
+     */
+    protected function loadAdminTeams(string $userId): array {
         if (!class_exists('\\OCA\\Circles\\Api\\v1\\Circles')) {
             return [];
         }

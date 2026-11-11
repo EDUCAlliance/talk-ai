@@ -52,8 +52,8 @@ class BotController extends Controller {
 	 */
 	public function index(): DataResponse {
 		try {
-			$bots = $this->botService->getBotsByUser($this->userId);
-			return new DataResponse($bots);
+			$bots = $this->botService->getBotsByUserEnriched($this->userId);
+			return new DataResponse(array_map(fn (array $bot): array => $this->localizeToolList($bot), $bots));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list bots: ' . $e->getMessage());
 			return $this->errorResponse('bots_load_failed', $this->l10n->t('Failed to load bots'), 500);
@@ -68,8 +68,8 @@ class BotController extends Controller {
 		try {
 			$bot = $this->botService->getBot($id);
 
-			// Verify ownership
-			if ($bot->getUserId() !== $this->userId) {
+			// Whoever may save the bot may also load it
+			if ($this->userId === null || !$this->permissionService->canEditBot($this->userId, $bot)) {
 				return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
 			}
 
@@ -226,7 +226,7 @@ class BotController extends Controller {
 	public function listPublic(): DataResponse {
 		try {
 			$bots = $this->botService->getAvailableBotsForUserEnriched((string)$this->userId);
-			return new DataResponse($bots);
+			return new DataResponse(array_map(fn (array $bot): array => $this->localizeToolList($bot), $bots));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list public bots: ' . $e->getMessage());
 			return $this->errorResponse('public_bots_load_failed', $this->l10n->t('Failed to load public bots'), 500);
@@ -247,10 +247,7 @@ class BotController extends Controller {
 					404,
 				);
 			}
-			if (isset($botDetails['tools']) && is_array($botDetails['tools'])) {
-				$botDetails['tools'] = $this->localizeBuiltInTools($botDetails['tools']);
-			}
-			return new DataResponse($botDetails);
+			return new DataResponse($this->localizeToolList($botDetails));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to get public bot details: ' . $e->getMessage());
 			return $this->errorResponse('public_bots_load_failed', $this->l10n->t('Failed to load public bot details'), 500);
@@ -388,6 +385,13 @@ class BotController extends Controller {
 	public function pendingApprovals(): DataResponse {
 		try {
 			$bots = $this->botService->getPendingApprovals($this->userId);
+			foreach ($bots as &$bot) {
+				$bot = $this->localizeToolList($bot, 'live_tools');
+				if (isset($bot['review_target']) && is_array($bot['review_target'])) {
+					$bot['review_target'] = $this->localizeToolList($bot['review_target']);
+				}
+			}
+			unset($bot);
 			return new DataResponse(['bots' => $bots]);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to list pending approvals: ' . $e->getMessage());
@@ -532,6 +536,20 @@ class BotController extends Controller {
 			return true;
 		}
 		return (bool)$value;
+	}
+
+	/**
+	 * Localize the built-in tools in one tool list of a bot payload.
+	 *
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	private function localizeToolList(array $payload, string $key = 'tools'): array {
+		if (isset($payload[$key]) && is_array($payload[$key])) {
+			$payload[$key] = $this->localizeBuiltInTools($payload[$key]);
+		}
+
+		return $payload;
 	}
 
 	/**
