@@ -737,6 +737,13 @@ class SettingsController extends Controller {
 				throw new Exception('Bot is no longer active');
 			}
 
+			// Same rule as in the background job: a sender who lost access since the request was queued
+			// (guest switch off, bot no longer live, group left) gets no run, no retry and no reply.
+			if (!$this->botService->userCanAccessBot($bot, $request->getUserId())) {
+				$this->failProcessingIfOwned($request, 'Sender may no longer use this bot');
+				return ['success' => true, 'skipped' => true];
+			}
+
 			$traceRunId = $this->startQueuedTrace($request, $bot);
 			$executionError = null;
 			$agentExecutionStarted = true;

@@ -128,7 +128,8 @@ class BotController extends Controller {
 					$ragEnabled,
 					$tools,
 					$description,
-					$onboardingQuestions
+					$onboardingQuestions,
+					$allowGuests
 				);
 				$botData = $bot->jsonSerialize();
 				$botData['is_assistant'] = true;

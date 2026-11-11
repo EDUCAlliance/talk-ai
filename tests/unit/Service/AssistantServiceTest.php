@@ -48,7 +48,25 @@ class AssistantServiceTest extends TestCase {
 		$this->assertNull($created[9]);
 		$this->assertSame([['is_builtin' => true, 'builtin_name' => 'room_search_documents']], $created[11]);
 		$this->assertSame('Just for me', $created[12]);
+		$this->assertNull($created[14], 'guests are not answered unless the request says so');
 		$this->assertSame('31', $this->userValues['alice/educai/assistant_bot_id']);
+	}
+
+	public function testTheAssistantCanAnswerGuestsFromTheStart(): void {
+		$created = [];
+		$botService = $this->createBotService();
+		$botService->expects($this->once())
+			->method('createBot')
+			->willReturnCallback(function (...$arguments) use (&$created): Bot {
+				$created = $arguments;
+				return $this->createBot(31, (string)$arguments[0], 'personal', '@' . $arguments[2]);
+			});
+		$service = new AssistantService($botService, $this->createConfig());
+
+		$service->createAssistant('alice', 'Personal assistant', 'Help me.', allowGuests: true);
+
+		$this->assertSame('personal', $created[7]);
+		$this->assertTrue($created[14], 'the switch reaches the bot like for every other bot');
 	}
 
 	public function testMentionUsesOnlyAllowedCharactersAndAvoidsTakenNames(): void {

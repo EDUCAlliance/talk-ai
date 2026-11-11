@@ -201,6 +201,18 @@ class ProcessQueuedRequestsJob extends TimedJob {
                 throw new \Exception('Bot is no longer active');
             }
 
+            // The sender could use the bot when the request was queued. That may have changed since:
+            // the guest switch was turned off, the bot left its audience, the sender left the group.
+            // The request then ends like a message of someone without access: no run, no retry, no reply.
+            if (!$this->botService->userCanAccessBot($bot, $request->getUserId())) {
+                $this->failProcessingIfOwned($request, 'Sender may no longer use this bot');
+                $this->logger->info('EducAI: Queued request dropped - the sender may no longer use the bot', [
+                    'request_id' => $requestId,
+                    'bot_id' => $request->getBotId(),
+                ]);
+                return true;
+            }
+
             // Process the message (with isFromQueue=true to skip rate limit check)
             $traceRunId = $this->startQueuedTrace($request, $bot);
             $executionError = null;

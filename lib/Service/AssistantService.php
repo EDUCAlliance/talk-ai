@@ -72,6 +72,7 @@ class AssistantService {
 		?array $tools = null,
 		?string $description = null,
 		?array $onboardingQuestions = null,
+		mixed $allowGuests = null,
 	): Bot {
 		if ($this->findAssistant($userId) !== null) {
 			throw new AssistantExistsException();
@@ -91,7 +92,8 @@ class AssistantService {
 			$ragEnabled,
 			$tools,
 			$description,
-			$onboardingQuestions
+			$onboardingQuestions,
+			$allowGuests
 		);
 		$this->config->setUserValue($userId, self::APP_ID, self::CONFIG_KEY, (string)$bot->getId());
 
