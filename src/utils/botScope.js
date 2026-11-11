@@ -5,6 +5,11 @@ import { n, t } from '../l10n.js'
  */
 export const SCOPE_KEYS = ['personal', 'group', 'team', 'everyone']
 
+/**
+ * Icon name per scope (see components/TalkAiIcon.vue). The icon and the words carry the meaning, the colour supports it.
+ */
+export const SCOPE_ICONS = { personal: 'lock', group: 'group', team: 'team', everyone: 'globe' }
+
 const SCOPE_BY_VISIBILITY = {
 	personal: 'personal',
 	groups: 'group',
@@ -49,6 +54,36 @@ export function scopeOf(bot, directory = {}) {
 	}
 	const label = t('educai', 'Group')
 	return { key, label, detail: names === '' ? label : n('educai', 'Group {names}', 'Groups {names}', audience.length, { names }) }
+}
+
+/**
+ * Name who reviews a bot before it is shared. A personal bot needs no approval and gets an empty string.
+ *
+ * The result is a nominative phrase, meant to follow a label such as "Reviewed by:".
+ *
+ * @param {object} bot Bot as delivered by the API
+ * @param {object} [directory] Known audiences, see scopeOf()
+ * @return {string} For example `the admins of the group “IKM students”`
+ */
+export function reviewersOf(bot, directory = {}) {
+	const key = SCOPE_BY_VISIBILITY[visibilityOf(bot)] ?? 'group'
+	if (key === 'personal') {
+		return ''
+	}
+	if (key === 'everyone') {
+		return t('educai', 'the administration')
+	}
+
+	const audience = audienceNames(bot, key, directory)
+	const names = audience.map(name => `“${name}”`).join(', ')
+	if (key === 'team') {
+		return names === ''
+			? t('educai', 'the admins of the team')
+			: n('educai', 'the admins of the team {names}', 'the admins of the teams {names}', audience.length, { names })
+	}
+	return names === ''
+		? t('educai', 'the admins of the group')
+		: n('educai', 'the admins of the group {names}', 'the admins of the groups {names}', audience.length, { names })
 }
 
 function audienceNames(bot, key, directory) {

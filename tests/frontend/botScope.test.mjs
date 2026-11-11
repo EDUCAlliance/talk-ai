@@ -99,3 +99,19 @@ test('unknown group ids stay readable, unknown team ids are left out', () => {
 test('an unknown visibility is treated like a group bot', () => {
 	assert.equal(scopeOf({ visibility: 'department' }).key, 'group')
 })
+
+test('reviewers are named by the audience, a personal bot has none', async () => {
+	const { reviewersOf, SCOPE_ICONS } = await import('../../src/utils/botScope.js')
+	assert.equal(reviewersOf({ visibility: 'personal' }), '')
+	assert.equal(reviewersOf({ visibility: 'global' }), 'the administration')
+	assert.equal(reviewersOf({ visibility: 'groups', allowed_groups: [] }), 'the admins of the group')
+	assert.equal(
+		reviewersOf({ visibility: 'groups', allowed_groups: ['ikm-students'] }, { groups: [{ id: 'ikm-students', displayName: 'IKM students' }] }),
+		'the admins of the group “IKM students”',
+	)
+	assert.equal(
+		reviewersOf({ visibility: 'teams', allowed_teams: ['a', 'b'] }, { teams: [{ id: 'a', displayName: 'EDUC Dev' }, { id: 'b', displayName: 'Methods lab' }] }),
+		'the admins of the teams “EDUC Dev”, “Methods lab”',
+	)
+	assert.deepEqual(Object.keys(SCOPE_ICONS), SCOPE_KEYS)
+})
