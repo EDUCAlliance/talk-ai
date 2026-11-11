@@ -71,6 +71,8 @@ class DoclingClient {
     private IClientService $clientService;
     private SettingsService $settingsService;
     private LoggerInterface $logger;
+    /** @var array<string,string> Pipeline choice for the test conversions of a running detection */
+    private array $detectionPipeline = [];
 
     public function __construct(
         IClientService $clientService,
@@ -189,11 +191,13 @@ class DoclingClient {
      * @param string|null $apiKey Optional API key to use
      * @param string|null $profile Optional unsaved API profile
      * @param string|null $authMode Optional unsaved authentication mode
+     * @param string|null $pipeline Optional unsaved pipeline choice
+     * @param string|null $vlmPreset Optional unsaved VLM preset name
      * @return array{success: bool, error?: string}
      */
-    public function testConnection(?string $endpoint = null, ?string $apiKey = null, ?string $profile = null, ?string $authMode = null): array {
+    public function testConnection(?string $endpoint = null, ?string $apiKey = null, ?string $profile = null, ?string $authMode = null, ?string $pipeline = null, ?string $vlmPreset = null): array {
         try {
-            $config = $this->settingsService->getDoclingConfig($profile, $authMode);
+            $config = $this->settingsService->getDoclingConfig($profile, $authMode, $pipeline, $vlmPreset);
         } catch (Exception $e) {
             return ['success' => false, 'error' => $this->message(self::SETTINGS_UNREADABLE)];
         }
@@ -216,9 +220,9 @@ class DoclingClient {
     }
 
     /** @return array{fingerprint: ?string, summary: ?string} */
-    public function connectionCheckTarget(?string $endpoint = null, ?string $apiKey = null, ?string $profile = null, ?string $authMode = null, bool $ignoreStoredKey = false): array {
+    public function connectionCheckTarget(?string $endpoint = null, ?string $apiKey = null, ?string $profile = null, ?string $authMode = null, bool $ignoreStoredKey = false, ?string $pipeline = null, ?string $vlmPreset = null): array {
         try {
-            $config = $this->settingsService->getDoclingConfig($profile, $authMode);
+            $config = $this->settingsService->getDoclingConfig($profile, $authMode, $pipeline, $vlmPreset);
             $profile = (string)$config['docling_api_profile'];
             $authMode = (string)$config['docling_auth_mode'];
             if ($apiKey === null && $ignoreStoredKey) {
@@ -235,9 +239,14 @@ class DoclingClient {
             $url = trim($endpoint);
         }
 
+        // A check of one processing path says nothing about another. The unchanged request keeps
+        // the fingerprint it always had, so existing results stay valid.
+        $pipelineFields = $this->pipelineFields($config);
+
         return [
-            'fingerprint' => ConnectionCheckStore::fingerprint('docling', [$url, $profile, $authMode], $key),
-            'summary' => (self::SERVICE_LABELS[$profile] ?? $profile) . ' · ' . $authMode,
+            'fingerprint' => ConnectionCheckStore::fingerprint('docling', array_merge([$url, $profile, $authMode], array_values($pipelineFields)), $key),
+            'summary' => (self::SERVICE_LABELS[$profile] ?? $profile) . ' · ' . $authMode
+                . ($pipelineFields !== [] ? ' · ' . implode(' ', array_values($pipelineFields)) : ''),
         ];
     }
 
@@ -248,10 +257,13 @@ class DoclingClient {
      * @param string|null $endpoint URL entered by the administrator; blank selects the AcademicCloud default
      * @param string|null $apiKey Unsaved Docling key; blank uses the stored Docling key
      * @param bool $ignoreStoredKey The stored Docling key is about to be removed and must not be used
+     * @param string|null $pipeline Unsaved pipeline choice; null uses the saved one
+     * @param string|null $vlmPreset Unsaved VLM preset name; null uses the saved one
      * @return array{success: bool, profile: ?string, auth_mode: ?string, service: ?string, title: ?string, version: ?string, source: ?string, endpoint: string, conversion_url: ?string, duration_ms: ?int, error: ?string}
-     * @throws \InvalidArgumentException For an invalid URL or key, before any request is made
+     * @throws \InvalidArgumentException For an invalid URL, key, pipeline or preset, before any request is made
      */
-    public function detect(?string $endpoint = null, ?string $apiKey = null, bool $ignoreStoredKey = false): array {
+    public function detect(?string $endpoint = null, ?string $apiKey = null, bool $ignoreStoredKey = false, ?string $pipeline = null, ?string $vlmPreset = null): array {
+        $this->settingsService->validateDoclingPipelineOptions($pipeline, $vlmPreset);
         $input = trim((string)$endpoint);
         $typedKey = trim((string)$apiKey);
         if (preg_match('/[\x00-\x1F\x7F]/', $typedKey)) {
@@ -265,8 +277,14 @@ class DoclingClient {
             'duration_ms' => null, 'error' => null,
         ];
         try {
+            // The test conversion uses the processing path that real conversions will use.
+            $serveConfig = $this->settingsService->getDoclingConfig('docling_serve', 'x_api_key', $pipeline, $vlmPreset);
+            $this->detectionPipeline = [
+                'docling_pipeline' => $serveConfig['docling_pipeline'] ?? '',
+                'docling_vlm_preset' => $serveConfig['docling_vlm_preset'] ?? '',
+            ];
             $serveKey = $typedKey !== '' || $ignoreStoredKey ? $typedKey
-                : trim((string)($this->settingsService->getDoclingConfig('docling_serve', 'x_api_key')['api_key'] ?? ''));
+                : trim((string)($serveConfig['api_key'] ?? ''));
         } catch (\Throwable $e) {
             return ['error' => $this->message(self::SETTINGS_UNREADABLE)] + $result;
         }
@@ -460,7 +478,7 @@ class DoclingClient {
                 'docling_auth_mode' => $authMode,
                 'docling_api_endpoint' => $endpoint,
                 'api_key' => $apiKey,
-            ], 'educai-docling-test.pdf', $this->buildTestPdf(), 'application/pdf', self::TEST_CONVERSION_TIMEOUT);
+            ] + $this->detectionPipeline, 'educai-docling-test.pdf', $this->buildTestPdf(), 'application/pdf', self::TEST_CONVERSION_TIMEOUT);
             $attempt['success'] = true;
         } catch (Exception $e) {
             $status = $e->getCode();
@@ -526,6 +544,30 @@ class DoclingClient {
     }
 
     /**
+     * Form fields that select the processing path on Docling Serve. Empty for the unchanged request.
+     * With the VLM pipeline the preset is always named: without it Docling Serve would fall back to
+     * its built-in local model instead of the preset the server administrator configured.
+     *
+     * @param array<string,mixed> $config
+     * @return array<string,string>
+     */
+    private function pipelineFields(array $config): array {
+        $pipeline = (string)($config['docling_pipeline'] ?? '');
+        if (($config['docling_api_profile'] ?? 'legacy') !== 'docling_serve' || $pipeline === '') {
+            return [];
+        }
+        if ($pipeline === 'standard') {
+            return ['pipeline' => 'standard'];
+        }
+        if ($pipeline !== 'vlm') {
+            throw new Exception($this->message('Invalid Docling pipeline. Check the Docling settings.'));
+        }
+        $preset = trim((string)($config['docling_vlm_preset'] ?? ''));
+
+        return ['pipeline' => 'vlm', 'vlm_pipeline_preset' => $preset !== '' ? $preset : 'default'];
+    }
+
+    /**
      * @param array<string,mixed> $config
      */
     private function convertContent(array $config, string $filename, string $content, string $mimeType, int $timeout): string {
@@ -557,6 +599,10 @@ class DoclingClient {
             $multipart[] = ['name' => 'to_formats', 'contents' => 'md'];
             $multipart[] = ['name' => 'target_type', 'contents' => 'inbody'];
         }
+        $pipelineFields = $this->pipelineFields($config);
+        foreach ($pipelineFields as $name => $value) {
+            $multipart[] = ['name' => $name, 'contents' => $value];
+        }
 
         try {
             // A timeout/5xx can leave a conversion running; never resubmit or follow redirects.
@@ -581,6 +627,8 @@ class DoclingClient {
             throw new Exception(match (true) {
                 $status === 401 || $status === 403 => $this->message('Docling authentication failed (HTTP %s). Check the authentication mode and Docling API key.', [$status]),
                 $status === 404 => $this->message('Docling endpoint not found (HTTP 404). Check the API profile and conversion URL.'),
+                // A refused pipeline or preset is reported as such. The request is never repeated without them.
+                $pipelineFields !== [] && in_array($status, [400, 422], true) => $this->message('Docling rejected the pipeline or the preset (HTTP %s). Check that the server knows the preset and allows it. The document was not converted another way.', [$status]),
                 $status === 422 => $this->message('Docling rejected the upload (HTTP 422). Check the API profile and use the file-upload endpoint, not /v1/convert/source.'),
                 $status === 408 || $status === 504 => $this->message('Docling conversion timed out (HTTP %s). The server may still be processing it; no automatic retry was made. Check its synchronous conversion limit.', [$status]),
                 $status === 413 => $this->message('Docling rejected the document size (HTTP 413). Check the server upload limit.'),

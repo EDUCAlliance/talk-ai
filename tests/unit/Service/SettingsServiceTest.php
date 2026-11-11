@@ -891,4 +891,58 @@ class SettingsServiceTest extends TestCase {
 		}
 		$this->assertSame(50, $settings->getRagChunkOverlap());
 	}
+
+	public function testDoclingPipelineChoiceIsStoredValidatedAndMergedIntoTheDoclingConfig(): void {
+		$values = [];
+		$config = $this->createMock(\OCP\IConfig::class);
+		$config->method('getAppValue')->willReturnCallback(static function (string $app, string $key, string $default = '') use (&$values): string {
+			return $values["$app/$key"] ?? $default;
+		});
+		$config->method('setAppValue')->willReturnCallback(static function (string $app, string $key, string $value) use (&$values): void {
+			$values["$app/$key"] = $value;
+		});
+		$settings = new Settings();
+		$settings->setDoclingEnabled(true);
+		$settings->setDoclingApiProfile('docling_serve');
+		$settings->setDoclingAuthMode('none');
+		$mapper = $this->createMock(SettingsMapper::class);
+		$mapper->method('getSettings')->willReturn($settings);
+		$service = new SettingsService($mapper, $this->createMock(CredentialService::class),
+			$this->createMock(TalkBotRegistrationService::class), $this->createMock(LoggerInterface::class),
+			$this->createMock(\OCA\EducAI\Service\EmbeddingConfigurationService::class), $config);
+
+		// Nothing chosen: the request stays as it was.
+		$this->assertSame(['pipeline' => '', 'vlm_preset' => 'default'], $service->getDoclingPipelineOptions());
+		$this->assertSame('', $service->getDoclingConfig()['docling_pipeline']);
+
+		$service->updateDoclingPipelineOptions('vlm', ' uni-gemma ');
+		$this->assertSame(['educai/docling_pipeline' => 'vlm', 'educai/docling_vlm_preset' => 'uni-gemma'], $values);
+		$saved = $service->getDoclingConfig();
+		$this->assertSame(['vlm', 'uni-gemma'], [$saved['docling_pipeline'], $saved['docling_vlm_preset']]);
+
+		// Unsaved choices of the admin form win over the saved ones, each on its own.
+		$unsaved = $service->getDoclingConfig(null, null, 'standard', null);
+		$this->assertSame(['standard', 'uni-gemma'], [$unsaved['docling_pipeline'], $unsaved['docling_vlm_preset']]);
+		$this->assertSame('', $service->getDoclingConfig('legacy', 'bearer')['docling_pipeline'], 'the legacy endpoint knows no pipelines');
+
+		// An empty preset means the default one; only one of the two can be changed.
+		$service->updateDoclingPipelineOptions(null, '');
+		$this->assertSame(['pipeline' => 'vlm', 'vlm_preset' => 'default'], $service->getDoclingPipelineOptions());
+		$service->updateDoclingPipelineOptions('', null);
+		$this->assertSame(['pipeline' => '', 'vlm_preset' => 'default'], $service->getDoclingPipelineOptions());
+
+		foreach ([['asr', null], [null, 'has space'], [null, '../x'], [null, str_repeat('p', 65)], ['vlm', "a\nb"]] as [$pipeline, $preset]) {
+			$before = $values;
+			try {
+				$service->updateDoclingPipelineOptions($pipeline, $preset);
+				$this->fail('Invalid Docling pipeline options accepted');
+			} catch (\InvalidArgumentException $e) {
+				$this->assertSame($before, $values, 'nothing is stored when one of the two is invalid');
+			}
+		}
+
+		// Values that got into the store another way never reach a request.
+		$values = ['educai/docling_pipeline' => 'asr', 'educai/docling_vlm_preset' => 'bad preset'];
+		$this->assertSame(['pipeline' => '', 'vlm_preset' => 'default'], $service->getDoclingPipelineOptions());
+	}
 }

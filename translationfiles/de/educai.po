@@ -7460,3 +7460,55 @@ msgstr "Fertig"
 #: src/components/TalkAiTour.vue
 msgid "Start the tour"
 msgstr "Rundgang starten"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "How documents are read"
+msgstr "Wie Dokumente gelesen werden"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "As before (the Docling server decides)"
+msgstr "Wie bisher (der Docling-Server entscheidet)"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Standard pipeline (models on the Docling server)"
+msgstr "Standard-Pipeline (Modelle auf dem Docling-Server)"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Vision model from a server preset"
+msgstr "Vision-Modell aus einem Server-Preset"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Preset on the Docling server"
+msgstr "Preset auf dem Docling-Server"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "“default” uses the preset the server administrator marked as default."
+msgstr "„default“ nutzt das Preset, das die Server-Administration als Standard markiert hat."
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "vision model “{preset}”"
+msgstr "Vision-Modell „{preset}“"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "standard pipeline"
+msgstr "Standard-Pipeline"
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "Pages are read by the vision model of the preset. The model, its address and its key are set on the Docling server, not here. If the server refuses the preset, the document is not converted another way."
+msgstr "Die Seiten liest das Vision-Modell des Presets. Modell, Adresse und Schlüssel werden auf dem Docling-Server eingestellt, nicht hier. Lehnt der Server das Preset ab, wird das Dokument nicht auf anderem Weg umgewandelt."
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "The Docling server reads documents with its own layout and text recognition models. Large scans need a lot of memory there."
+msgstr "Der Docling-Server liest Dokumente mit seinen eigenen Modellen für Layout und Texterkennung. Große Scans brauchen dort viel Arbeitsspeicher."
+
+#: src/components/admin/KnowledgeTab.vue
+msgid "No pipeline is named. A Docling server then uses its standard pipeline, even when it has a vision preset."
+msgstr "Es wird keine Pipeline genannt. Ein Docling-Server nutzt dann seine Standard-Pipeline, auch wenn er ein Vision-Preset hat."
+
+#: lib/Service/DoclingClient.php
+msgid "Docling rejected the pipeline or the preset (HTTP %s). Check that the server knows the preset and allows it. The document was not converted another way."
+msgstr "Docling hat die Pipeline oder das Preset abgelehnt (HTTP %s). Prüfe, ob der Server das Preset kennt und erlaubt. Das Dokument wurde nicht auf anderem Weg umgewandelt."
+
+#: lib/Service/DoclingClient.php
+msgid "Invalid Docling pipeline. Check the Docling settings."
+msgstr "Ungültige Docling-Pipeline. Prüfe die Docling-Einstellungen."

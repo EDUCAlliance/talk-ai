@@ -280,6 +280,11 @@
 	gap: 16px 20px;
 }
 
+/* A second row of fields that belongs to the grid above keeps its row gap */
+.educai-admin .ta-grid--follow {
+	margin-block-start: 16px;
+}
+
 .educai-admin .ta-grid--three {
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 }

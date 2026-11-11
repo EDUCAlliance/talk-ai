@@ -2051,6 +2051,19 @@ OC.L10N.register(
     "End the tour" : "Rundgang beenden",
     "Read the guide" : "Anleitung lesen",
     "Done" : "Fertig",
-    "Start the tour" : "Rundgang starten"
+    "Start the tour" : "Rundgang starten",
+    "How documents are read" : "Wie Dokumente gelesen werden",
+    "As before (the Docling server decides)" : "Wie bisher (der Docling-Server entscheidet)",
+    "Standard pipeline (models on the Docling server)" : "Standard-Pipeline (Modelle auf dem Docling-Server)",
+    "Vision model from a server preset" : "Vision-Modell aus einem Server-Preset",
+    "Preset on the Docling server" : "Preset auf dem Docling-Server",
+    "“default” uses the preset the server administrator marked as default." : "„default“ nutzt das Preset, das die Server-Administration als Standard markiert hat.",
+    "vision model “{preset}”" : "Vision-Modell „{preset}“",
+    "standard pipeline" : "Standard-Pipeline",
+    "Pages are read by the vision model of the preset. The model, its address and its key are set on the Docling server, not here. If the server refuses the preset, the document is not converted another way." : "Die Seiten liest das Vision-Modell des Presets. Modell, Adresse und Schlüssel werden auf dem Docling-Server eingestellt, nicht hier. Lehnt der Server das Preset ab, wird das Dokument nicht auf anderem Weg umgewandelt.",
+    "The Docling server reads documents with its own layout and text recognition models. Large scans need a lot of memory there." : "Der Docling-Server liest Dokumente mit seinen eigenen Modellen für Layout und Texterkennung. Große Scans brauchen dort viel Arbeitsspeicher.",
+    "No pipeline is named. A Docling server then uses its standard pipeline, even when it has a vision preset." : "Es wird keine Pipeline genannt. Ein Docling-Server nutzt dann seine Standard-Pipeline, auch wenn er ein Vision-Preset hat.",
+    "Docling rejected the pipeline or the preset (HTTP %s). Check that the server knows the preset and allows it. The document was not converted another way." : "Docling hat die Pipeline oder das Preset abgelehnt (HTTP %s). Prüfe, ob der Server das Preset kennt und erlaubt. Das Dokument wurde nicht auf anderem Weg umgewandelt.",
+    "Invalid Docling pipeline. Check the Docling settings." : "Ungültige Docling-Pipeline. Prüfe die Docling-Einstellungen."
 },
 "nplurals=2; plural=(n != 1);");

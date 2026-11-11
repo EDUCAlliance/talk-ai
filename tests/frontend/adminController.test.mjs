@@ -163,7 +163,8 @@ for (const [name, fixture] of Object.entries(fixtures)) {
 		state.settings.defaultModel = 'primary:alpha'
 		Object.assign(state.settings, fixture())
 		state.outputTokenOverrides = name === 'everything' ? [{ model: 'secondary:beta', tokens: 4096 }] : []
-		const expected = JSON.parse(JSON.stringify(legacyPayload(state)))
+		// The Docling pipeline choice is the one addition; without a choice it leaves the request unchanged.
+		const expected = { ...JSON.parse(JSON.stringify(legacyPayload(state))), doclingPipeline: '', doclingVlmPreset: 'default' }
 		await state.saveSettings()
 		assert.deepEqual(plain(state.errors), [])
 		assert.deepEqual(plain(sent), expected)
@@ -274,7 +275,7 @@ test('Docling detection sends the typed values and applies the detected profile'
 	state.settings.doclingApiEndpoint = ' https://docling.example/educ '
 	state.settings.doclingApiKey = 'typed-key'
 	await state.detectDocling()
-	assert.deepEqual(plain(posts), [{ url: '/apps/educai/api/v1/admin/docling/detect', payload: { doclingApiEndpoint: 'https://docling.example/educ', doclingApiKey: 'typed-key', ignoreStoredKey: false } }])
+	assert.deepEqual(plain(posts), [{ url: '/apps/educai/api/v1/admin/docling/detect', payload: { doclingApiEndpoint: 'https://docling.example/educ', doclingApiKey: 'typed-key', ignoreStoredKey: false, doclingPipeline: '', doclingVlmPreset: 'default' } }])
 	assert.equal(state.settings.doclingApiProfile, 'legacy')
 	assert.equal(state.settings.doclingAuthMode, 'bearer')
 	assert.equal(state.settings.doclingApiEndpoint, 'https://docling.example/educ/v1/documents/convert')

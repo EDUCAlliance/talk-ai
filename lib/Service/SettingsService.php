@@ -7,6 +7,7 @@ namespace OCA\EducAI\Service;
 use OCA\EducAI\Db\Settings;
 use OCA\EducAI\Db\SettingsMapper;
 use OCP\AppFramework\Db\DoesNotExistException;
+use OCP\IConfig;
 use Psr\Log\LoggerInterface;
 
 class SettingsService {
@@ -24,6 +25,11 @@ class SettingsService {
 	public const APP_ICON_MODE_CUSTOM = 'custom';
 	public const APP_ICON_UPLOAD_PREFIX = 'educai-upload://';
 	public const CLEARABLE_CREDENTIALS = ['secondaryApiKey', 'embeddingApiKey', 'visionApiKey', 'speechApiKey', 'doclingApiKey'];
+	/** '' keeps the request unchanged; the others are sent to Docling Serve as `pipeline`. */
+	public const DOCLING_PIPELINES = ['', 'standard', 'vlm'];
+	public const DOCLING_DEFAULT_VLM_PRESET = 'default';
+	private const DOCLING_PRESET_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/';
+	private const APP_ID = 'educai';
 
 	private SettingsMapper $mapper;
 	private CredentialService $credentialService;
@@ -36,6 +42,7 @@ class SettingsService {
 		TalkBotRegistrationService $talkBotRegistrationService,
 		LoggerInterface $logger,
 		private EmbeddingConfigurationService $embeddingConfiguration,
+		private ?IConfig $config = null,
 	) {
 		$this->mapper = $mapper;
 		$this->credentialService = $credentialService;
@@ -823,19 +830,73 @@ class SettingsService {
 	}
 
 	/**
+	 * Which processing path Docling Serve is asked for. The request stays as it always was
+	 * unless a pipeline is chosen; the model behind a VLM preset is configured on the Docling
+	 * server, never here.
+	 *
+	 * @return array{pipeline: string, vlm_preset: string}
+	 */
+	public function getDoclingPipelineOptions(): array {
+		$pipeline = (string)($this->config?->getAppValue(self::APP_ID, 'docling_pipeline', '') ?? '');
+		$preset = trim((string)($this->config?->getAppValue(self::APP_ID, 'docling_vlm_preset', self::DOCLING_DEFAULT_VLM_PRESET) ?? ''));
+
+		return [
+			'pipeline' => in_array($pipeline, self::DOCLING_PIPELINES, true) ? $pipeline : '',
+			'vlm_preset' => preg_match(self::DOCLING_PRESET_PATTERN, $preset) === 1 ? $preset : self::DOCLING_DEFAULT_VLM_PRESET,
+		];
+	}
+
+	/**
+	 * @throws \InvalidArgumentException
+	 */
+	public function updateDoclingPipelineOptions(?string $pipeline, ?string $vlmPreset): void {
+		$this->validateDoclingPipelineOptions($pipeline, $vlmPreset);
+		if ($this->config === null) {
+			return;
+		}
+		if ($pipeline !== null) {
+			$this->config->setAppValue(self::APP_ID, 'docling_pipeline', $pipeline);
+		}
+		if ($vlmPreset !== null) {
+			$vlmPreset = trim($vlmPreset);
+			$this->config->setAppValue(self::APP_ID, 'docling_vlm_preset', $vlmPreset !== '' ? $vlmPreset : self::DOCLING_DEFAULT_VLM_PRESET);
+		}
+	}
+
+	/**
+	 * @throws \InvalidArgumentException
+	 */
+	public function validateDoclingPipelineOptions(?string $pipeline, ?string $vlmPreset): void {
+		if ($pipeline !== null && !in_array($pipeline, self::DOCLING_PIPELINES, true)) {
+			throw new \InvalidArgumentException('Invalid Docling pipeline');
+		}
+		if ($vlmPreset !== null && trim($vlmPreset) !== '' && preg_match(self::DOCLING_PRESET_PATTERN, trim($vlmPreset)) !== 1) {
+			throw new \InvalidArgumentException('Invalid Docling VLM preset');
+		}
+	}
+
+	/**
+	 * @param string|null $pipeline Unsaved pipeline choice; null uses the saved one
+	 * @param string|null $vlmPreset Unsaved preset name; null uses the saved one
 	 * @return array{
 	 *     docling_enabled: bool,
 	 *     docling_api_endpoint: ?string,
 	 *     docling_api_profile: string,
 	 *     docling_auth_mode: string,
+	 *     docling_pipeline: string,
+	 *     docling_vlm_preset: string,
 	 *     api_key: ?string
 	 * }
 	 */
-	public function getDoclingConfig(?string $profile = null, ?string $authMode = null): array {
+	public function getDoclingConfig(?string $profile = null, ?string $authMode = null, ?string $pipeline = null, ?string $vlmPreset = null): array {
 		$settings = $this->mapper->getSettings();
 		$profile ??= $settings->getDoclingApiProfile();
 		$authMode ??= $settings->getDoclingAuthMode();
 		$this->validateDoclingOptions($profile, $authMode);
+		$this->validateDoclingPipelineOptions($pipeline, $vlmPreset);
+		$saved = $this->getDoclingPipelineOptions();
+		$pipeline ??= $saved['pipeline'];
+		$vlmPreset = trim((string)($vlmPreset ?? $saved['vlm_preset']));
 		$apiKey = '';
 		if ($authMode !== 'none') {
 			$apiKey = $this->decryptOptionalCredential($settings->getDoclingApiKey());
@@ -849,6 +910,9 @@ class SettingsService {
 			'docling_api_endpoint' => $settings->getDoclingApiEndpoint(),
 			'docling_api_profile' => $profile,
 			'docling_auth_mode' => $authMode,
+			// Only Docling Serve knows pipelines; the legacy endpoint keeps its request.
+			'docling_pipeline' => $profile === 'docling_serve' ? $pipeline : '',
+			'docling_vlm_preset' => $vlmPreset !== '' ? $vlmPreset : self::DOCLING_DEFAULT_VLM_PRESET,
 			'api_key' => $apiKey,
 		];
 	}
