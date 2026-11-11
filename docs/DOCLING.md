@@ -25,6 +25,18 @@ Talk AI sends the file in the `files` field with `to_formats=md` and
 a successful conversion status. Partial, failed or empty conversions do not
 enter the index as successful documents.
 
+### File formats
+
+Both profiles convert PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, PNG, JPG, TIFF and
+BMP. With the Docling Serve profile Talk AI also sends OpenDocument texts,
+spreadsheets and presentations (ODT, ODS, ODP), as knowledge sources and as
+attachments in Talk. Docling reads them directly, without OCR and without a
+vision model, also when a vision preset is selected. This needs a Docling
+version that knows OpenDocument (checked with Docling Serve 1.37 and 1.38). A
+server that does not know the format reports a failed conversion for the file.
+The AcademicCloud / EDUC profile keeps the first list: an OpenDocument file
+stays an unsupported file there and is not sent.
+
 The official profile never falls back to the main LLM API key. No-auth mode
 sends neither an Authorization header nor X-Api-Key, even when a key is stored.
 Changing profiles does not rewrite a custom endpoint or delete a stored key;
@@ -133,10 +145,22 @@ The PDF test distinguishes authentication errors, an incorrect endpoint,
 invalid upload requests, incomplete output and timeouts. A successful health
 check alone is not a successful conversion.
 
+Talk AI waits up to 10 minutes for one conversion, one minute more for every
+megabyte above two, and at most 15 minutes. The test button waits 60 seconds.
+A long document takes minutes when the Docling server has no GPU or when a
+vision model reads every page, so the wait follows the work and not only the
+file size.
+
+Docling Serve has a wait limit of its own, `max_sync_wait`
+(`DOCLING_SERVE_MAX_SYNC_WAIT`), with a default of 120 seconds. After that it
+answers HTTP 504 while the conversion goes on. Set it to at least 600 seconds
+for long documents; a longer wait in Talk AI does not extend the limit of the
+server.
+
 Each client conversion call makes one HTTP submission. Talk AI does not resubmit after a timeout,
 connection loss or 5xx response: the server may still be processing the first
-upload. Docling Serve's synchronous wait limit is controlled by the server;
-increasing the client timeout does not extend it. Check the server before
+upload. With a single Docling worker such an abandoned conversion also delays
+the files sent after it. Check the server before
 manually retrying. An explicit retry or later job execution is a new call, not
 an exactly-once guarantee. Durable async submission and polling are outside this change.
 

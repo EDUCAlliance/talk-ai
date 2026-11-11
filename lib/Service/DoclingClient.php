@@ -19,8 +19,10 @@ use Psr\Log\LoggerInterface;
  */
 class DoclingClient {
     private const DEFAULT_ENDPOINT = 'https://chat-ai.academiccloud.de/v1/documents/convert';
-    private const BASE_CONVERSION_TIMEOUT = 120;
-    private const MAX_CONVERSION_TIMEOUT = 600;
+    // One synchronous conversion: ten minutes, one more per megabyte above two, at most fifteen.
+    // A long document takes minutes on a CPU-only server or with a vision model per page.
+    private const BASE_CONVERSION_TIMEOUT = 600;
+    private const MAX_CONVERSION_TIMEOUT = 900;
     private const TEST_CONVERSION_TIMEOUT = 60;
     private const DISCOVERY_TIMEOUT = 10;
     private const MAX_DISCOVERY_BYTES = 2097152;
@@ -68,6 +70,22 @@ class DoclingClient {
         'bmp',
     ];
 
+    /**
+     * OpenDocument types. Docling Serve reads them without a model; the legacy
+     * profile keeps the lists above, because its server may not know them.
+     */
+    private const OPEN_DOCUMENT_MIME_TYPES = [
+        'application/vnd.oasis.opendocument.text', // odt
+        'application/vnd.oasis.opendocument.spreadsheet', // ods
+        'application/vnd.oasis.opendocument.presentation', // odp
+    ];
+
+    private const OPEN_DOCUMENT_EXTENSIONS = [
+        'odt',
+        'ods',
+        'odp',
+    ];
+
     private IClientService $clientService;
     private SettingsService $settingsService;
     private LoggerInterface $logger;
@@ -104,13 +122,27 @@ class DoclingClient {
      */
     public function isSupported(File $file): bool {
         $mimeType = $file->getMimeType();
-        if (in_array($mimeType, self::SUPPORTED_MIME_TYPES, true)) {
+        // Also check by extension as MIME detection may not be perfect
+        $extension = strtolower(pathinfo($file->getName(), PATHINFO_EXTENSION));
+        if (in_array($mimeType, self::SUPPORTED_MIME_TYPES, true)
+            || in_array($extension, self::SUPPORTED_EXTENSIONS, true)) {
             return true;
         }
 
-        // Also check by extension as MIME detection may not be perfect
-        $extension = strtolower(pathinfo($file->getName(), PATHINFO_EXTENSION));
-        return in_array($extension, self::SUPPORTED_EXTENSIONS, true);
+        return (in_array($mimeType, self::OPEN_DOCUMENT_MIME_TYPES, true)
+                || in_array($extension, self::OPEN_DOCUMENT_EXTENSIONS, true))
+            && $this->readsOpenDocument();
+    }
+
+    /**
+     * OpenDocument files are sent only to Docling Serve. Unreadable settings count as "no".
+     */
+    private function readsOpenDocument(): bool {
+        try {
+            return ($this->settingsService->getDoclingConfig()['docling_api_profile'] ?? 'legacy') === 'docling_serve';
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
@@ -119,7 +151,9 @@ class DoclingClient {
      * @return array<int,string>
      */
     public function getSupportedMimeTypes(): array {
-        return self::SUPPORTED_MIME_TYPES;
+        return $this->readsOpenDocument()
+            ? array_merge(self::SUPPORTED_MIME_TYPES, self::OPEN_DOCUMENT_MIME_TYPES)
+            : self::SUPPORTED_MIME_TYPES;
     }
 
     /**
@@ -128,7 +162,9 @@ class DoclingClient {
      * @return array<int,string>
      */
     public function getSupportedExtensions(): array {
-        return self::SUPPORTED_EXTENSIONS;
+        return $this->readsOpenDocument()
+            ? array_merge(self::SUPPORTED_EXTENSIONS, self::OPEN_DOCUMENT_EXTENSIONS)
+            : self::SUPPORTED_EXTENSIONS;
     }
 
     /**

@@ -273,10 +273,99 @@ class DoclingClientTest extends TestCase {
 		$file->method('getContent')->willReturn($contents);
 		$client = $this->createMock(IClient::class);
 		$client->expects($this->once())->method('post')->with($this->anything(), $this->callback(
-			static fn (array $options): bool => $options['timeout'] === 540
+			static fn (array $options): bool => $options['timeout'] === 900
 				&& $options['multipart'][0]['filename'] === 'manual.pdf' && $options['multipart'][0]['contents'] === $contents
 		))->willReturn($this->response(['markdown' => 'Long document']));
 		$this->assertSame('Long document', $this->createDoclingClient($client)->convertToMarkdown($file));
+	}
+
+	public function testAConversionWaitsTenMinutesAndLongerForLargeFilesUpToFifteen(): void {
+		$megabyte = 1024 * 1024;
+		foreach ([[1, 600], [2 * $megabyte, 600], [2 * $megabyte + 1, 660], [4 * $megabyte, 720], [7 * $megabyte, 900], [9 * $megabyte, 900]] as [$bytes, $seconds]) {
+			$client = $this->createMock(IClient::class);
+			$client->expects($this->once())->method('post')->with($this->anything(), $this->callback(
+				static fn (array $options): bool => $options['timeout'] === $seconds
+			))->willReturn($this->response(['markdown' => 'Text']));
+			$this->assertSame('Text', $this->createDoclingClient($client)->convertBinaryToMarkdown('doc.pdf', str_repeat('x', $bytes), 'application/pdf'), $bytes . ' bytes');
+		}
+	}
+
+	public function testOpenDocumentFilesAreSupportedOnlyWithDoclingServe(): void {
+		$serve = $this->createDoclingClient($this->createMock(IClient::class), ['docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'x_api_key']);
+		$legacy = $this->createDoclingClient($this->createMock(IClient::class), ['docling_api_profile' => 'legacy', 'docling_auth_mode' => 'bearer']);
+		$withoutProfile = $this->createDoclingClient($this->createMock(IClient::class));
+		$files = [
+			['notes.odt', 'application/vnd.oasis.opendocument.text'],
+			['table.ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+			['slides.odp', 'application/vnd.oasis.opendocument.presentation'],
+			// The extension decides when the storage reports a generic type, and the type when the name has none.
+			['Report.ODT', 'application/octet-stream'],
+			['report', 'application/vnd.oasis.opendocument.text'],
+		];
+		foreach ($files as [$name, $mimeType]) {
+			$file = $this->createMock(File::class);
+			$file->method('getName')->willReturn($name);
+			$file->method('getMimeType')->willReturn($mimeType);
+			$this->assertTrue($serve->isSupported($file), $name);
+			$this->assertFalse($legacy->isSupported($file), $name);
+			$this->assertFalse($withoutProfile->isSupported($file), $name);
+		}
+
+		$this->assertSame(['odt', 'ods', 'odp'], array_slice($serve->getSupportedExtensions(), -3));
+		$this->assertContains('application/vnd.oasis.opendocument.presentation', $serve->getSupportedMimeTypes());
+		$this->assertNotContains('odt', $legacy->getSupportedExtensions());
+		$this->assertNotContains('application/vnd.oasis.opendocument.text', $legacy->getSupportedMimeTypes());
+		$this->assertSame($legacy->getSupportedExtensions(), array_slice($serve->getSupportedExtensions(), 0, -3));
+	}
+
+	public function testTheOtherFormatsDoNotDependOnTheProfileOrOnReadableSettings(): void {
+		$unreadable = $this->createMock(SettingsService::class);
+		$unreadable->method('getDoclingConfig')->willThrowException(new \RuntimeException('cannot decrypt private-secret'));
+		$clients = [
+			$this->createDoclingClient($this->createMock(IClient::class), ['docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'x_api_key']),
+			$this->createDoclingClient($this->createMock(IClient::class), ['docling_api_profile' => 'legacy', 'docling_auth_mode' => 'bearer']),
+			$this->createDoclingClient($this->createMock(IClient::class), settings: $unreadable),
+		];
+		foreach ($clients as $index => $docling) {
+			foreach ([['manual.pdf', 'application/pdf', true], ['Letter.DOCX', 'application/octet-stream', true],
+				['scan', 'image/png', true], ['notes.txt', 'text/plain', false], ['archive.zip', 'application/zip', false]] as [$name, $mimeType, $expected]) {
+				$file = $this->createMock(File::class);
+				$file->method('getName')->willReturn($name);
+				$file->method('getMimeType')->willReturn($mimeType);
+				$this->assertSame($expected, $docling->isSupported($file), $index . ' ' . $name);
+			}
+		}
+
+		$file = $this->createMock(File::class);
+		$file->method('getName')->willReturn('notes.odt');
+		$file->method('getMimeType')->willReturn('application/vnd.oasis.opendocument.text');
+		$this->assertFalse($clients[2]->isSupported($file));
+		$this->assertNotContains('odt', $clients[2]->getSupportedExtensions());
+	}
+
+	public function testAnOpenDocumentFileIsUploadedToDoclingServeLikeAnyOtherFile(): void {
+		$file = $this->createMock(File::class);
+		$file->method('getName')->willReturn('blueprint.odt');
+		$file->method('getMimeType')->willReturn('application/vnd.oasis.opendocument.text');
+		$file->method('getContent')->willReturn('PK synthetic OpenDocument bytes');
+		$client = $this->createMock(IClient::class);
+		$client->expects($this->once())->method('post')->willReturnCallback(function (string $url, array $options): IResponse {
+			$this->assertSame('https://docling.example/v1/convert/file', $url);
+			$this->assertSame(600, $options['timeout']);
+			$this->assertSame('files', $options['multipart'][0]['name']);
+			$this->assertSame('blueprint.odt', $options['multipart'][0]['filename']);
+			$this->assertSame('application/vnd.oasis.opendocument.text', $options['multipart'][0]['headers']['Content-Type']);
+			$this->assertSame('PK synthetic OpenDocument bytes', $options['multipart'][0]['contents']);
+			$this->assertSame([
+				['name' => 'to_formats', 'contents' => 'md'],
+				['name' => 'target_type', 'contents' => 'inbody'],
+			], array_slice($options['multipart'], 1));
+			return $this->response(['status' => 'success', 'document' => ['md_content' => '# Blueprint'], 'errors' => []]);
+		});
+		$docling = $this->createDoclingClient($client, ['docling_api_profile' => 'docling_serve', 'docling_auth_mode' => 'x_api_key',
+			'docling_api_endpoint' => 'https://docling.example']);
+		$this->assertTrue($docling->isSupported($file));
+		$this->assertSame('# Blueprint', $docling->convertToMarkdown($file));
 	}
 
 	public function testDetectWithBlankUrlUsesTheAcademicCloudDefaultAndMainKeyFallback(): void {
