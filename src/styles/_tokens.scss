@@ -69,7 +69,6 @@
 	--talkai-danger: var(--color-text-error, #ff8a8a);
 	--talkai-danger-soft: color-mix(in srgb, #b91c1c 25%, transparent);
 	--talkai-check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23222' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E");
-	@include scope.tokens-dark;
 }
 
 [data-theme-dark] .talkai,

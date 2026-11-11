@@ -26,18 +26,24 @@ function contrast(first, second) {
 }
 
 const light = mixin('tokens')
-const themes = { light, dark: { ...light, ...mixin('tokens-dark') } }
 
-for (const [theme, colours] of Object.entries(themes)) {
-	for (const key of SCOPE_KEYS) {
-		test(`scope colour "${key}" carries its text in the ${theme} theme (WCAG AA)`, () => {
-			const background = colours[`--talkai-scope-${key}`]
-			const text = colours[`--talkai-scope-${key}-text`]
-			assert.ok(background && text, 'background and text colour are defined')
-			assert.ok(contrast(background, text) >= 4.5, `${text} on ${background} has ${contrast(background, text).toFixed(2)}:1`)
-		})
-	}
+for (const key of SCOPE_KEYS) {
+	test(`scope colour "${key}" carries its text (WCAG AA)`, () => {
+		const background = light[`--talkai-scope-${key}`]
+		const text = light[`--talkai-scope-${key}-text`]
+		assert.ok(background && text, 'background and text colour are defined')
+		assert.ok(contrast(background, text) >= 4.5, `${text} on ${background} has ${contrast(background, text).toFixed(2)}:1`)
+	})
 }
+
+test('the scopes use the four colours of the EDUC logo, the same in every theme', () => {
+	assert.deepEqual(
+		SCOPE_KEYS.map(key => light[`--talkai-scope-${key}`]),
+		['#7e4bdd', '#28be7f', '#ff9880', '#f96e99'],
+		'violet for only you, green for a group, orange for a team, pink for everyone',
+	)
+	assert.equal(source.match(/@mixin /g).length, 1, 'no theme overrides a scope colour')
+})
 
 test('the contrast check itself matches known WCAG values', () => {
 	assert.equal(contrast('#000', '#fff'), 21)

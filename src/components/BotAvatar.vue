@@ -46,18 +46,6 @@ export default {
 	line-height: 1;
 }
 
-[data-theme-dark] .talkai-ava,
-[data-theme-dark-highcontrast] .talkai-ava {
-	@include scope.tokens-dark;
-}
-
-@media (prefers-color-scheme: dark) {
-
-	[data-theme-default] .talkai-ava {
-		@include scope.tokens-dark;
-	}
-}
-
 .talkai-ava--lg {
 	width: 56px;
 	height: 56px;
