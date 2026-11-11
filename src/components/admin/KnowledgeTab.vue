@@ -307,7 +307,7 @@
 				</div>
 			</details>
 			<p class="ta-hint ta-formats">
-				{{ t('educai', 'Supported formats:') }} PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, PNG, JPG, TIFF, BMP
+				{{ t('educai', 'Supported formats:') }} {{ supportedFormats }}
 			</p>
 		</AdminSection>
 
@@ -555,6 +555,11 @@ export default {
 				parts.push(t('educai', 'standard pipeline'))
 			}
 			return parts.join(', ')
+		},
+		supportedFormats() {
+			// Only Docling Serve reads OpenDocument files; the server-side check is DoclingClient::isSupported().
+			const openDocument = this.admin.settings.doclingApiProfile === 'docling_serve' ? ['ODT', 'ODS', 'ODP'] : []
+			return ['PDF', 'DOCX', 'DOC', 'PPTX', 'PPT', 'XLSX', 'XLS', ...openDocument, 'PNG', 'JPG', 'TIFF', 'BMP'].join(', ')
 		},
 		pipelineHint() {
 			if (this.admin.settings.doclingPipeline === 'vlm') {
