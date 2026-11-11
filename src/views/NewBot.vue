@@ -1,13 +1,6 @@
 <template>
 	<!-- Starting point -->
 	<section v-if="view === 'templates'" class="talkai-screen">
-		<nav class="talkai-crumbs" :aria-label="t('educai', 'Breadcrumb')">
-			<router-link class="talkai-crumbs__link" to="/my-bots">
-				{{ t('educai', 'My bots') }}
-			</router-link>
-			<TalkAiIcon name="chevron" :size="14" />
-			<span>{{ t('educai', 'New bot') }}</span>
-		</nav>
 		<header class="talkai-page-head">
 			<div>
 				<h2 class="talkai-page-head__title">
