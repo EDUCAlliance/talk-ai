@@ -249,3 +249,104 @@
 	color: var(--talkai-ink-2);
 	font-size: 14px;
 }
+
+// Preview chat in the sidebar of a new bot
+.talkai-trychat__log {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-height: 320px;
+	padding: 10px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface-2);
+	overflow-y: auto;
+}
+
+.talkai-trychat__empty {
+	color: var(--talkai-ink-3);
+	font-size: 13.5px;
+}
+
+.talkai-trychat__msg {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+.talkai-trychat__msg--user {
+	justify-content: flex-end;
+}
+
+.talkai-trychat__bubble {
+	max-width: 85%;
+	padding: 7px 11px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface);
+	font-size: 14px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.talkai-trychat__msg--user .talkai-trychat__bubble {
+	border-color: var(--talkai-ink);
+	background-color: var(--talkai-ink);
+	color: var(--talkai-on-ink);
+}
+
+.talkai-trychat__bubble--wait {
+	color: var(--talkai-ink-3);
+	font-style: italic;
+}
+
+.talkai-trychat__cut {
+	display: block;
+	margin-block-start: 4px;
+	color: var(--talkai-ink-3);
+	font-size: 12.5px;
+	font-style: italic;
+}
+
+.talkai-trychat__error {
+	margin-block-start: 8px;
+	color: var(--talkai-danger);
+	font-size: 13.5px;
+}
+
+.talkai-trychat__form {
+	margin-block-start: 8px;
+}
+
+.talkai-trychat__input {
+	width: 100%;
+	resize: vertical;
+}
+
+.talkai-trychat__actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 12px;
+	margin-block-start: 8px;
+}
+
+.talkai-trychat__reset {
+	margin-inline-end: auto;
+	color: var(--talkai-ink-2);
+	font-size: 13.5px;
+	text-decoration: underline;
+	text-underline-offset: 4px;
+
+	&:hover {
+		color: var(--talkai-ink);
+	}
+
+	&:disabled {
+		opacity: 0.5;
+	}
+}
+
+.talkai-trychat__note {
+	margin-block-start: 12px;
+}

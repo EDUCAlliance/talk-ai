@@ -20,6 +20,7 @@ use OCA\EducAI\Db\ToolMapper;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ContextLengthExceededException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
+use OCA\EducAI\Exception\PreviewUnavailableException;
 use OCA\EducAI\OpenApi\ApiToolAccess;
 use OCA\EducAI\OpenApi\ApiToolAssignmentException;
 use OCA\EducAI\OpenApi\OpenApiToolCatalog;
@@ -42,6 +43,11 @@ use Psr\Log\LoggerInterface;
  * @psalm-import-type ToolAssignmentPayload from \OCA\EducAI\TypeDefinitions
  */
 class BotService {
+	/** Limits of the preview chat for a bot that is not created yet */
+	public const PREVIEW_MAX_MESSAGES = 20;
+	public const PREVIEW_MAX_MESSAGE_BYTES = 4000;
+	public const PREVIEW_MAX_INSTRUCTION_BYTES = 60000;
+
 	public const TEMPERATURE_NOT_PROVIDED = '__educai_temperature_not_provided__';
 	private const AI_SERVICE_UNAVAILABLE_MESSAGE = "Sorry, I'm having trouble connecting to the AI service right now. Please try again later.";
 	private const CONTEXT_LIMIT_MESSAGE = "This request is too large for the model's context window. Please shorten your message, reduce the conversation context, or choose a model with a larger context window.";
@@ -1424,6 +1430,82 @@ class BotService {
 				? self::CONTEXT_LIMIT_MESSAGE
 				: self::AI_SERVICE_UNAVAILABLE_MESSAGE;
 		}
+	}
+
+	/**
+	 * Answer a few messages with the instruction and model of a bot that does not exist yet,
+	 * so its author can try the wording before creating it.
+	 *
+	 * The turn goes through the same executor, model choice, temperature and output handling
+	 * as a message in Talk. Nothing is stored, and a draft has neither tools nor an indexed
+	 * knowledge base, so the answer comes from the instruction and the conversation alone.
+	 *
+	 * @param array<int,mixed> $messages Conversation so far, oldest first, ending with the user's message
+	 * @return array{reply: string, incomplete: bool}
+	 * @throws \InvalidArgumentException For an unusable instruction or conversation
+	 * @throws ModelNotReleasedException
+	 * @throws PreviewUnavailableException When the chat endpoint is rate-limited or gave no answer
+	 */
+	public function previewReply(string $systemPrompt, ?string $model, mixed $temperature, array $messages): array {
+		$systemPrompt = trim($systemPrompt);
+		if ($systemPrompt === '' || strlen($systemPrompt) > self::PREVIEW_MAX_INSTRUCTION_BYTES) {
+			throw new \InvalidArgumentException('The preview needs an instruction of a usable length');
+		}
+		if ($messages === [] || count($messages) > self::PREVIEW_MAX_MESSAGES || !array_is_list($messages)) {
+			throw new \InvalidArgumentException('The preview needs a short conversation');
+		}
+		$conversation = [];
+		foreach ($messages as $entry) {
+			$role = is_array($entry) ? ($entry['role'] ?? null) : null;
+			$content = is_array($entry) && is_string($entry['content'] ?? null) ? trim($entry['content']) : '';
+			if (!in_array($role, ['user', 'assistant'], true) || $content === '' || strlen($content) > self::PREVIEW_MAX_MESSAGE_BYTES) {
+				throw new \InvalidArgumentException('The preview conversation contains an unusable message');
+			}
+			$conversation[] = ['role' => $role, 'content' => $content];
+		}
+		if ($conversation[count($conversation) - 1]['role'] !== 'user') {
+			throw new \InvalidArgumentException('The preview conversation must end with a message of the user');
+		}
+
+		// The same rules as for saving a bot: only released models, the default otherwise.
+		$draft = new Bot();
+		if ($model !== null && trim($model) !== '') {
+			$draft->setModel($this->authorizeModelSelection($model));
+		}
+		$draft->setTemperature($this->settingsService->normalizeTemperatureValue($temperature, true));
+
+		if ($this->rateLimitService->isEnabled()) {
+			if (!$this->rateLimitService->canProcess()) {
+				throw new PreviewUnavailableException(PreviewUnavailableException::RATE_LIMITED);
+			}
+			$this->rateLimitService->recordUsage();
+		}
+
+		try {
+			$result = $this->agentExecutor->run($systemPrompt, $conversation, [], array_filter([
+				'model' => $draft->getModel(),
+				'temperature' => $this->resolveTemperature($draft),
+				'built_in_tools' => [],
+			], static fn ($value) => $value !== null));
+		} catch (\Throwable $e) {
+			$this->logger->warning('Bot preview failed', ['exception_class' => get_class($e)]);
+			throw new PreviewUnavailableException(PreviewUnavailableException::NO_ANSWER);
+		}
+		if (is_array($result['rateLimitHeaders'] ?? null)) {
+			$this->rateLimitService->updateFromHeaders($result['rateLimitHeaders']);
+		}
+		$status = $result['status'] ?? null;
+		$reply = is_string($result['content'] ?? null) ? AssistantContentSanitizer::sanitize($result['content']) : '';
+		$incomplete = $status === 'incomplete' && ($result['terminalReason'] ?? null) === 'length';
+		if (!in_array($status, ['completed', 'incomplete'], true) || trim($reply) === '') {
+			$this->logger->warning('Bot preview got no usable answer', [
+				'status' => is_string($status) ? $status : null,
+				'terminal_reason' => is_string($result['terminalReason'] ?? null) ? $result['terminalReason'] : null,
+			]);
+			throw new PreviewUnavailableException(PreviewUnavailableException::NO_ANSWER);
+		}
+
+		return ['reply' => $reply, 'incomplete' => $incomplete];
 	}
 
 	private function enforceCatalogueLinks(string $assistantMessage, string $userId, ?int $traceRunId): string {

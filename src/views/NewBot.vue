@@ -186,9 +186,10 @@
 						<h4 class="talkai-side__title">
 							{{ t('educai', 'Try it out') }}
 						</h4>
-						<p class="talkai-side__text">
-							{{ t('educai', 'You can test the bot in Talk as soon as it is created. Nobody else can use it before that, and a shared bot only after approval.') }}
-						</p>
+						<BotPreviewChat :key="editorKey"
+							:bot="preview.bot"
+							:draft="preview.draft"
+							:directory="preview.directory" />
 					</div>
 				</NcAppSidebarTab>
 			</NcAppSidebar>
@@ -207,6 +208,7 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import NcAppSidebar from '@nextcloud/vue/components/NcAppSidebar'
 import NcAppSidebarTab from '@nextcloud/vue/components/NcAppSidebarTab'
 import BotEditor from '../components/BotEditor.vue'
+import BotPreviewChat from '../components/BotPreviewChat.vue'
 import BotSubmitDialog from '../components/BotSubmitDialog.vue'
 import BotTalkDialog from '../components/BotTalkDialog.vue'
 import BotTile from '../components/BotTile.vue'
@@ -221,7 +223,7 @@ const SIDEBAR_KEY = 'talkai-preview-sidebar'
 // A new bot in five steps. The bot is created at the end; until then everything stays in the browser.
 export default {
 	name: 'NewBot',
-	components: { BotEditor, BotSubmitDialog, BotTalkDialog, BotTile, NcAppSidebar, NcAppSidebarTab, TalkAiIcon },
+	components: { BotEditor, BotPreviewChat, BotSubmitDialog, BotTalkDialog, BotTile, NcAppSidebar, NcAppSidebarTab, TalkAiIcon },
 
 	beforeRouteLeave() {
 		if (this.started && !this.done && this.$refs.editor?.dirty) {

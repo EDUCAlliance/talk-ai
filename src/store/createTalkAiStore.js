@@ -126,6 +126,11 @@ export function createTalkAiStore({ http, url }) {
 		return bot
 	}
 
+	// One answer of a bot that does not exist yet, from its instruction and model. Nothing is stored.
+	async function previewReply(payload) {
+		return (await http.post(api('bots/preview'), payload)).data
+	}
+
 	// Tools the administration offers to this user. Without the list a new bot simply starts without tools.
 	async function fetchOfferedTools() {
 		const tools = (await http.get(api('tools'))).data?.tools
@@ -207,6 +212,7 @@ export function createTalkAiStore({ http, url }) {
 		fetchPublicBot,
 		fetchSources,
 		createBot,
+		previewReply,
 		fetchOfferedTools,
 		createAssistant,
 		updateBot,

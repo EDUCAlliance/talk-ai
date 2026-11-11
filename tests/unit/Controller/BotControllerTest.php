@@ -210,6 +210,36 @@ class BotControllerTest extends TestCase {
 		$this->assertSame(['id' => 8], $response->getData()['bots'][1]);
 	}
 
+	public function testPreviewReturnsTheAnswerAndExplainsEveryRefusalWithoutUpstreamDetails(): void {
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('previewReply')
+			->with('Be kind.', 'primary:x', 0.3, [['role' => 'user', 'content' => 'Hi']])
+			->willReturn(['reply' => 'Hello', 'incomplete' => false]);
+		$response = $this->createController($botService)->preview('Be kind.', 'primary:x', 0.3, [['role' => 'user', 'content' => 'Hi']]);
+		$this->assertSame(200, $response->getStatus());
+		$this->assertSame(['reply' => 'Hello', 'incomplete' => false], $response->getData());
+
+		foreach ([
+			[new \InvalidArgumentException('internal validation detail'), 400, 'preview_invalid'],
+			[new \OCA\EducAI\Exception\PreviewUnavailableException('rate_limited'), 429, 'preview_rate_limited'],
+			[new \OCA\EducAI\Exception\PreviewUnavailableException('no_answer'), 502, 'preview_failed'],
+			[new ModelNotReleasedException(false), 400, 'model_not_released'],
+			[new \Exception('database details must stay private'), 502, 'preview_failed'],
+		] as [$failure, $status, $code]) {
+			$botService = $this->createMock(BotService::class);
+			$botService->method('previewReply')->willThrowException($failure);
+			$response = $this->createController($botService)->preview('Be kind.', null, null, null);
+
+			$this->assertSame($status, $response->getStatus(), $code);
+			$this->assertSame($code, $response->getData()['errorCode']);
+			$this->assertStringNotContainsString('detail', $response->getData()['error']);
+		}
+
+		$anonymous = $this->createMock(BotService::class);
+		$anonymous->expects($this->never())->method('previewReply');
+		$this->assertSame(403, $this->createController($anonymous, userId: null)->preview('Be kind.')->getStatus());
+	}
+
 	public function testCreateWithTheAssistantFlagCreatesThePersonalAssistant(): void {
 		$botService = $this->createMock(BotService::class);
 		$botService->expects($this->never())->method('createBot');

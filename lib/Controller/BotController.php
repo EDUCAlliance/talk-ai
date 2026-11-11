@@ -8,6 +8,7 @@ use Exception;
 use OCA\EducAI\Exception\AssistantExistsException;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
+use OCA\EducAI\Exception\PreviewUnavailableException;
 use OCA\EducAI\OpenApi\ApiToolAssignmentException;
 use OCA\EducAI\Service\AssistantService;
 use OCA\EducAI\Service\BotService;
@@ -164,6 +165,40 @@ class BotController extends Controller {
 		} catch (Exception $e) {
 			$this->logger->error('Failed to create bot: ' . $e->getMessage());
 			return $this->errorResponse('bot_create_failed', $this->l10n->t('Failed to create bot'), 400);
+		}
+	}
+
+	/**
+	 * @NoAdminRequired
+	 * Try the instruction of a bot that is not created yet: one answer to a short conversation.
+	 * Nothing is stored; tools and knowledge are not part of a draft.
+	 */
+	public function preview(
+		string $systemPrompt = '',
+		?string $model = null,
+		$temperature = null,
+		?array $messages = null,
+	): DataResponse {
+		if ($this->userId === null) {
+			return $this->errorResponse('forbidden', $this->l10n->t('Unauthorized'), 403);
+		}
+		try {
+			return new DataResponse($this->botService->previewReply($systemPrompt, $model, $temperature, $messages ?? []));
+		} catch (ModelNotReleasedException $e) {
+			return $this->modelNotReleasedResponse($e);
+		} catch (\InvalidArgumentException $e) {
+			return $this->errorResponse(
+				'preview_invalid',
+				$this->l10n->t('The preview needs an instruction and a message. Very long conversations cannot be tried here.'),
+				400,
+			);
+		} catch (PreviewUnavailableException $e) {
+			return $e->reason === PreviewUnavailableException::RATE_LIMITED
+				? $this->errorResponse('preview_rate_limited', $this->l10n->t('The model is busy right now. Try again in a moment.'), 429)
+				: $this->errorResponse('preview_failed', $this->l10n->t('The model gave no answer. Try again, or ask your administrator to check the model connection.'), 502);
+		} catch (Exception $e) {
+			$this->logger->error('Bot preview failed unexpectedly', ['exception_class' => get_class($e)]);
+			return $this->errorResponse('preview_failed', $this->l10n->t('The model gave no answer. Try again, or ask your administrator to check the model connection.'), 502);
 		}
 	}
 

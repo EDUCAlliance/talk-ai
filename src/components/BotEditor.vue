@@ -946,6 +946,12 @@ export default {
 			}
 			return {
 				bot: this.previewBot,
+				// What the preview chat sends: the same values as saving would
+				draft: {
+					systemPrompt: this.formData.systemPrompt,
+					model: this.toStoredModelReference(this.formData.model) || null,
+					temperature: this.formData.useCustomTemperature ? this.normalizeTemperatureValue(this.formData.temperature) : null,
+				},
 				directory: this.directory,
 				knowledge: this.knowledgeSummary,
 				abilities: abilities.length > 0 ? abilities.join(' · ') : t('educai', 'Answer in the chat'),

@@ -6986,10 +6986,6 @@ msgid "Try it out"
 msgstr "Ausprobieren"
 
 #: src/views/NewBot.vue
-msgid "You can test the bot in Talk as soon as it is created. Nobody else can use it before that, and a shared bot only after approval."
-msgstr "Du kannst den Bot in Talk testen, sobald er erstellt ist. Vorher kann ihn niemand sonst nutzen, einen geteilten Bot erst nach der Freigabe."
-
-#: src/views/NewBot.vue
 msgid "Leave without creating the bot? Your entries will be lost."
 msgstr "Verlassen, ohne den Bot zu erstellen? Deine Eingaben gehen verloren."
 
@@ -7512,3 +7508,59 @@ msgstr "Docling hat die Pipeline oder das Preset abgelehnt (HTTP %s). Prüfe, ob
 #: lib/Service/DoclingClient.php
 msgid "Invalid Docling pipeline. Check the Docling settings."
 msgstr "Ungültige Docling-Pipeline. Prüfe die Docling-Einstellungen."
+
+#: src/components/BotPreviewChat.vue
+msgid "Enter a name and an instruction first. Then you can try here how the bot answers."
+msgstr "Gib zuerst einen Namen und eine Anweisung ein. Dann kannst du hier ausprobieren, wie der Bot antwortet."
+
+#: src/components/BotPreviewChat.vue
+msgid "Preview conversation"
+msgstr "Vorschau-Gespräch"
+
+#: src/components/BotPreviewChat.vue
+msgid "Write a message to see how the bot answers."
+msgstr "Schreib eine Nachricht, um zu sehen, wie der Bot antwortet."
+
+#: src/components/BotPreviewChat.vue
+msgid "Cut off at the output limit."
+msgstr "Am Ausgabelimit abgeschnitten."
+
+#: src/components/BotPreviewChat.vue
+msgid "The bot is writing…"
+msgstr "Der Bot schreibt…"
+
+#: src/components/BotPreviewChat.vue
+msgid "Write a message"
+msgstr "Nachricht schreiben"
+
+#: src/components/BotPreviewChat.vue
+msgid "Message to the bot"
+msgstr "Nachricht an den Bot"
+
+#: src/components/BotPreviewChat.vue
+msgid "Start over"
+msgstr "Neu beginnen"
+
+#: src/components/BotPreviewChat.vue
+msgid "Send"
+msgstr "Senden"
+
+#: src/components/BotPreviewChat.vue
+msgid "This chat is only a preview. It uses the instruction and the model from the form, without knowledge and capabilities. You find the real chat in Talk once the bot is created."
+msgstr "Dieser Chat ist nur eine Vorschau. Er nutzt die Anweisung und das Modell aus dem Formular, ohne Wissen und Funktionen. Den richtigen Chat findest du in Talk, sobald der Bot erstellt ist."
+
+#: src/components/BotPreviewChat.vue
+msgid "The preview could not answer. Try again."
+msgstr "Die Vorschau konnte nicht antworten. Versuche es erneut."
+
+#: lib/Controller/BotController.php
+msgid "The preview needs an instruction and a message. Very long conversations cannot be tried here."
+msgstr "Die Vorschau braucht eine Anweisung und eine Nachricht. Sehr lange Gespräche lassen sich hier nicht ausprobieren."
+
+#: lib/Controller/BotController.php
+msgid "The model is busy right now. Try again in a moment."
+msgstr "Das Modell ist gerade ausgelastet. Versuche es gleich noch einmal."
+
+#: lib/Controller/BotController.php
+msgid "The model gave no answer. Try again, or ask your administrator to check the model connection."
+msgstr "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Administration, die Modellverbindung zu prüfen."
