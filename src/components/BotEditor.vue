@@ -83,13 +83,12 @@
 					{{ t('educai', 'This decides who can use the bot and whether changes are reviewed first. It also sets the colour of the bot.') }}
 				</p>
 			</template>
-			<div class="talkai-rcards" role="radiogroup" :aria-label="t('educai', 'Who uses the bot?')">
+			<div class="talkai-rcards" role="group" :aria-label="t('educai', 'Who uses the bot?')">
 				<button v-for="option in audienceOptions"
 					:key="option.value"
 					type="button"
 					class="talkai-rcard"
-					role="radio"
-					:aria-checked="String(formData.visibility === option.value)"
+					:aria-pressed="String(formData.visibility === option.value)"
 					@click="formData.visibility = option.value">
 					<span class="talkai-rcard__icon" :class="`talkai-rcard__icon--${option.scope}`">
 						<TalkAiIcon :name="option.icon" />
@@ -653,7 +652,7 @@ import NcSelect from '@nextcloud/vue/components/NcSelect'
 import BotForm from './BotForm.vue'
 import ModelSelector from './ModelSelector.vue'
 import TalkAiIcon from './TalkAiIcon.vue'
-import { getCanonicalLocale, n, t } from '../l10n.js'
+import { n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { SCOPE_ICONS, reviewersOf } from '../utils/botScope.js'
@@ -1292,9 +1291,6 @@ export default {
 			}
 			this.submitForm()
 			return true
-		},
-		formatDate(timestamp) {
-			return timestamp ? new Date(timestamp * 1000).toLocaleDateString(getCanonicalLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : ''
 		},
 	},
 }

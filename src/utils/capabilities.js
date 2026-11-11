@@ -160,13 +160,3 @@ export function capabilitiesOf(bot) {
 	})
 	return result
 }
-
-/**
- * Tell whether the bot keeps a wiki.
- *
- * @param {object} bot Bot with `tools`
- * @return {boolean} True when a wiki tool is assigned
- */
-export function hasWiki(bot) {
-	return (Array.isArray(bot?.tools) ? bot.tools : []).some(tool => WIKI_TOOLS.includes(builtinName(tool)))
-}

@@ -30,7 +30,12 @@
 }
 
 .talkai-tile__id {
+	flex: 1;
 	min-width: 0;
+}
+
+.talkai-tile__state {
+	align-self: flex-start;
 }
 
 .talkai-tile__name {

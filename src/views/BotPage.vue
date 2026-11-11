@@ -14,8 +14,8 @@
 
 		<template v-else>
 			<nav class="talkai-crumbs" :aria-label="t('educai', 'Breadcrumb')">
-				<router-link class="talkai-crumbs__link" to="/my-bots">
-					{{ t('educai', 'My bots') }}
+				<router-link class="talkai-crumbs__link" :to="listEntry ? '/my-bots' : '/discover'">
+					{{ listEntry ? t('educai', 'My bots') : t('educai', 'Discover') }}
 				</router-link>
 				<TalkAiIcon name="chevron" :size="14" />
 				<span>{{ bot.bot_name }}</span>

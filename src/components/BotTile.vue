@@ -19,6 +19,9 @@
 					{{ mention }}
 				</div>
 			</div>
+			<span v-if="state"
+				class="talkai-chip talkai-chip--dot talkai-tile__state"
+				:class="`talkai-chip--${state.tone}`">{{ state.label }}</span>
 		</div>
 		<p class="talkai-tile__text" :class="{ 'talkai-tile__text--empty': !bot.description }">
 			{{ bot.description || t('educai', 'No description yet.') }}
@@ -56,6 +59,7 @@ import BotAvatar from './BotAvatar.vue'
 import TalkAiIcon from './TalkAiIcon.vue'
 import { t } from '../l10n.js'
 import { SCOPE_ICONS, scopeOf } from '../utils/botScope.js'
+import { statusOf } from '../utils/botStatus.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
 
 // One tile for every place a bot is shown as a card: Discover and the preview while creating a bot.
@@ -86,6 +90,12 @@ export default {
 		},
 		capabilities() {
 			return capabilitiesOf(this.bot).slice(0, 4)
+		},
+		// Only the owner sees a bot that is not live yet. The tile carries the colour of its audience,
+		// so it has to say that this audience cannot use it so far.
+		state() {
+			const status = statusOf(this.bot)
+			return !this.preview && ['draft', 'feedback', 'in-review'].includes(status.stage) ? status.chips[0] : null
 		},
 	},
 	methods: {

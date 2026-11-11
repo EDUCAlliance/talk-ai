@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { CAPABILITY_KEYS, capabilitiesOf, capabilityTexts, groupOfferedTools, hasWiki, toolKeyOf } from '../../src/utils/capabilities.js'
+import { CAPABILITY_KEYS, capabilitiesOf, capabilityTexts, groupOfferedTools, toolKeyOf } from '../../src/utils/capabilities.js'
 
 const builtin = (name, label = name) => ({ id: null, name: label, is_builtin: true, builtin_name: name })
 const offered = [
@@ -66,10 +66,4 @@ test('a bot lists knowledge only with sources, then its capabilities, then its s
 
 test('the old catalogue tool name still counts as the catalogue', () => {
 	assert.deepEqual(capabilitiesOf({ tools: [builtin('catalogue_search_courses')] }).map(entry => entry.key), ['catalogue'])
-})
-
-test('a wiki is recognised by any of its tools', () => {
-	assert.equal(hasWiki({ tools: [builtin('wiki_log_event')] }), true)
-	assert.equal(hasWiki({ tools: [builtin('room_search_documents')] }), false)
-	assert.equal(hasWiki({}), false)
 })
