@@ -1,0 +1,251 @@
+// The page of one bot: head, tabs, history, comparison and the save bar.
+
+.talkai-bot-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 16px;
+	margin-block-end: 20px;
+}
+
+.talkai-bot-head__text {
+	flex: 1;
+	min-width: 240px;
+}
+
+.talkai-bot-head__title {
+	font-size: 30px;
+	font-weight: 700;
+	line-height: 1.15;
+	overflow-wrap: anywhere;
+}
+
+.talkai-bot-head__meta {
+	margin-block-start: 8px;
+}
+
+.talkai-bot-head__mention {
+	color: var(--talkai-ink-3);
+	font-weight: 600;
+}
+
+.talkai-tabs {
+	display: flex;
+	gap: 6px;
+	max-width: 100%;
+	margin-block-end: 24px;
+	overflow-x: auto;
+}
+
+.talkai-tabs__tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	height: 44px;
+	padding: 0 18px;
+	border-radius: 22px;
+	color: var(--talkai-ink-3);
+	font-size: 15px;
+	text-decoration: none;
+	white-space: nowrap;
+	transition: color var(--talkai-ease), background-color var(--talkai-ease);
+
+	&:hover {
+		color: var(--talkai-ink);
+	}
+
+	&.is-current {
+		background-color: var(--talkai-line);
+		color: var(--talkai-ink);
+	}
+}
+
+.talkai-tabs__badge {
+	height: 20px;
+	padding: 0 7px;
+}
+
+.talkai-bot__note {
+	align-items: center;
+	margin-block-end: 16px;
+}
+
+.talkai-bot__note-action {
+	margin-inline-start: auto;
+}
+
+.talkai-bot__feedback {
+	margin-block-start: 12px;
+}
+
+// History
+.talkai-timeline {
+	list-style: none;
+}
+
+.talkai-timeline__item {
+	display: grid;
+	position: relative;
+	grid-template-columns: 24px minmax(0, 1fr);
+	gap: 12px;
+	padding-block-end: 16px;
+	font-size: 14px;
+
+	&::before {
+		position: absolute;
+		inset-block: 24px 0;
+		inset-inline-start: 11px;
+		width: 2px;
+		background-color: var(--talkai-line);
+		content: '';
+	}
+
+	&:last-child::before {
+		display: none;
+	}
+}
+
+.talkai-timeline__dot {
+	display: grid;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	border: 2px solid var(--talkai-line-2);
+	border-radius: 50%;
+	background-color: var(--talkai-surface);
+}
+
+.talkai-timeline__dot--ok {
+	border-color: var(--talkai-green);
+	background-color: var(--talkai-green);
+	color: #3d3d3b;
+}
+
+.talkai-timeline__dot--current {
+	border-color: var(--talkai-orange);
+	background-color: var(--talkai-orange-soft);
+}
+
+.talkai-timeline__dot--err {
+	border-color: var(--talkai-pink);
+	background-color: var(--talkai-pink-soft);
+}
+
+// What changed: added and removed lines, marked by a sign and a word for screen readers, not by colour alone
+.talkai-diff {
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	font-size: 14px;
+	overflow: hidden;
+}
+
+.talkai-diff__line {
+	display: flex;
+	gap: 8px;
+	padding: 8px 12px;
+	border-block-start: 1px solid var(--talkai-surface-3);
+	overflow-wrap: anywhere;
+
+	&:first-child {
+		border-block-start: 0;
+	}
+
+	&::before {
+		flex: none;
+		font-weight: 800;
+	}
+}
+
+.talkai-diff__line--add {
+	background-color: color-mix(in srgb, var(--talkai-green-soft) 55%, var(--talkai-surface));
+
+	&::before {
+		color: var(--talkai-green-text);
+		content: '+';
+	}
+}
+
+.talkai-diff__line--del {
+	background-color: color-mix(in srgb, var(--talkai-pink-soft) 55%, var(--talkai-surface));
+	color: var(--talkai-pink-text);
+	text-decoration: line-through;
+	text-decoration-color: color-mix(in srgb, var(--talkai-pink-text) 45%, transparent);
+
+	&::before {
+		display: inline-block;
+		content: '\2212';
+		text-decoration: none;
+	}
+}
+
+// Save bar: appears with the first unsaved change and stays in view
+.talkai-savebar {
+	display: flex;
+	position: sticky;
+	inset-block-end: 16px;
+	z-index: 5;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px 16px;
+	margin-block-start: 20px;
+	padding: 12px;
+	padding-inline-start: 20px;
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-ink);
+	box-shadow: var(--talkai-shadow-lg);
+	color: var(--talkai-on-ink);
+}
+
+.talkai-savebar__dot {
+	flex: none;
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background-color: var(--talkai-yellow);
+}
+
+.talkai-savebar__text {
+	flex: 1 1 260px;
+	font-size: 14.5px;
+}
+
+.talkai-savebar__aside {
+	opacity: 0.75;
+}
+
+.talkai-savebar__discard {
+	color: var(--talkai-on-ink);
+}
+
+.talkai-savebar__save {
+	border-color: var(--talkai-surface);
+	background-color: var(--talkai-surface);
+	color: var(--talkai-ink);
+
+	&:hover {
+		background-color: var(--talkai-surface);
+	}
+}
+
+// Preview in the sidebar while creating a bot
+.talkai-side {
+	padding: 4px 4px 24px;
+}
+
+.talkai-side__title {
+	margin-block: 24px 10px;
+	color: var(--talkai-ink-2);
+	font-size: 13px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+
+	&:first-child {
+		margin-block-start: 0;
+	}
+}
+
+.talkai-side__text {
+	color: var(--talkai-ink-2);
+	font-size: 14px;
+}

@@ -1,0 +1,92 @@
+// Content of dialogs. The frame is NcDialog, which carries the classes `talkai talkai-dialog`.
+
+.talkai-dialog__body {
+	padding-block-end: 8px;
+	font-size: 14.5px;
+}
+
+.talkai-dialog__head {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	margin-block-end: 16px;
+}
+
+.talkai-dialog__sub {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	color: var(--talkai-ink-3);
+	font-size: 13.5px;
+}
+
+.talkai-dialog__text {
+	margin-block-end: 14px;
+}
+
+.talkai-dialog__note {
+	margin-block-start: 14px;
+}
+
+.talkai-dialog__seg {
+	margin-block-end: 16px;
+}
+
+.talkai-dialog__option {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	font-size: 14.5px;
+}
+
+.talkai-dialog__prompt {
+	max-height: 260px;
+	padding: 10px 12px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	background-color: var(--talkai-surface-2);
+	font-size: 13.5px;
+	white-space: pre-wrap;
+	overflow: auto;
+	overflow-wrap: anywhere;
+}
+
+// Talk conversations to choose from
+.talkai-rooms {
+	display: grid;
+	gap: 6px;
+	max-height: 220px;
+	margin-block-start: 6px;
+	overflow: auto;
+}
+
+.talkai-rooms__item {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 10px 12px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius-md);
+	cursor: pointer;
+
+	&.is-selected {
+		border-color: var(--talkai-ink);
+		background-color: var(--talkai-surface-2);
+		box-shadow: inset 0 0 0 1px var(--talkai-ink);
+	}
+}
+
+.talkai-rooms__radio {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	min-height: 0;
+	margin: 3px 0 0;
+	accent-color: var(--talkai-ink);
+}
+
+.talkai-rooms__name {
+	display: block;
+	font-weight: 600;
+}

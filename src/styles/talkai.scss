@@ -9,4 +9,11 @@
 // <body>, so they only need the class on their content.
 :is(#talkai-specificity, .talkai) {
 	@include meta.load-css('base');
+	@include meta.load-css('elements');
+	@include meta.load-css('forms');
+	@include meta.load-css('tiles');
+	@include meta.load-css('dialog');
+	@include meta.load-css('editor');
+	@include meta.load-css('botpage');
+	@include meta.load-css('pages');
 }

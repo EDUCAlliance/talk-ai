@@ -21,6 +21,13 @@
 	--talkai-pink-soft: #fcd4e1;
 	--talkai-violet: #9d76e5;
 	--talkai-violet-soft: #e4d7fc;
+	--talkai-yellow: #e8dd79;
+	--talkai-yellow-soft: #fcf8cf;
+	--talkai-green-text: #13593c;
+	--talkai-pink-text: #94415b;
+	--talkai-danger: #b91c1c;
+	--talkai-danger-soft: #fef2f2;
+	--talkai-check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E");
 	--talkai-radius: 10px;
 	--talkai-radius-md: 8px;
 	--talkai-radius-sm: 6px;
@@ -52,6 +59,12 @@
 	--talkai-orange-text: #ff9880;
 	--talkai-pink-soft: color-mix(in srgb, #f96e99 22%, transparent);
 	--talkai-violet-soft: color-mix(in srgb, #9d76e5 26%, transparent);
+	--talkai-yellow-soft: color-mix(in srgb, #e8dd79 20%, transparent);
+	--talkai-green-text: #8ce5c0;
+	--talkai-pink-text: #fcd4e1;
+	--talkai-danger: var(--color-text-error, #ff8a8a);
+	--talkai-danger-soft: color-mix(in srgb, #b91c1c 25%, transparent);
+	--talkai-check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23222' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E");
 	@include scope.tokens-dark;
 }
 
