@@ -1415,6 +1415,11 @@ class SettingsControllerTest extends TestCase {
 		if ($botService instanceof \PHPUnit\Framework\MockObject\MockObject) {
 			$botService->method('userCanAccessBot')->willReturn(true);
 		}
+		// The settings payload names the Docling pipeline; the real service always returns both keys.
+		$settingsService ??= $this->createMock(SettingsService::class);
+		if ($settingsService instanceof \PHPUnit\Framework\MockObject\MockObject) {
+			$settingsService->method('getDoclingPipelineOptions')->willReturn(['pipeline' => '', 'vlm_preset' => 'default']);
+		}
 		return new SettingsController(
 			'educai',
 			$this->createMock(IRequest::class),
