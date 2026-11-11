@@ -6104,8 +6104,8 @@ msgid "You find the exact tool list later on the bot page under “Advanced”."
 msgstr "Die genaue Werkzeugliste findest du später auf der Bot-Seite unter „Erweitert“."
 
 #: src/components/BotEditor.vue
-msgid "Model and creativity. Not needed for most bots."
-msgstr "Modell und Kreativität. Für die meisten Bots nicht nötig."
+msgid "Model, creativity and guests. Not needed for most bots."
+msgstr "Modell, Kreativität und Gäste. Für die meisten Bots nicht nötig."
 
 #: src/components/BotEditor.vue
 msgid "Recommended by the administration"
@@ -7572,3 +7572,32 @@ msgstr "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Ad
 #: src/components/admin/ModelsTab.vue
 msgid "Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”."
 msgstr "Gilt für alle Bots ohne eigene Modellwahl. Wer einen Bot erstellt, sieht es als „Von der Administration empfohlen“."
+
+#: src/components/BotEditor.vue
+#: src/components/BotForm.vue
+msgid "Also answer guests"
+msgstr "Auch Gästen antworten"
+
+#: src/components/BotForm.vue
+msgid "People who join a public conversation without an account. The bot answers them in conversations where a signed-in person has activated it."
+msgstr "Personen, die ohne Konto an einer öffentlichen Unterhaltung teilnehmen. Der Bot antwortet ihnen in Unterhaltungen, in denen eine angemeldete Person ihn aktiviert hat."
+
+#: src/components/BotEditor.vue
+msgid "Guests"
+msgstr "Gäste"
+
+#: src/components/BotEditor.vue
+msgid "People who join a public conversation without an account."
+msgstr "Personen, die ohne Konto an einer öffentlichen Unterhaltung teilnehmen."
+
+#: src/components/BotEditor.vue
+msgid "The bot answers guests in conversations where a signed-in person has activated it. Guests get the same answers as everyone else, including what the bot knows from its sources."
+msgstr "Der Bot antwortet Gästen in Unterhaltungen, in denen eine angemeldete Person ihn aktiviert hat. Gäste erhalten dieselben Antworten wie alle anderen, auch das, was der Bot aus seinen Quellen weiß."
+
+#: src/utils/botScope.js
+msgid "{audience}, also guests"
+msgstr "{audience}, auch Gäste"
+
+#: src/utils/botDiff.js
+msgid "Also answers guests"
+msgstr "Antwortet auch Gästen"

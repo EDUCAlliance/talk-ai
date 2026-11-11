@@ -152,6 +152,18 @@
 					</div>
 
 					<div class="form-group">
+						<label class="checkbox">
+							<input
+								v-model="formData.allowGuests"
+								type="checkbox">
+							{{ t('educai', 'Also answer guests') }}
+						</label>
+						<p class="hint">
+							{{ t('educai', 'People who join a public conversation without an account. The bot answers them in conversations where a signed-in person has activated it.') }}
+						</p>
+					</div>
+
+					<div class="form-group">
 						<label for="model-select">{{ t('educai', 'Model') }}</label>
 						<ModelSelector
 							id="model-select"
@@ -705,6 +717,7 @@ const createFormData = () => ({
 	useCustomTemperature: false,
 	temperature: null,
 	ragEnabled: false,
+	allowGuests: false,
 	personalWikiEnabled: false,
 	personalWikiLocation: 'personal_files',
 	personalWikiCollectiveId: '',
@@ -1093,6 +1106,7 @@ export default {
 					useCustomTemperature: temperature !== null,
 					temperature,
 					ragEnabled: hasPending && pending.rag_enabled !== undefined ? !!pending.rag_enabled : !!this.bot.rag_enabled,
+					allowGuests: hasPending && pending.allow_guests !== undefined ? !!pending.allow_guests : !!this.bot.allow_guests,
 					personalWikiEnabled: false,
 					personalWikiLocation: 'personal_files',
 					personalWikiCollectiveId: '',
@@ -1990,6 +2004,7 @@ export default {
 				model: this.toStoredModelReference(this.formData.model) || (this.bot?.id ? '' : null),
 				temperature: this.formData.useCustomTemperature ? this.normalizeTemperatureValue(this.formData.temperature) : null,
 				ragEnabled: this.formData.ragEnabled,
+				allowGuests: this.formData.allowGuests,
 				tools: toolPayload,
 				onboardingQuestions: onboardingQuestionsPayload,
 			})

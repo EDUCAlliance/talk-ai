@@ -368,7 +368,7 @@
 			:class="mode === 'wizard' ? 'talkai-disclosure' : 'talkai-section'">
 			<summary v-if="mode === 'wizard'" class="talkai-disclosure__summary">
 				{{ t('educai', 'Advanced') }}
-				<span class="talkai-disclosure__aside">· {{ t('educai', 'Model and creativity. Not needed for most bots.') }}</span>
+				<span class="talkai-disclosure__aside">· {{ t('educai', 'Model, creativity and guests. Not needed for most bots.') }}</span>
 			</summary>
 			<h3 v-else class="talkai-section__title">
 				{{ t('educai', 'Model') }}
@@ -420,6 +420,25 @@
 					{{ creativity === 'default'
 						? t('educai', 'Uses the default of the administration: {temperature}.', { temperature: inheritedTemperatureLabel })
 						: t('educai', 'For bots that answer from sources, “Precise” is usually best.') }}
+				</p>
+			</div>
+			<!-- A new bot can answer guests from the start; an existing bot has its own section below. -->
+			<div v-if="mode === 'wizard'" class="talkai-field">
+				<div class="talkai-spread">
+					<span>
+						{{ t('educai', 'Also answer guests') }}
+						<span class="talkai-checks__aside">{{ t('educai', 'People who join a public conversation without an account.') }}</span>
+					</span>
+					<button type="button"
+						class="talkai-switch"
+						role="switch"
+						data-talkai-guests
+						:aria-checked="String(formData.allowGuests)"
+						:aria-label="t('educai', 'Also answer guests')"
+						@click="formData.allowGuests = !formData.allowGuests" />
+				</div>
+				<p class="talkai-hint">
+					{{ t('educai', 'The bot answers guests in conversations where a signed-in person has activated it. Guests get the same answers as everyone else, including what the bot knows from its sources.') }}
 				</p>
 			</div>
 		</component>
@@ -475,6 +494,29 @@
 						:aria-label="t('educai', 'Pause knowledge search')"
 						@click="setKnowledgePaused(!knowledgePaused)" />
 				</div>
+			</div>
+
+			<!-- Guests -->
+			<div class="talkai-section">
+				<h3 class="talkai-section__title">
+					{{ t('educai', 'Guests') }}
+				</h3>
+				<div class="talkai-spread talkai-editor__gap">
+					<span>
+						{{ t('educai', 'Also answer guests') }}
+						<span class="talkai-checks__aside">{{ t('educai', 'People who join a public conversation without an account.') }}</span>
+					</span>
+					<button type="button"
+						class="talkai-switch"
+						role="switch"
+						data-talkai-guests
+						:aria-checked="String(formData.allowGuests)"
+						:aria-label="t('educai', 'Also answer guests')"
+						@click="formData.allowGuests = !formData.allowGuests" />
+				</div>
+				<p class="talkai-hint">
+					{{ t('educai', 'The bot answers guests in conversations where a signed-in person has activated it. Guests get the same answers as everyone else, including what the bot knows from its sources.') }}
+				</p>
 			</div>
 
 			<!-- Bot wiki -->

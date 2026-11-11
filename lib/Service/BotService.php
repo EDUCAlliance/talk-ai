@@ -26,6 +26,7 @@ use OCA\EducAI\OpenApi\ApiToolAssignmentException;
 use OCA\EducAI\OpenApi\OpenApiToolCatalog;
 use OCA\EducAI\ToolProvider\ToolProviderRegistry;
 use OCA\EducAI\Webhook\IncomingTalkAttachment;
+use OCA\EducAI\Webhook\TalkActor;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\IGroupManager;
@@ -323,7 +324,8 @@ class BotService {
 		$ragEnabled = null,
 		?array $tools = null,
 		?string $description = null,
-		?array $onboardingQuestions = null
+		?array $onboardingQuestions = null,
+		$allowGuests = null
 	): Bot {
 		// Validate mention name format
 		if (!preg_match('/^@?[a-z0-9_-]+$/i', $mentionName)) {
@@ -364,6 +366,7 @@ class BotService {
 		$bot->setAllowedTeams($this->encodeIdList($normalizedVisibility === 'teams' ? ($allowedTeams ?? []) : []));
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$bot->setRagEnabled($this->normalizeBool($ragEnabled) ?? false);
+		$bot->setAllowGuests($this->normalizeBool($allowGuests) ?? false);
 		if ($description !== null) {
 			$bot->setDescription($description);
 		}
@@ -422,7 +425,8 @@ class BotService {
 		$ragEnabled = null,
 		?array $tools = null,
 		?string $description = null,
-		?array $onboardingQuestions = null
+		?array $onboardingQuestions = null,
+		$allowGuests = null
 	): Bot {
 		$bot = $this->botMapper->findById($id);
 		$originalStatus = $bot->getApprovalStatus() ?? 'approved';
@@ -452,6 +456,8 @@ class BotService {
 		if ($targetRagEnabled === null) {
 			$targetRagEnabled = $editableState['rag_enabled'];
 		}
+		// Not sent means unchanged, so older clients never switch the guests off by accident.
+		$targetAllowGuests = $this->normalizeBool($allowGuests) ?? $editableState['allow_guests'];
 		$targetTools = $this->stripWikiToolsForVisibility($tools, $targetVisibility, $targetAllowedTeams, $bot->getUserId());
 		$editableToolNames = $this->editableBuiltInToolNames($bot);
 		$this->assertApiToolAssignments(
@@ -487,6 +493,7 @@ class BotService {
 				'allowed_groups' => $this->encodeIdList($targetAllowedGroups),
 				'allowed_teams' => $this->encodeIdList($targetAllowedTeams),
 				'rag_enabled' => $targetRagEnabled,
+				'allow_guests' => $targetAllowGuests,
 				'tools' => $targetTools, // Store tool changes too
 				'onboarding_questions' => $targetOnboardingQuestions, // Store onboarding question changes
 			];
@@ -514,6 +521,7 @@ class BotService {
 		$bot->setAllowedGroups($this->encodeIdList($targetAllowedGroups));
 		$bot->setAllowedTeams($this->encodeIdList($targetAllowedTeams));
 		$bot->setRagEnabled($targetRagEnabled);
+		$bot->setAllowGuests($targetAllowGuests);
 		$bot->setDescription($targetDescription);
 		$bot->setOnboardingQuestionsArray($targetOnboardingQuestions);
 
@@ -1711,9 +1719,16 @@ class BotService {
 	}
 
 	/**
-	 * Determine if a user can access a bot based on visibility and groups
+	 * Determine if a user can access a bot based on visibility and groups.
+	 *
+	 * A guest has no account, so the audience of the bot says nothing about them: the bot
+	 * itself says whether it answers guests.
 	 */
 	public function userCanAccessBot(Bot $bot, string $userId): bool {
+		if (TalkActor::isGuest($userId)) {
+			return $this->guestCanUseBot($bot);
+		}
+
 		$normalizedUserId = $this->normalizeExternalUserId($userId);
 
 		// Owner is always allowed
@@ -2186,6 +2201,7 @@ class BotService {
 	 *   temperature:?float,
 	 *   description:?string,
 	 *   rag_enabled:bool,
+	 *   allow_guests:bool,
 	 *   onboarding_questions:?array
 	 * }
 	 */
@@ -2199,6 +2215,7 @@ class BotService {
 			'temperature' => $bot->getTemperature(),
 			'description' => $bot->getDescription(),
 			'rag_enabled' => $bot->getRagEnabled(),
+			'allow_guests' => $bot->getAllowGuests(),
 			'onboarding_questions' => $bot->getOnboardingQuestionsArray(),
 		];
 
@@ -2227,6 +2244,9 @@ class BotService {
 		}
 		if (array_key_exists('rag_enabled', $pendingChanges)) {
 			$state['rag_enabled'] = (bool)$pendingChanges['rag_enabled'];
+		}
+		if (array_key_exists('allow_guests', $pendingChanges)) {
+			$state['allow_guests'] = (bool)$pendingChanges['allow_guests'];
 		}
 		if (array_key_exists('onboarding_questions', $pendingChanges)) {
 			$state['onboarding_questions'] = is_array($pendingChanges['onboarding_questions'])
@@ -2272,6 +2292,24 @@ class BotService {
 		return $this->normalizeVisibilityValue($bot->getVisibility(), $bot->getIsPublic()) !== 'personal';
 	}
 
+	/**
+	 * A bot answers guests when its guest switch is on and it is live: a personal bot,
+	 * an approved bot, or an approved bot whose change waits for review. In the last case
+	 * the stored switch is the approved one; the requested one is still in pending_changes.
+	 */
+	private function guestCanUseBot(Bot $bot): bool {
+		if (!$bot->getAllowGuests()) {
+			return false;
+		}
+
+		$status = $bot->getApprovalStatus() ?? 'approved';
+		if ($status === 'draft') {
+			return false;
+		}
+
+		return !($status === 'pending' && $this->isInitialPendingApproval($bot));
+	}
+
 	private function isInitialPendingApproval(Bot $bot): bool {
 		$status = $bot->getApprovalStatus() ?? 'approved';
 		return $status === 'pending'
@@ -2279,14 +2317,18 @@ class BotService {
 			&& $bot->getApprovedAt() === null;
 	}
 
+	/**
+	 * Turn the sender of a Talk message into a user id. Talk names senders "<actor type>/<actor id>",
+	 * and only "users/…" is an account of this instance. Every other sender (guest, e-mail guest,
+	 * bridge, user of another server) keeps its full name, so it can never equal a user id:
+	 * an e-mail guest whose address is also somebody's user id is not that user.
+	 */
 	private function normalizeExternalUserId(string $userId): string {
-		if (strpos($userId, '/') === false) {
-			return $userId;
+		if (str_starts_with($userId, 'users/')) {
+			return substr($userId, strlen('users/'));
 		}
 
-		$parts = explode('/', $userId);
-		$tail = end($parts);
-		return is_string($tail) && $tail !== '' ? $tail : $userId;
+		return $userId;
 	}
 
 	/**
@@ -2414,6 +2456,9 @@ class BotService {
 		if (array_key_exists('rag_enabled', $pendingChanges)) {
 			$targetBot->setRagEnabled((bool)$pendingChanges['rag_enabled']);
 		}
+		if (array_key_exists('allow_guests', $pendingChanges)) {
+			$targetBot->setAllowGuests((bool)$pendingChanges['allow_guests']);
+		}
 		if (array_key_exists('onboarding_questions', $pendingChanges)) {
 			$targetBot->setOnboardingQuestionsArray(
 				is_array($pendingChanges['onboarding_questions']) ? $pendingChanges['onboarding_questions'] : null
@@ -2434,6 +2479,7 @@ class BotService {
 	 *   allowed_teams:array<int,string>,
 	 *   allowed_team_names:array<int,string>,
 	 *   rag_enabled:bool,
+	 *   allow_guests:bool,
 	 *   onboarding_questions:?array,
 	 *   tools:array<int,array{name:string,description:?string,is_builtin:bool,builtin_name?:string}>,
 	 *   is_update:bool
@@ -2454,6 +2500,7 @@ class BotService {
 			'allowed_teams' => $allowedTeamIds,
 			'allowed_team_names' => $this->resolveTeamDisplayNames($allowedTeamIds),
 			'rag_enabled' => $targetBot->getRagEnabled(),
+			'allow_guests' => $targetBot->getAllowGuests(),
 			'onboarding_questions' => $targetBot->getOnboardingQuestionsArray(),
 			'tools' => $this->buildToolDisplayEntries($toolLoadout),
 			'is_update' => $bot->hasPendingChanges(),

@@ -10,9 +10,10 @@ const sameList = (first, second) => first.length === second.length && first.ever
 /**
  * List what a submitted version changes compared with the live one, as lines that were added or removed.
  *
- * Both versions are plain descriptions: `{ name, description, instruction, audience, tools, knowledge, model,
- * temperature, questions }`. `tools` is a list of names, or null when it is unknown for that side; `audience` is
- * the sentence the app shows for it. Fields that are undefined on either side are not compared.
+ * Both versions are plain descriptions: `{ name, description, instruction, audience, guests, tools, knowledge,
+ * model, temperature, questions }`. `tools` is a list of names, or null when it is unknown for that side;
+ * `audience` is the sentence the app shows for it; `guests` says whether the bot also answers people who are not
+ * signed in. Fields that are undefined on either side are not compared.
  *
  * @param {object} live Version people use now
  * @param {object} next Version waiting for approval
@@ -45,6 +46,10 @@ export function diffVersions(live, next) {
 	if (known('audience') && text(live.audience) !== text(next.audience)) {
 		del(t('educai', 'For: {value}', { value: text(live.audience) }))
 		add(t('educai', 'For: {value}', { value: text(next.audience) }))
+	}
+	if (known('guests') && !!live.guests !== !!next.guests) {
+		// One line that appears or goes away, like a capability
+		(next.guests ? add : del)(t('educai', 'Also answers guests'))
 	}
 	if (Array.isArray(live?.tools) && Array.isArray(next?.tools)) {
 		live.tools.filter(name => !next.tools.includes(name)).forEach(name => del(t('educai', 'Capability: {value}', { value: name })))

@@ -11,7 +11,7 @@ import * as modelSelection from '../../src/utils/modelSelection.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
 import { createTalkAiStore } from '../../src/store/createTalkAiStore.js'
 import { diffVersions } from '../../src/utils/botDiff.js'
-import { scopeOf } from '../../src/utils/botScope.js'
+import { audienceWithGuests, scopeOf } from '../../src/utils/botScope.js'
 import { capabilitiesOf } from '../../src/utils/capabilities.js'
 
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -37,7 +37,7 @@ function component(ctx, path, axios, props = {}, globals = {}) {
 		BotForm: {}, ModelSelector: {}, NcProgressBar: {},
 		// Views of the app page: child components and the shared store are wiring, the rules are the real ones.
 		BotAvatar: {}, BotTalkDialog: {}, NcLoadingIcon: {}, TalkAiDialog: {}, TalkAiIcon: {},
-		store: createTalkAiStore({ http: axios, url: value => value }), scopeOf, diffVersions, capabilitiesOf,
+		store: createTalkAiStore({ http: axios, url: value => value }), scopeOf, audienceWithGuests, diffVersions, capabilitiesOf,
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage,
 		modelSelection, normalizeToolSelectionAliases, apiToolBlockReason, unavailableSelections,
 		showError: value => errors.push(value), showSuccess: value => successes.push(value),

@@ -117,7 +117,7 @@
 								{{ t('educai', 'For') }}
 							</dt>
 							<dd class="talkai-dl__value">
-								{{ scope.detail }}
+								{{ audienceWithGuests(scope, bot.allow_guests) }}
 							</dd>
 							<dt class="talkai-dl__term">
 								{{ t('educai', 'Model') }}
@@ -281,7 +281,7 @@ import { getCanonicalLocale, n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { diffVersions } from '../utils/botDiff.js'
-import { SCOPE_ICONS, reviewersOf, scopeOf } from '../utils/botScope.js'
+import { SCOPE_ICONS, audienceWithGuests, reviewersOf, scopeOf } from '../utils/botScope.js'
 import { statusOf } from '../utils/botStatus.js'
 
 const TABS = ['overview', 'basics', 'knowledge', 'capabilities', 'access', 'advanced']
@@ -440,6 +440,7 @@ export default {
 				description: this.bot.description,
 				instruction: this.bot.system_prompt,
 				audience: this.scope.detail,
+				guests: !!this.bot.allow_guests,
 				tools: liveTools,
 				knowledge: this.bot.rag_enabled,
 				model: this.bot.model,
@@ -450,6 +451,7 @@ export default {
 				description: pending.description,
 				instruction: pending.system_prompt ?? this.bot.system_prompt,
 				audience: scopeOf(nextBot, this.directory).detail,
+				guests: !!(pending.allow_guests ?? this.bot.allow_guests),
 				tools: liveTools && this.preview ? this.preview.bot.tools.map(tool => tool.name) : null,
 				knowledge: pending.rag_enabled ?? this.bot.rag_enabled,
 				model: pending.model,
@@ -492,6 +494,7 @@ export default {
 
 	methods: {
 		t,
+		audienceWithGuests,
 		n,
 		formatDate(timestamp) {
 			return timestamp

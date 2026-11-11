@@ -27,7 +27,7 @@
 				{{ t('educai', 'For') }}
 			</dt>
 			<dd class="talkai-dl__value">
-				{{ scope.detail }}
+				{{ audienceWithGuests(scope, details.allow_guests) }}
 			</dd>
 		</dl>
 		<div class="talkai-note talkai-note--info talkai-dialog__note">
@@ -65,7 +65,7 @@ import TalkAiDialog from './TalkAiDialog.vue'
 import TalkAiIcon from './TalkAiIcon.vue'
 import { getCanonicalLocale, n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
-import { scopeOf } from '../utils/botScope.js'
+import { audienceWithGuests, scopeOf } from '../utils/botScope.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
 
 // What a bot can do, what it knows and who it is for. Opens from a tile on Discover.
@@ -134,6 +134,6 @@ export default {
 			this.loading = false
 		}
 	},
-	methods: { t },
+	methods: { t, audienceWithGuests },
 }
 </script>

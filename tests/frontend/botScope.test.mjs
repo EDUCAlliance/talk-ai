@@ -121,3 +121,12 @@ test('reviewers are named by the audience, a personal bot has none', async () =>
 	)
 	assert.deepEqual(Object.keys(SCOPE_ICONS), SCOPE_KEYS)
 })
+
+test('the audience names guests only when the bot answers them', async () => {
+	const { audienceWithGuests } = await import('../../src/utils/botScope.js')
+	const group = scopeOf({ visibility: 'groups', allowed_groups: ['staff'] })
+	assert.equal(audienceWithGuests(group, true), 'Group staff, also guests')
+	assert.equal(audienceWithGuests(group, false), 'Group staff')
+	assert.equal(audienceWithGuests(group, undefined), 'Group staff')
+	assert.equal(audienceWithGuests(scopeOf({ visibility: 'personal' }), true), 'Only you, also guests')
+})

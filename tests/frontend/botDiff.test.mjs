@@ -61,3 +61,10 @@ test('starter questions are reported as changed, not spelled out', () => {
 test('going back to the default creativity is named', () => {
 	assert.deepEqual(lines({ temperature: 0.6 }, { temperature: null }), ['+ Creativity: default of the administration'])
 })
+
+test('turning the guest answers on or off is one line of its own', () => {
+	assert.deepEqual(diffVersions({ guests: false }, { guests: true }), [{ kind: 'add', text: 'Also answers guests' }])
+	assert.deepEqual(diffVersions({ guests: true }, { guests: false }), [{ kind: 'del', text: 'Also answers guests' }])
+	assert.deepEqual(diffVersions({ guests: true }, { guests: true }), [])
+	assert.deepEqual(diffVersions({ guests: false }, {}), [], 'an unknown side is not compared')
+})

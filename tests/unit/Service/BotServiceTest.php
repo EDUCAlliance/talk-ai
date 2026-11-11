@@ -3105,6 +3105,182 @@ class BotServiceTest extends TestCase {
 		$this->assertSame(['reply' => 'A long answer that', 'incomplete' => true], $service->previewReply('Be kind.', null, null, [['role' => 'user', 'content' => 'Hi']]));
 	}
 
+	public function testGuestsAreAnsweredOnlyByBotsWhoseSwitchIsOn(): void {
+		$service = $this->createBotService(
+			$this->createMock(BotMapper::class),
+			$this->createMock(PermissionService::class)
+		);
+		$everyone = $this->createApprovedBot();
+		$everyone->setVisibility('global');
+		$everyone->setIsPublic(true);
+
+		// Shared with everyone means everyone who is signed in; guests need the switch.
+		$this->assertTrue($service->userCanAccessBot($everyone, 'users/audience'));
+		$this->assertFalse($service->userCanAccessBot($everyone, 'guests/3f2a9c'));
+		$this->assertFalse($service->userCanAccessBot($everyone, 'emails/7b1d'));
+
+		$everyone->setAllowGuests(true);
+		$this->assertTrue($service->userCanAccessBot($everyone, 'guests/3f2a9c'));
+		$this->assertTrue($service->userCanAccessBot($everyone, 'emails/7b1d'));
+		$this->assertTrue($service->userCanAccessBot($everyone, 'users/audience'));
+	}
+
+	public function testTheGuestSwitchWorksForEveryAudienceAndOpensNothingForSignedInPeople(): void {
+		$service = $this->createBotService(
+			$this->createMock(BotMapper::class),
+			$this->createMock(PermissionService::class)
+		);
+
+		$personal = $this->createPersonalBot();
+		$personal->setAllowGuests(true);
+		$this->assertTrue($service->userCanAccessBot($personal, 'guests/3f2a9c'));
+		$this->assertTrue($service->userCanAccessBot($personal, 'users/owner'));
+		$this->assertFalse($service->userCanAccessBot($personal, 'users/colleague'), 'a personal bot stays personal for accounts');
+
+		$group = $this->createApprovedBot();
+		$group->setAllowGuests(true);
+		$this->assertTrue($service->userCanAccessBot($group, 'guests/3f2a9c'));
+		$this->assertFalse($service->userCanAccessBot($group, 'users/outsider'), 'accounts still need the group');
+	}
+
+	public function testGuestsAreNotAnsweredBeforeABotIsLive(): void {
+		$service = $this->createBotService(
+			$this->createMock(BotMapper::class),
+			$this->createMock(PermissionService::class)
+		);
+
+		$draft = $this->createApprovedBot();
+		$draft->setAllowGuests(true);
+		$draft->setApprovalStatus('draft');
+		$draft->setApprovedAt(null);
+		$this->assertFalse($service->userCanAccessBot($draft, 'guests/3f2a9c'));
+
+		$submitted = $this->createApprovedBot();
+		$submitted->setAllowGuests(true);
+		$submitted->setApprovalStatus('pending');
+		$submitted->setApprovedAt(null);
+		$this->assertFalse($service->userCanAccessBot($submitted, 'guests/3f2a9c'));
+		$submitted->setTestingEnabledBy('reviewer');
+		$this->assertFalse($service->userCanAccessBot($submitted, 'guests/reviewer'), 'a test release is for one account, never for a guest');
+	}
+
+	public function testAChangeInReviewKeepsTheApprovedGuestSwitch(): void {
+		$service = $this->createBotService(
+			$this->createMock(BotMapper::class),
+			$this->createMock(PermissionService::class)
+		);
+
+		$requested = $this->createApprovedBot();
+		$requested->setApprovalStatus('pending');
+		$requested->setPendingChangesArray(['bot_name' => 'Live bot', 'allow_guests' => true]);
+		$this->assertFalse($service->userCanAccessBot($requested, 'guests/3f2a9c'), 'requested, not approved yet');
+
+		$withdrawn = $this->createApprovedBot();
+		$withdrawn->setAllowGuests(true);
+		$withdrawn->setApprovalStatus('pending');
+		$withdrawn->setPendingChangesArray(['bot_name' => 'Live bot', 'allow_guests' => false]);
+		$this->assertTrue($service->userCanAccessBot($withdrawn, 'guests/3f2a9c'), 'the approved version stays live');
+	}
+
+	public function testOnlyAnAccountOfThisInstanceIsTakenForTheOwner(): void {
+		$service = $this->createBotService(
+			$this->createMock(BotMapper::class),
+			$this->createMock(PermissionService::class)
+		);
+		$bot = $this->createPersonalBot();
+		// User ids that are e-mail addresses are common; an invited guest has the same address.
+		$bot->setUserId('owner@example.org');
+
+		$this->assertTrue($service->userCanAccessBot($bot, 'users/owner@example.org'));
+		$this->assertTrue($service->userCanAccessBot($bot, 'owner@example.org'));
+		foreach (['guests/owner@example.org', 'emails/owner@example.org', 'bridged/owner@example.org', 'federated_users/owner@example.org'] as $sender) {
+			$this->assertFalse($service->userCanAccessBot($bot, $sender), $sender);
+		}
+	}
+
+	public function testAGuestGetsTheApprovedVersionEvenWithTheIdOfTheOwnerOrTester(): void {
+		$service = $this->createBotService(
+			$this->createMock(BotMapper::class),
+			$this->createMock(PermissionService::class)
+		);
+		$bot = $this->createApprovedBot();
+		$bot->setAllowGuests(true);
+		$bot->setApprovalStatus('pending');
+		$bot->setTestingEnabledBy('reviewer');
+		$bot->setPendingChangesArray(['bot_name' => 'Pending v2', 'system_prompt' => 'Not approved yet']);
+
+		// The owner and the tester try the version in review ...
+		$this->assertSame('Pending v2', $service->getEffectiveBotForUser($bot, 'users/owner')->getBotName());
+		$this->assertSame('Pending v2', $service->getEffectiveBotForUser($bot, 'users/reviewer')->getBotName());
+		// ... a guest never does, whatever the guest is called.
+		foreach (['guests/owner', 'emails/owner', 'guests/reviewer', 'emails/reviewer', 'federated_users/owner'] as $sender) {
+			$effective = $service->getEffectiveBotForUser($bot, $sender);
+			$this->assertSame($bot, $effective, $sender);
+			$this->assertSame('Live prompt', $effective->getSystemPrompt(), $sender);
+		}
+		$this->assertTrue($service->userCanAccessBot($bot, 'guests/owner'), 'the approved bot answers guests');
+	}
+
+	public function testANewBotAnswersGuestsOnlyWhenAsked(): void {
+		$mapper = $this->createMock(BotMapper::class);
+		$mapper->method('findByMentionName')->willThrowException(new DoesNotExistException('free'));
+		$mapper->method('insert')->willReturnCallback(static fn (Bot $bot): Bot => $bot);
+		$service = $this->createBotService($mapper, $this->createMock(PermissionService::class));
+
+		$this->assertFalse($service->createBot('owner', 'Quiet', 'quiet', 'Prompt', visibility: 'personal')->getAllowGuests());
+		$this->assertTrue($service->createBot('owner', 'Open', 'open', 'Prompt', visibility: 'personal', allowGuests: true)->getAllowGuests());
+		$this->assertFalse($service->createBot('owner', 'Off', 'off', 'Prompt', visibility: 'personal', allowGuests: '')->getAllowGuests());
+	}
+
+	public function testSavingAPersonalBotSetsTheGuestSwitchAndKeepsItWhenNotSent(): void {
+		$bot = $this->createPersonalBot();
+		$mapper = $this->createMock(BotMapper::class);
+		$mapper->method('findById')->willReturn($bot);
+		$mapper->method('update')->willReturnCallback(static fn (Bot $bot): Bot => $bot);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$service = $this->createBotService($mapper, $permissions);
+
+		$saved = $service->updateBot(id: 7, userId: 'owner', botName: 'Personal bot', systemPrompt: 'Prompt', allowGuests: true);
+		$this->assertTrue($saved->getAllowGuests());
+		$this->assertSame('personal', $saved->getApprovalStatus());
+		$this->assertTrue($saved->jsonSerialize()['allow_guests']);
+
+		// A client that does not know the switch leaves it alone.
+		$this->assertTrue($service->updateBot(id: 7, userId: 'owner', botName: 'Renamed', systemPrompt: 'Prompt')->getAllowGuests());
+		$this->assertFalse($service->updateBot(id: 7, userId: 'owner', botName: 'Renamed', systemPrompt: 'Prompt', allowGuests: false)->getAllowGuests());
+	}
+
+	public function testTheGuestSwitchOfAnApprovedBotIsReviewedLikeEveryOtherChange(): void {
+		$bot = $this->createApprovedBot();
+		$mapper = $this->createMock(BotMapper::class);
+		$mapper->method('findById')->willReturn($bot);
+		$mapper->method('update')->willReturnCallback(static fn (Bot $bot): Bot => $bot);
+		$mapper->method('findByApprovalStatus')->with('pending')->willReturn([$bot]);
+		$permissions = $this->createMock(PermissionService::class);
+		$permissions->method('canEditBot')->willReturn(true);
+		$permissions->method('canApproveBot')->willReturn(true);
+		$permissions->method('hasApprovalRights')->willReturn(true);
+		$service = $this->createBotService($mapper, $permissions);
+
+		$saved = $service->updateBot(id: 7, userId: 'owner', botName: 'Live bot', systemPrompt: 'Live prompt', allowGuests: true);
+
+		$this->assertSame('pending', $saved->getApprovalStatus());
+		$this->assertFalse($saved->getAllowGuests(), 'the approved version stays live');
+		$this->assertTrue($saved->getPendingChangesArray()['allow_guests']);
+		$this->assertFalse($service->userCanAccessBot($saved, 'guests/3f2a9c'));
+		$this->assertTrue($service->getPendingApprovals('reviewer')[0]['review_target']['allow_guests'], 'the reviewer sees the request');
+
+		// A further save without the switch keeps the requested value.
+		$again = $service->updateBot(id: 7, userId: 'owner', botName: 'Live bot v2', systemPrompt: 'Live prompt');
+		$this->assertTrue($again->getPendingChangesArray()['allow_guests']);
+
+		$approved = $service->approveBot(7, 'reviewer');
+		$this->assertSame('approved', $approved->getApprovalStatus());
+		$this->assertTrue($approved->getAllowGuests());
+		$this->assertTrue($service->userCanAccessBot($approved, 'guests/3f2a9c'));
+	}
+
 	private function createApprovedBot(): Bot {
 		$bot = new Bot();
 		$bot->setId(7);

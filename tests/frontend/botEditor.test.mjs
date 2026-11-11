@@ -336,3 +336,43 @@ test('the preview is the bot as the tile will show it, and says when it goes liv
 		[4, 'Knowledge · 1 source · Documents in chat', false],
 	])
 })
+
+test('the guest switch loads with the bot, counts as a change and is saved', async ctx => {
+	const routes = { ...offer, [`${API}/bots/4/tools`]: { tools: [] }, [`${API}/bots/4/sources`]: { sources: [] } }
+	const { state, emitted } = editor(ctx, { props: { bot: savedBot() }, routes })
+	await settle()
+	assert.equal(state.formData.allowGuests, false, 'a bot does not answer guests unless it says so')
+
+	state.arm()
+	state.formData.allowGuests = true
+	await settle()
+	assert.deepEqual(emitted, [['dirty', true]])
+	assert.equal(state.save(), true)
+	assert.equal(emitted.at(-1)[0], 'save')
+	assert.equal(emitted.at(-1)[1].allowGuests, true)
+
+	const saved = editor(ctx, { props: { bot: savedBot({ allow_guests: true }) }, routes })
+	await settle()
+	assert.equal(saved.state.formData.allowGuests, true)
+	assert.equal(saved.state.dirty, false)
+	assert.equal(saved.state.save(), true)
+	assert.equal(saved.emitted.at(-1)[1].allowGuests, true, 'saving something else keeps the switch')
+
+	// While a change waits for review, the form shows the requested value, not the live one.
+	const inReview = editor(ctx, {
+		props: { bot: savedBot({ allow_guests: true, has_pending_changes: true, approval_status: 'pending', pending_changes: { allow_guests: false } }) },
+		routes,
+	})
+	await settle()
+	assert.equal(inReview.state.formData.allowGuests, false)
+})
+
+test('a new bot is created without guests', async ctx => {
+	const { state, emitted } = editor(ctx, { props: { mode: 'wizard' }, routes: offer })
+	await settle()
+	state.arm()
+	Object.assign(state.formData, { botName: 'Quiet', mentionName: 'quiet', systemPrompt: 'Help.' })
+	await settle()
+	assert.equal(state.save(), true)
+	assert.equal(emitted.at(-1)[1].allowGuests, false)
+})

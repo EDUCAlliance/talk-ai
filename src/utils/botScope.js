@@ -57,6 +57,18 @@ export function scopeOf(bot, directory = {}) {
 }
 
 /**
+ * Name who gets answers from a bot: its audience, and guests when the bot answers them too.
+ * Guests are people who take part in a public conversation without an account.
+ *
+ * @param {{ detail: string }} scope Result of scopeOf()
+ * @param {boolean} allowGuests Whether the bot also answers guests
+ * @return {string} For example `Group IKM students, also guests`
+ */
+export function audienceWithGuests(scope, allowGuests) {
+	return allowGuests ? t('educai', '{audience}, also guests', { audience: scope.detail }) : scope.detail
+}
+
+/**
  * Name who reviews a bot before it is shared. A personal bot needs no approval and gets an empty string.
  *
  * The result is a nominative phrase, meant to follow a label such as "Reviewed by:".

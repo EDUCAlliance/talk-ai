@@ -113,7 +113,7 @@
 								{{ t('educai', 'For') }}
 							</dt>
 							<dd class="talkai-dl__value">
-								{{ current.scope.detail }}
+								{{ audienceWithGuests(current.scope, current.target.allow_guests) }}
 							</dd>
 							<dt class="talkai-dl__term">
 								{{ t('educai', 'Can') }}
@@ -242,7 +242,7 @@ import { getCanonicalLocale, n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { diffVersions } from '../utils/botDiff.js'
-import { scopeOf } from '../utils/botScope.js'
+import { audienceWithGuests, scopeOf } from '../utils/botScope.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
 
 // Bots waiting for the approval of this user: what was submitted, what it changes, and the decision.
@@ -309,6 +309,7 @@ export default {
 
 	methods: {
 		t,
+		audienceWithGuests,
 		load() {
 			store.loadApprovals().catch(error => console.error('Failed to load approvals', error))
 		},
@@ -327,6 +328,7 @@ export default {
 				allowed_groups: bot.allowed_groups ?? [],
 				allowed_teams: bot.allowed_teams ?? [],
 				rag_enabled: bot.rag_enabled,
+				allow_guests: bot.allow_guests,
 				onboarding_questions: bot.onboarding_questions,
 				tools: [],
 				is_update: !!bot.has_pending_changes,
@@ -354,6 +356,7 @@ export default {
 						description: bot.description,
 						instruction: bot.system_prompt,
 						audience: scopeOf(bot, directory).detail,
+						guests: !!bot.allow_guests,
 						tools: names(bot.live_tools),
 						knowledge: bot.rag_enabled,
 						temperature: bot.temperature,
@@ -363,6 +366,7 @@ export default {
 						description: target.description,
 						instruction: target.system_prompt,
 						audience: scope.detail,
+						guests: !!target.allow_guests,
 						tools: Array.isArray(bot.live_tools) ? names(target.tools) : null,
 						knowledge: target.rag_enabled,
 						temperature: target.temperature,

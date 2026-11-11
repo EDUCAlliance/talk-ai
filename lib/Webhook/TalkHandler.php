@@ -334,6 +334,14 @@ class TalkHandler {
 			'user_id' => $userId,
 		]);
 
+		if (TalkActor::isGuest($userId)) {
+			// A reset clears what a bot knows about the conversation for everyone in it. Guests only ask.
+			$this->logger->info('Ignoring the reset command of a guest', [
+				'room_token' => $roomToken,
+			]);
+			return;
+		}
+
 		// Check if there's a bot mention after ((RESET)) (e.g., "((RESET)) @mybot")
 		$resetBot = $this->detectBot($message);
 		
@@ -411,8 +419,11 @@ class TalkHandler {
 		?int $threadRootMessageId,
 		IncomingTalkMessage $incomingMessage
 	): void {
-		// First, check if there are any bots in onboarding mode - they should receive answers without mentions
-		$onboardingBots = $this->onboardingService->getOnboardingInProgressBotsForRoom($roomToken);
+		// First, check if there are any bots in onboarding mode - they should receive answers without mentions.
+		// A guest never sets a bot up, so a guest's message is not an answer to its activation questions.
+		$onboardingBots = TalkActor::isGuest($userId)
+			? []
+			: $this->onboardingService->getOnboardingInProgressBotsForRoom($roomToken);
 		
 		foreach ($onboardingBots as $entry) {
 			$bot = $entry['bot'];
@@ -512,7 +523,17 @@ class TalkHandler {
 
 		// Get or create room state
 		$room = $this->onboardingService->getRoomState($effectiveBot->getId(), $roomToken);
-		
+
+		if (TalkActor::isGuest($userId) && ($room === null || !$room->isOnboardingComplete())) {
+			// Guests use a bot in conversations where a signed-in person has set it up.
+			// They neither activate it nor answer its activation questions.
+			$this->logger->info('Guest mentioned a bot that is not set up in this conversation; ignoring mention', [
+				'bot_id' => $bot->getId(),
+				'room_token' => $roomToken,
+			]);
+			return;
+		}
+
 		if ($room === null) {
 			// First time this bot is used in this room - start onboarding
 			$this->handleFirstActivation($effectiveBot, $roomToken, $userId, $replyTargetId);

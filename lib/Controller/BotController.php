@@ -109,9 +109,11 @@ class BotController extends Controller {
 		?string $description = null,
 		?array $onboardingQuestions = null,
 		$assistant = null,
+		$allowGuests = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
+		$allowGuests = $this->optionalBool($allowGuests);
 		try {
 			if (is_scalar($assistant) && $this->normalizeBool($assistant) === true) {
 				if ($this->assistantService === null || $this->userId === null) {
@@ -148,7 +150,8 @@ class BotController extends Controller {
 				$ragEnabled,
 				$tools,
 				$description,
-				$onboardingQuestions
+				$onboardingQuestions,
+				$allowGuests
 			);
 
 			return new DataResponse($bot, 201);
@@ -220,9 +223,12 @@ class BotController extends Controller {
 		?array $tools = null,
 		?string $description = null,
 		?array $onboardingQuestions = null,
+		$allowGuests = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
+		// Not sent means unchanged
+		$allowGuests = $this->optionalBool($allowGuests);
 
 		try {
 			$bot = $this->botService->updateBot(
@@ -239,7 +245,8 @@ class BotController extends Controller {
 				$ragEnabled,
 				$tools,
 				$description,
-				$onboardingQuestions
+				$onboardingQuestions,
+				$allowGuests
 			);
 
 			return new DataResponse($bot);
@@ -568,7 +575,8 @@ class BotController extends Controller {
 				$this->request->getParam('ragEnabled'),
 				$this->request->getParam('tools'),
 				$this->request->getParam('description'),
-				$this->request->getParam('onboardingQuestions')
+				$this->request->getParam('onboardingQuestions'),
+				$this->optionalBool($this->request->getParam('allowGuests'))
 			);
 
 			return new DataResponse($bot);
@@ -598,6 +606,14 @@ class BotController extends Controller {
 		}
 
 		return $this->assistantService->markAssistant($this->userId, $bots);
+	}
+
+	/**
+	 * Read a switch that a request may leave out: anything that is not a boolean, a number
+	 * or a string counts as "not sent".
+	 */
+	private function optionalBool(mixed $value): ?bool {
+		return is_bool($value) || is_int($value) || is_string($value) ? $this->normalizeBool($value) : null;
 	}
 
 	/**

@@ -1716,7 +1716,7 @@ OC.L10N.register(
     "Recommended" : "Empfohlen",
     "Remove it or choose another audience before saving." : "Entferne es oder wähle vor dem Speichern eine andere Zielgruppe.",
     "You find the exact tool list later on the bot page under “Advanced”." : "Die genaue Werkzeugliste findest du später auf der Bot-Seite unter „Erweitert“.",
-    "Model and creativity. Not needed for most bots." : "Modell und Kreativität. Für die meisten Bots nicht nötig.",
+    "Model, creativity and guests. Not needed for most bots." : "Modell, Kreativität und Gäste. Für die meisten Bots nicht nötig.",
     "Recommended by the administration" : "Von der Administration empfohlen",
     "The administration has set one model for all bots." : "Die Administration hat ein Modell für alle Bots festgelegt.",
     "Uses the default of the administration: {temperature}." : "Nutzt den Standard der Administration: {temperature}.",
@@ -2078,6 +2078,13 @@ OC.L10N.register(
     "The preview needs an instruction and a message. Very long conversations cannot be tried here." : "Die Vorschau braucht eine Anweisung und eine Nachricht. Sehr lange Gespräche lassen sich hier nicht ausprobieren.",
     "The model is busy right now. Try again in a moment." : "Das Modell ist gerade ausgelastet. Versuche es gleich noch einmal.",
     "The model gave no answer. Try again, or ask your administrator to check the model connection." : "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Administration, die Modellverbindung zu prüfen.",
-    "Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”." : "Gilt für alle Bots ohne eigene Modellwahl. Wer einen Bot erstellt, sieht es als „Von der Administration empfohlen“."
+    "Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”." : "Gilt für alle Bots ohne eigene Modellwahl. Wer einen Bot erstellt, sieht es als „Von der Administration empfohlen“.",
+    "Also answer guests" : "Auch Gästen antworten",
+    "People who join a public conversation without an account. The bot answers them in conversations where a signed-in person has activated it." : "Personen, die ohne Konto an einer öffentlichen Unterhaltung teilnehmen. Der Bot antwortet ihnen in Unterhaltungen, in denen eine angemeldete Person ihn aktiviert hat.",
+    "Guests" : "Gäste",
+    "People who join a public conversation without an account." : "Personen, die ohne Konto an einer öffentlichen Unterhaltung teilnehmen.",
+    "The bot answers guests in conversations where a signed-in person has activated it. Guests get the same answers as everyone else, including what the bot knows from its sources." : "Der Bot antwortet Gästen in Unterhaltungen, in denen eine angemeldete Person ihn aktiviert hat. Gäste erhalten dieselben Antworten wie alle anderen, auch das, was der Bot aus seinen Quellen weiß.",
+    "{audience}, also guests" : "{audience}, auch Gäste",
+    "Also answers guests" : "Antwortet auch Gästen"
 },
 "nplurals=2; plural=(n != 1);");
