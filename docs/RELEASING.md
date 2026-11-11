@@ -22,6 +22,13 @@ The workflow verifies that the key and certificate match before uploading anythi
 
 `scripts/build-release.sh` refuses to build when `CHANGELOG.md` has no section for the version.
 
+## Screenshots
+
+The App Store shows the `<screenshot>` entries of `appinfo/info.xml` through its image cache (`usercontent.apps.nextcloud.com`). The cache stores a picture once per address and never fetches that address again, and it accepts pictures up to 2 MiB.
+
+- Give a screenshot a new file name whenever its content changes. Replacing the file under the same name leaves the old picture on the App Store.
+- New pictures appear after the cache's next run, which follows the App Store catalogue; right after a release they can be missing for a while.
+
 ## Normal release
 
 1. Update `<version>` in `appinfo/info.xml`, rebuild the frontend (the bundle contains the version), move the `## [Unreleased]` entries into a new `## <version> – <date>` section in `CHANGELOG.md`, and commit the release changes.

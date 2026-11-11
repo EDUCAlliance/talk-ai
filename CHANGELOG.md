@@ -4,6 +4,14 @@ All notable changes to Talk AI (`educai`) are documented in this file. The forma
 
 ## [Unreleased]
 
+## 3.0.1 – 2026-11-11
+
+No change to the app itself. This release only renews a screenshot on the Nextcloud App Store.
+
+### Fixed
+
+- The App Store showed an outdated picture of the admin settings: its image cache keeps the first picture it stored for an address, so the screenshot got a new file name.
+
 ## 3.0.0 – 2026-11-11
 
 **Requires Nextcloud 32–35.** Talk AI gets a new app page: finding, creating, editing and reviewing bots moved there from the personal settings. The upgrade adds one database migration, the guest switch of a bot. Bots that are shared with everyone keep answering guests, and no other bot starts to. Reload open Talk AI pages once after the upgrade.
