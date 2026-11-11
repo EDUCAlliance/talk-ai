@@ -4,6 +4,21 @@ All notable changes to Talk AI (`educai`) are documented in this file. The forma
 
 ## [Unreleased]
 
+### Added
+
+- The app page is the one place for bots, with its own navigation: Discover, My bots, To review (for people with approval rights), Activity and a short guide. Every view has a link of its own.
+- New bot: a template and five steps (basics, who uses it, knowledge, capabilities, check and finish) with a preview in a sidebar. Sources chosen on the way are attached when the bot is created. A bot that needs approval can be created and submitted in one go.
+- Bot page with an overview, the history of creation and approval, and the settings in tabs. A save bar collects the changes and says when they go into review first.
+- Reviews show what a change to an approved bot alters, the reason, the instruction and the knowledge sources. Feedback is written next to the decision.
+- Bots show who can use them by one colour per audience (only you, group, team, everyone), always together with an icon and the words. Group and team admins get "Edit" on bots of their audience.
+
+### Changed
+
+- The personal settings point to the app page. Creating, editing and reviewing bots, and the activity, moved there.
+- Capabilities are switches named after what they do (documents in chat, images, voice messages); the exact tool list stays under "Advanced". The knowledge search turns on with the first source and can be paused there.
+- Submitting a bot for approval asks one question instead of four.
+- API: `GET /api/v1/bots`, `/public-bots` and `/approvals` return additional fields (`can_edit`, `tools`, source counts, `live_tools`). Whoever may save a bot may now also load it, its tools and its sources.
+
 ## 2.45.0 – 2026-11-02
 
 **Requires Nextcloud 32–35.** Installations on Nextcloud 30 or 31 stay on 2.43.2. The upgrade adds two database migrations (course link settings and the API connection tables); nothing is approved, assigned or reindexed by it.
