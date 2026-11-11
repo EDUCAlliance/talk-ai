@@ -41,7 +41,7 @@
 					<BotAvatar :name="entry.target.bot_name" :scope="entry.scope.key" size="sm" />
 					<span>
 						<b class="talkai-queue__name">{{ entry.target.bot_name }}</b>
-						<span class="talkai-queue__sub">{{ entry.isUpdate ? t('educai', 'Change') : t('educai', 'New bot') }} · {{ entry.bot.owner_name }}</span>
+						<span class="talkai-queue__sub">{{ entry.isUpdate ? t('educai', 'Changed bot') : t('educai', 'New bot') }} · {{ entry.bot.owner_name }}</span>
 						<span class="talkai-queue__sub">{{ entry.scope.detail }}<template v-if="entry.submitted"> · {{ entry.submitted }}</template></span>
 					</span>
 				</button>
