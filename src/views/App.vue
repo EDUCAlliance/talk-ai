@@ -24,6 +24,17 @@
 						<NcCounterBubble :count="ownBotCount" />
 					</template>
 				</NcAppNavigationItem>
+				<NcAppNavigationItem v-if="hasApprovalRights"
+					:name="t('educai', 'To review')"
+					to="/review"
+					:active="nav === 'review'">
+					<template #icon>
+						<IconShield :size="20" />
+					</template>
+					<template v-if="reviewCount > 0" #counter>
+						<NcCounterBubble :count="reviewCount" type="highlighted" />
+					</template>
+				</NcAppNavigationItem>
 				<NcAppNavigationItem :name="t('educai', 'Activity')"
 					to="/activity"
 					:active="nav === 'activity'">
@@ -67,6 +78,7 @@ import IconInformation from 'vue-material-design-icons/InformationOutline.vue'
 import IconPlus from 'vue-material-design-icons/Plus.vue'
 import IconPulse from 'vue-material-design-icons/Pulse.vue'
 import IconRobot from 'vue-material-design-icons/RobotOutline.vue'
+import IconShield from 'vue-material-design-icons/ShieldCheckOutline.vue'
 import { APP_DISPLAY_NAME } from '../branding.js'
 import { store } from '../store/talkAi.js'
 
@@ -79,6 +91,7 @@ export default {
 		IconPlus,
 		IconPulse,
 		IconRobot,
+		IconShield,
 		NcAppContent,
 		NcAppNavigation,
 		NcAppNavigationItem,
@@ -98,6 +111,14 @@ export default {
 
 		ownBotCount() {
 			return store.state.ownBots.length
+		},
+
+		hasApprovalRights() {
+			return store.state.permissions.hasApprovalRights
+		},
+
+		reviewCount() {
+			return store.state.approvals.length
 		},
 	},
 
@@ -121,6 +142,8 @@ export default {
 				console.error('Failed to load permissions', error)
 			}
 			store.loadOwnBots().catch(error => console.error('Failed to load own bots', error))
+			// Also the directory of names and colours for views that only know a mention
+			store.loadPublicBots().catch(error => console.error('Failed to load bots', error))
 			store.loadApprovals().catch(error => console.error('Failed to load approvals', error))
 			store.loadDirectory()
 		},

@@ -9,7 +9,9 @@ function activity(axios) {
 	const source = readFileSync(new URL('../../src/views/PersonalActivity.vue', import.meta.url), 'utf8')
 	const script = source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/^import .+$/gm, '').replace('export default', 'globalThis.component =')
 	const scope = { axios, APP_DISPLAY_NAME: 'Talk AI', generateUrl: value => value,
-		t, n, getCanonicalLocale, getApiErrorMessage, showError() {}, showSuccess() {} }
+		t, n, getCanonicalLocale, getApiErrorMessage, showError() {}, showSuccess() {},
+		// Wiring of the app page: child components, shared store and scope rule
+		BotAvatar: {}, TalkAiIcon: {}, store: { state: { publicBots: [], ownBots: [] } }, scopeOf: () => ({ key: 'everyone' }) }
 	vm.runInNewContext(script, scope)
 	const state = scope.component.data()
 	for (const [name, method] of Object.entries(scope.component.methods)) state[name] = method.bind(state)

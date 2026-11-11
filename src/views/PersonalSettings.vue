@@ -1,152 +1,45 @@
 <template>
-	<div class="educai-personal-settings">
-		<header class="personal-header">
-			<div>
-				<h2>{{ APP_DISPLAY_NAME }}</h2>
-				<p>{{ t('educai', 'Manage your bots and review your own AI activity.') }}</p>
-			</div>
-			<nav class="personal-tabs" :aria-label="t('educai', '{appName} personal settings', { appName: APP_DISPLAY_NAME })">
-				<button
-					type="button"
-					class="tab-button"
-					:class="{ active: activeView === 'bots' }"
-					@click="setView('bots')">
-					<span class="icon-comment" />
-					{{ t('educai', 'My bots') }}
-				</button>
-				<button
-					type="button"
-					class="tab-button"
-					:class="{ active: activeView === 'activity' }"
-					@click="setView('activity')">
-					<span class="icon-search" />
-					{{ t('educai', 'Activity') }}
-				</button>
-			</nav>
-		</header>
-
-		<PersonalBots v-if="activeView === 'bots'" />
-		<PersonalActivity v-else />
-	</div>
+	<NcSettingsSection :name="APP_DISPLAY_NAME"
+		:description="t('educai', 'Your bots, the bots you can use and your activity now live on one page.')">
+		<div class="educai-personal-pointer">
+			<NcButton variant="primary" :href="appUrl('my-bots')">
+				{{ t('educai', 'Open {appName}', { appName: APP_DISPLAY_NAME }) }}
+			</NcButton>
+			<NcButton :href="appUrl('activity')">
+				{{ t('educai', 'Activity') }}
+			</NcButton>
+		</div>
+	</NcSettingsSection>
 </template>
 
 <script>
-import PersonalActivity from './PersonalActivity.vue'
+import { generateUrl } from '@nextcloud/router'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcSettingsSection from '@nextcloud/vue/components/NcSettingsSection'
 import { APP_DISPLAY_NAME } from '../branding.js'
-import PersonalBots from './PersonalBots.vue'
 
+// Creating, editing and reviewing bots moved to the app page. Old bookmarks land here and find the way.
 export default {
 	name: 'PersonalSettings',
 
-	components: {
-		PersonalActivity,
-		PersonalBots,
-	},
+	components: { NcButton, NcSettingsSection },
 
 	data() {
-		return {
-			APP_DISPLAY_NAME,
-			activeView: this.initialView(),
-		}
+		return { APP_DISPLAY_NAME }
 	},
 
 	methods: {
-		initialView() {
-			const params = new URLSearchParams(window.location.search)
-			return params.get('view') === 'activity' ? 'activity' : 'bots'
-		},
-
-		setView(view) {
-			this.activeView = view
-			const url = new URL(window.location.href)
-			if (view === 'activity') {
-				url.searchParams.set('view', 'activity')
-			} else {
-				url.searchParams.delete('view')
-			}
-			window.history.replaceState({}, '', url.toString())
+		appUrl(view) {
+			return generateUrl('/apps/educai/') + '#/' + view
 		},
 	},
 }
 </script>
 
 <style scoped>
-.educai-personal-settings {
-	max-width: 1280px;
-	margin: 0 auto;
-	padding: 24px;
-}
-
-.personal-header {
+.educai-personal-pointer {
 	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 16px;
-	margin-bottom: 20px;
-}
-
-.personal-header h2 {
-	margin: 0 0 4px;
-	font-size: 24px;
-}
-
-.personal-header p {
-	margin: 0;
-	color: var(--color-text-maxcontrast);
-}
-
-.personal-tabs {
-	display: inline-flex;
-	gap: 4px;
-	padding: 4px;
-	border: 1px solid var(--color-border);
-	border-radius: var(--border-radius);
-	background: var(--color-main-background);
-}
-
-.tab-button {
-	display: inline-flex;
-	align-items: center;
+	flex-wrap: wrap;
 	gap: 8px;
-	min-height: 36px;
-	padding: 0 12px;
-	border: 0;
-	border-radius: var(--border-radius);
-	background: transparent;
-	color: var(--color-main-text);
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.tab-button.active {
-	background: var(--color-primary-element);
-	color: var(--color-primary-element-text);
-}
-
-.tab-button span {
-	filter: var(--background-invert-if-dark);
-}
-
-.tab-button.active span {
-	filter: none;
-}
-
-@media (max-width: 700px) {
-	.educai-personal-settings {
-		padding: 16px;
-	}
-
-	.personal-header {
-		flex-direction: column;
-	}
-
-	.personal-tabs {
-		width: 100%;
-	}
-
-	.tab-button {
-		flex: 1;
-		justify-content: center;
-	}
 }
 </style>

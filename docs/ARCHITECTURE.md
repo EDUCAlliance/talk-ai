@@ -36,8 +36,12 @@ The app ID is `educai`. The PHP namespace is `OCA\EducAI`.
 
 | File | Surface |
 | --- | --- |
-| `src/views/PersonalBots.vue` | Personal app view, pending approvals, bot lists |
-| `src/components/BotForm.vue` | Bot creation and editing |
+| `src/views/App.vue` + `src/router.js` | App page: navigation and the views Discover, My bots, New bot, bot page, To review, Activity |
+| `src/store/createTalkAiStore.js` | Shared state of the app page: permissions, own bots, usable bots, open reviews |
+| `src/components/BotEditor.vue` | Bot creation (wizard steps) and editing (bot page tabs); extends `BotForm.vue` and replaces only its template |
+| `src/components/BotForm.vue` | Form logic of a bot (loading, validation, save payload) and the admin edit dialog |
+| `src/styles/talkai.scss` | Styles of the app page content; the frame comes from `@nextcloud/vue` |
+| `src/views/PersonalSettings.vue` | Personal settings: pointer to the app page |
 | `src/components/AdminSettings.vue` | Admin configuration accordions |
 | `src/components/BotPickerElement.vue` | Talk Smart Picker entry |
 | `src/components/BotPickerModal.vue` | Talk room bot activation UI |

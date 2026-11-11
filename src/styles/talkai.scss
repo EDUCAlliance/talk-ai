@@ -15,5 +15,6 @@
 	@include meta.load-css('dialog');
 	@include meta.load-css('editor');
 	@include meta.load-css('botpage');
+	@include meta.load-css('activity');
 	@include meta.load-css('pages');
 }

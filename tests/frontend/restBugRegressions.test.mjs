@@ -9,6 +9,10 @@ import { normalizeToolSelectionAliases } from '../../src/utils/toolAliases.js'
 import { apiToolBlockReason, unavailableSelections } from '../../src/utils/apiConnections.js'
 import * as modelSelection from '../../src/utils/modelSelection.js'
 import { t, n, getCanonicalLocale } from '../../src/l10n.js'
+import { createTalkAiStore } from '../../src/store/createTalkAiStore.js'
+import { diffVersions } from '../../src/utils/botDiff.js'
+import { scopeOf } from '../../src/utils/botScope.js'
+import { capabilitiesOf } from '../../src/utils/capabilities.js'
 
 const plain = value => JSON.parse(JSON.stringify(value))
 const deferred = () => {
@@ -30,7 +34,10 @@ function component(ctx, path, axios, props = {}, globals = {}) {
 	const errors = [], successes = [], emitted = []
 	const scope = {
 		axios, APP_DISPLAY_NAME: 'Talk AI', WIKI_ROOT_FOLDER: 'Talk AI',
-		BotCard: {}, BotForm: {}, ModelSelector: {}, NcProgressBar: {},
+		BotForm: {}, ModelSelector: {}, NcProgressBar: {},
+		// Views of the app page: child components and the shared store are wiring, the rules are the real ones.
+		BotAvatar: {}, BotTalkDialog: {}, NcLoadingIcon: {}, TalkAiDialog: {}, TalkAiIcon: {},
+		store: createTalkAiStore({ http: axios, url: value => value }), scopeOf, diffVersions, capabilitiesOf,
 		generateUrl: value => value, t, n, getCanonicalLocale, getApiErrorMessage,
 		modelSelection, normalizeToolSelectionAliases, apiToolBlockReason, unavailableSelections,
 		showError: value => errors.push(value), showSuccess: value => successes.push(value),
@@ -71,16 +78,41 @@ for (const reason of [null, '', 'Needs a clearer prompt']) {
 	test(`rejection dialog ${reason === null ? 'Cancel does nothing' : `confirmation sends optional reason ${JSON.stringify(reason)}`}`, async ctx => {
 		const posts = []
 		let refreshed = 0
-		const { state, successes } = component(ctx, 'views/PersonalBots', {
-			post: async (url, payload) => { posts.push([url, plain(payload)]) },
-		}, {}, { prompt: () => reason })
-		state.loadPendingApprovals = async () => { refreshed++ }
-		await state.rejectBot(17)
+		const http = {
+			post: async (url, payload) => { posts.push([url, plain(payload)]); return { data: {} } },
+			get: async () => { refreshed++; return { data: { bots: [] } } },
+		}
+		const store = createTalkAiStore({ http, url: value => value })
+		store.state.permissions.hasApprovalRights = true
+		const { state, successes } = component(ctx, 'views/Review', http, {}, { store })
+		state.askReject({ id: 17, bot_name: 'Bot 17', owner_name: 'Alice' })
+		assert.equal(state.rejectCandidate.id, 17)
+		if (reason === null) {
+			state.cancelReject()
+		} else {
+			state.feedback = reason
+			await state.confirmReject()
+		}
+		assert.equal(state.rejectCandidate, null)
 		assert.deepEqual(posts, reason === null ? [] : [['/apps/educai/api/v1/bots/17/reject', { reason }]])
 		assert.equal(refreshed, reason === null ? 0 : 1)
 		assert.equal(successes.length, reason === null ? 0 : 1)
 	})
 }
+
+test('a failed rejection keeps the dialog and the feedback, and reports the error once', async ctx => {
+	const http = { post: async () => { throw new Error('offline') }, get: async () => ({ data: { bots: [] } }) }
+	const store = createTalkAiStore({ http, url: value => value })
+	store.state.permissions.hasApprovalRights = true
+	const { state, successes, errors } = component(ctx, 'views/Review', http, {}, { store })
+	state.askReject({ id: 17, bot_name: 'Bot 17', owner_name: 'Alice' })
+	state.feedback = 'Please name the sources'
+	await state.confirmReject()
+	assert.equal(state.rejectCandidate.id, 17)
+	assert.equal(state.feedback, 'Please name the sources')
+	assert.equal(state.busy, false)
+	assert.deepEqual([successes.length, errors.length], [0, 1])
+})
 
 for (const pending of [false, true]) {
 	test(`cancelled nested onboarding edits never change ${pending ? 'pending' : 'approved'} data or the next save`, async ctx => {

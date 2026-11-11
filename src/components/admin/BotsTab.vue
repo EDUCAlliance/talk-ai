@@ -28,7 +28,7 @@
 					:aria-label="t('educai', 'Search bots')">
 			</div>
 			<p v-if="pendingCount > 0" class="ta-note">
-				{{ n('educai', '{count} bot is waiting for approval. Approvals are handled in the personal {app} settings under "My bots".', '{count} bots are waiting for approval. Approvals are handled in the personal {app} settings under "My bots".', pendingCount, { count: pendingCount, app: appName }) }}
+				{{ n('educai', '{count} bot is waiting for approval. Approvals are handled on the {app} page under “To review”.', '{count} bots are waiting for approval. Approvals are handled on the {app} page under “To review”.', pendingCount, { count: pendingCount, app: appName }) }}
 				<a :href="approvalsUrl" class="ta-link">{{ t('educai', 'Open approvals') }} →</a>
 			</p>
 			<p v-if="admin.loadingAllBots && admin.allBots.length === 0" class="ta-hint">
@@ -99,7 +99,7 @@ export default {
 			})
 		},
 		approvalsUrl() {
-			return generateUrl('/settings/user/educai')
+			return generateUrl('/apps/educai/') + '#/review'
 		},
 	},
 	methods: {

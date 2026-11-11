@@ -147,7 +147,10 @@ export default {
 		},
 	},
 	created() {
-		this.load()
+		// The frame loads the list once; coming back to this page refreshes it.
+		if (store.state.loaded.publicBots) {
+			this.load()
+		}
 	},
 	methods: {
 		t,
