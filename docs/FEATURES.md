@@ -2,6 +2,21 @@
 
 This guide describes the product surface of Talk AI. Use it when you need to understand what the app offers without reading the PHP and Vue code first.
 
+## The App Page
+
+Everything a user does with bots happens on the Talk AI app page:
+
+- **Discover** lists the bots a user may use, with search and a filter per audience. A tile opens the details and "Use in Talk".
+- **My bots** lists the user's own bots with their state: active, draft, in review, change in review.
+- **New bot** starts from a template and leads through five steps: basics, who uses it, knowledge, capabilities, check and finish. A sidebar shows the result, and a preview chat answers with the instruction and the model of the form before the bot exists.
+- The **bot page** has an overview, the history of creation and approval, and the settings in tabs. A save bar collects the changes and says when they go into review first.
+- **To review** is shown to people with approval rights. A review names the reason, the instruction, the knowledge sources and, for an approved bot, exactly what the change alters.
+- **Activity** shows a user's own conversations with bots.
+- **How Talk AI works** starts a tour over these pages; a short guide stays reachable from it.
+- The **personal assistant** is one personal bot per user. Discover and My bots invite to set it up; afterwards it is pinned in first place.
+
+The personal settings only point to the app page.
+
 ## Bot Management
 
 Users create bots from the Talk AI app. A bot stores:
@@ -13,6 +28,7 @@ Users create bots from the Talk AI app. A bot stores:
 - model selection
 - optional custom temperature
 - RAG state
+- whether it also answers guests
 - enabled tool assignments
 - onboarding questions for Talk rooms
 
@@ -28,6 +44,19 @@ Talk AI supports four visibility scopes:
 - `global`: visible to all users
 
 Personal bots do not need approval. Shared bots can move through draft, pending, and approved states. Users with scope rights can review pending bots for the groups or teams they manage. The approved version stays live while an update waits for review.
+
+Each scope has its own colour, one of the four of the EDUC logo: violet for personal, green for groups, orange for teams and pink for global. The colour always comes with an icon and the words.
+
+### Guests
+
+Guests are people who take part in a public Talk conversation without being signed in: by link, by e-mail invitation or through a bridge. A bot answers them only when **Also answer guests** is turned on. The switch is on the bot page under **Advanced**, and under **Advanced** in the last step of **New bot**.
+
+- The switch is independent of the visibility scope. It opens nothing for signed-in users: a personal bot with the switch on still answers no other account.
+- For a shared bot the switch belongs to the reviewed version. Turning it on or off on an approved bot is a change in review, and the approved setting stays live until then.
+- Guests use a bot in conversations where a signed-in person who may use the bot has activated it. They cannot activate a bot, answer its activation questions or reset it with `((RESET))`.
+- A bot that is not live for its audience (draft, first review) does not answer guests either.
+- Guests get the same answers as everyone else, including what the bot knows from its knowledge sources. Turn the switch on only for bots whose knowledge may leave the organisation.
+- Bots that were shared with everyone before version 3.0.0 answered guests already; the upgrade turns the switch on for them.
 
 ## Talk Integration
 

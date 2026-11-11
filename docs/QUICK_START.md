@@ -71,14 +71,15 @@ The webhook URL must include `/index.php` on installations that route apps throu
 
 ## 4. Create A Bot
 
-Open the Talk AI app and create a bot:
+Open the Talk AI app and choose **New bot**. A template and five steps lead through it:
 
-- choose a bot name
-- choose a Talk mention such as `@supportbot`
-- write the system prompt
-- choose visibility: personal, groups, teams, or global
-- choose a model if per-bot model selection is enabled
-- enable RAG, tools, or a personal wiki if needed
+- choose a bot name and a Talk mention such as `@supportbot`, and write the instruction
+- choose who uses it: only you, certain groups, certain teams, or everyone
+- add knowledge (files, folders, web pages) if the bot should answer from documents
+- switch on the capabilities it needs
+- check the summary; **Advanced** holds the model, the creativity and whether the bot also answers guests
+
+The preview chat in the sidebar lets you try the instruction before the bot exists.
 
 Shared bots may start as drafts or pending approvals depending on the user's scope rights.
 
