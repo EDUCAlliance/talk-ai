@@ -9,6 +9,9 @@
 					{{ t('educai', 'Bots answer in Talk. You use the ones that are shared with you, and you can create your own.') }}
 				</p>
 			</div>
+			<button type="button" class="talkai-btn talkai-btn--filled" @click="tour.open = true">
+				{{ t('educai', 'Start the tour') }}
+			</button>
 		</header>
 
 		<div class="talkai-grid2">
@@ -84,12 +87,13 @@ import BotAvatar from '../components/BotAvatar.vue'
 import TalkAiIcon from '../components/TalkAiIcon.vue'
 import { APP_DISPLAY_NAME } from '../branding.js'
 import { t } from '../l10n.js'
+import { tour } from '../utils/tour.js'
 
 export default {
 	name: 'Guide',
 	components: { BotAvatar, TalkAiIcon },
 	data() {
-		return { APP_DISPLAY_NAME }
+		return { APP_DISPLAY_NAME, tour }
 	},
 	computed: {
 		scopes() {

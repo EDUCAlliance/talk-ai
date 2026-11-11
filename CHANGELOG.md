@@ -11,6 +11,7 @@ All notable changes to Talk AI (`educai`) are documented in this file. The forma
 - Bot page with an overview, the history of creation and approval, and the settings in tabs. A save bar collects the changes and says when they go into review first.
 - Reviews show what a change to an approved bot alters, the reason, the instruction and the knowledge sources. Feedback is written next to the decision.
 - Bots show who can use them by one colour per audience (only you, group, team, everyone), always together with an icon and the words. Group and team admins get "Edit" on bots of their audience.
+- A tour behind "How Talk AI works": it walks through the real pages, highlights one element per step and explains it, in the words for what this user has (no step for "To review" without approval rights). Enter and the arrow keys move, Escape ends it; on small screens the explanation sits at the bottom. The short guide stays reachable from the tour.
 - Personal assistant: Discover and My bots invite every user to set up one bot of their own, whatever other personal bots they have. Once it exists, the invitation disappears and the assistant is pinned in first place. It is an ordinary personal bot with a mention name of its own (`@assistant-<user>`); its folders are added on its page.
 
 ### Changed
