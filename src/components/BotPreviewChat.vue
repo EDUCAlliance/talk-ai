@@ -1,5 +1,10 @@
 <template>
 	<div class="talkai-trychat">
+		<!-- Above the chat, so it is read before the first message and never scrolls out of sight below it -->
+		<div class="talkai-note talkai-note--info talkai-trychat__note">
+			<TalkAiIcon name="info" :size="16" />
+			<span>{{ t('educai', 'Only a preview. The real chat happens in Talk once the bot is created.') }}</span>
+		</div>
 		<p v-if="!ready" class="talkai-side__text">
 			{{ t('educai', 'Enter a name and an instruction first. Then you can try here how the bot answers.') }}
 		</p>
@@ -35,36 +40,37 @@
 			<p v-if="error" class="talkai-trychat__error" role="alert">
 				{{ error }}
 			</p>
+			<!-- One line that grows with the text and the button next to it, like the message field in Talk -->
 			<form class="talkai-trychat__form" @submit.prevent="send">
-				<textarea v-model="input"
+				<textarea ref="field"
+					v-model="input"
 					class="talkai-input talkai-trychat__input"
-					rows="2"
+					rows="1"
 					:placeholder="t('educai', 'Write a message')"
 					:aria-label="t('educai', 'Message to the bot')"
 					:disabled="sending"
 					@keydown.enter.exact.prevent="send" />
-				<div class="talkai-trychat__actions">
-					<button v-if="messages.length > 0"
-						type="button"
-						class="talkai-trychat__reset"
-						:disabled="sending"
-						@click="reset">
-						{{ t('educai', 'Start over') }}
-					</button>
-					<button type="submit" class="talkai-btn talkai-btn--filled" :disabled="sending || input.trim() === ''">
-						{{ t('educai', 'Send') }}
-					</button>
-				</div>
+				<button type="submit" class="talkai-btn talkai-btn--filled" :disabled="sending || input.trim() === ''">
+					{{ t('educai', 'Send') }}
+				</button>
 			</form>
+			<button v-if="messages.length > 0"
+				type="button"
+				class="talkai-trychat__reset"
+				:disabled="sending"
+				@click="reset">
+				{{ t('educai', 'Start over') }}
+			</button>
+			<p class="talkai-side__text talkai-trychat__detail">
+				{{ t('educai', 'The preview uses the instruction and the model from the form, without knowledge and capabilities.') }}
+			</p>
 		</template>
-		<p class="talkai-side__text talkai-trychat__note">
-			{{ t('educai', 'This chat is only a preview. It uses the instruction and the model from the form, without knowledge and capabilities. You find the real chat in Talk once the bot is created.') }}
-		</p>
 	</div>
 </template>
 
 <script>
 import BotAvatar from './BotAvatar.vue'
+import TalkAiIcon from './TalkAiIcon.vue'
 import { t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
@@ -77,7 +83,7 @@ const MAX_MESSAGES = 20
 // Nothing is stored. The real conversation happens in Talk, once the bot is created.
 export default {
 	name: 'BotPreviewChat',
-	components: { BotAvatar },
+	components: { BotAvatar, TalkAiIcon },
 	props: {
 		// The bot as the form describes it right now
 		bot: { type: Object, required: true },
@@ -101,8 +107,21 @@ export default {
 			return scopeOf(this.bot, this.directory).key
 		},
 	},
+	watch: {
+		input() {
+			this.$nextTick(this.fitField)
+		},
+	},
 	methods: {
 		t,
+		// The message field grows with its text; the stylesheet stops it after a few lines.
+		fitField() {
+			const field = this.$refs.field
+			if (field) {
+				field.style.height = 'auto'
+				field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`
+			}
+		},
 		async send() {
 			const text = this.input.trim()
 			if (text === '' || this.sending) {
@@ -130,6 +149,8 @@ export default {
 			} finally {
 				this.sending = false
 				this.scrollDown()
+				// The field was disabled while the bot wrote; typing goes on without another click.
+				this.$nextTick(() => this.$refs.field?.focus({ preventScroll: true }))
 			}
 		},
 		reset() {

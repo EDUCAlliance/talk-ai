@@ -7546,8 +7546,12 @@ msgid "Send"
 msgstr "Senden"
 
 #: src/components/BotPreviewChat.vue
-msgid "This chat is only a preview. It uses the instruction and the model from the form, without knowledge and capabilities. You find the real chat in Talk once the bot is created."
-msgstr "Dieser Chat ist nur eine Vorschau. Er nutzt die Anweisung und das Modell aus dem Formular, ohne Wissen und Funktionen. Den richtigen Chat findest du in Talk, sobald der Bot erstellt ist."
+msgid "Only a preview. The real chat happens in Talk once the bot is created."
+msgstr "Nur eine Vorschau. Der richtige Chat läuft in Talk, sobald der Bot erstellt ist."
+
+#: src/components/BotPreviewChat.vue
+msgid "The preview uses the instruction and the model from the form, without knowledge and capabilities."
+msgstr "Die Vorschau nutzt die Anweisung und das Modell aus dem Formular, ohne Wissen und Funktionen."
 
 #: src/components/BotPreviewChat.vue
 msgid "The preview could not answer. Try again."
