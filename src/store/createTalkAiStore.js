@@ -126,6 +126,22 @@ export function createTalkAiStore({ http, url }) {
 		return bot
 	}
 
+	// Tools the administration offers to this user. Without the list a new bot simply starts without tools.
+	async function fetchOfferedTools() {
+		const tools = (await http.get(api('tools'))).data?.tools
+		return Array.isArray(tools) ? tools : []
+	}
+
+	// The personal assistant shows up in both lists: pinned on Discover and in first place under "My bots".
+	async function createAssistant(payload) {
+		try {
+			return (await http.post(api('bots'), { ...payload, assistant: true })).data
+		} finally {
+			// Also after a refusal: "already set up" means the lists on screen are out of date.
+			await Promise.all([loadOwnBots().catch(() => {}), loadPublicBots().catch(() => {})])
+		}
+	}
+
 	async function updateBot(id, payload) {
 		const bot = (await http.put(api(`bots/${id}`), payload)).data
 		await loadOwnBots().catch(() => {})
@@ -170,6 +186,8 @@ export function createTalkAiStore({ http, url }) {
 		fetchPublicBot,
 		fetchSources,
 		createBot,
+		fetchOfferedTools,
+		createAssistant,
 		updateBot,
 		deleteBot,
 		submitBot,

@@ -21,7 +21,9 @@
 				<span>{{ bot.bot_name }}</span>
 			</nav>
 			<div class="talkai-bot-head">
-				<BotAvatar :name="bot.bot_name" :scope="scope.key" size="lg" />
+				<BotAvatar :name="bot.bot_name" :scope="scope.key" size="lg">
+					<TalkAiIcon v-if="listEntry && listEntry.is_assistant === true" name="sparkle" :size="28" />
+				</BotAvatar>
 				<div class="talkai-bot-head__text">
 					<h2 class="talkai-bot-head__title">
 						{{ bot.bot_name }}

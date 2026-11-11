@@ -11,6 +11,8 @@
 			</div>
 		</header>
 
+		<AssistantBanner v-if="assistantMissing" @setup="assistantSetup = true" />
+
 		<div v-if="bots.length > 0" class="talkai-toolbar">
 			<label class="talkai-search">
 				<TalkAiIcon name="search" />
@@ -44,6 +46,7 @@
 				:key="bot.id"
 				:bot="bot"
 				:directory="directory"
+				:pinned="bot.is_assistant === true"
 				@details="detailsBot = $event"
 				@talk="talkBot = $event" />
 			<p v-if="visibleBots.length === 0" class="talkai-grid__empty" role="status">
@@ -75,34 +78,44 @@
 			@close="detailsBot = null"
 			@talk="openTalk" />
 		<BotTalkDialog v-if="talkBot" :bot="talkBot" @close="talkBot = null" />
+		<AssistantSetupDialog v-if="assistantSetup" @close="assistantSetup = false" @created="onAssistantCreated" />
 	</section>
 </template>
 
 <script>
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import AssistantBanner from '../components/AssistantBanner.vue'
+import AssistantSetupDialog from '../components/AssistantSetupDialog.vue'
 import BotDetailsDialog from '../components/BotDetailsDialog.vue'
 import BotTalkDialog from '../components/BotTalkDialog.vue'
 import BotTile from '../components/BotTile.vue'
 import TalkAiIcon from '../components/TalkAiIcon.vue'
 import { t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
+import { assistantFirst, assistantOf } from '../utils/assistant.js'
 import { SCOPE_KEYS, scopeOf } from '../utils/botScope.js'
 
 // Bots the user can use, including their own. Filtered by who can use them, searched by name, mention and description.
 export default {
 	name: 'Discover',
-	components: { BotDetailsDialog, BotTalkDialog, BotTile, NcLoadingIcon, TalkAiIcon },
+	components: { AssistantBanner, AssistantSetupDialog, BotDetailsDialog, BotTalkDialog, BotTile, NcLoadingIcon, TalkAiIcon },
 	data() {
 		return {
 			query: '',
 			scopeFilter: '',
 			detailsBot: null,
 			talkBot: null,
+			assistantSetup: false,
 		}
 	},
 	computed: {
 		directory() {
 			return store.state.directory
+		},
+		// The invitation stays until the assistant exists, whatever other bots the user has.
+		// Only the list of own bots knows that, so nothing is shown before it has loaded.
+		assistantMissing() {
+			return store.state.loaded.ownBots && !store.state.failed.ownBots && assistantOf(store.state.ownBots) === null
 		},
 		loaded() {
 			return store.state.loaded.publicBots
@@ -110,11 +123,12 @@ export default {
 		failed() {
 			return store.state.failed.publicBots
 		},
-		// Own scope first, then the wider ones; names in alphabetical order.
+		// The personal assistant is pinned in first place. Then the own scope, then the wider ones; names in alphabetical order.
 		bots() {
 			return store.state.publicBots
 				.map(bot => ({ bot, scope: scopeOf(bot).key }))
-				.sort((a, b) => SCOPE_KEYS.indexOf(a.scope) - SCOPE_KEYS.indexOf(b.scope)
+				.sort((a, b) => assistantFirst(a.bot, b.bot)
+					|| SCOPE_KEYS.indexOf(a.scope) - SCOPE_KEYS.indexOf(b.scope)
 					|| String(a.bot.bot_name).localeCompare(String(b.bot.bot_name)))
 		},
 		filters() {
@@ -160,6 +174,11 @@ export default {
 		openTalk(bot) {
 			this.detailsBot = null
 			this.talkBot = bot
+		},
+		// The assistant exists now; its folders are chosen on its page.
+		onAssistantCreated(bot) {
+			this.assistantSetup = false
+			this.$router.push(`/bots/${bot.id}/knowledge`)
 		},
 	},
 }

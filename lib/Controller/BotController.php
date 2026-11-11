@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace OCA\EducAI\Controller;
 
 use Exception;
+use OCA\EducAI\Exception\AssistantExistsException;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\OpenApi\ApiToolAssignmentException;
+use OCA\EducAI\Service\AssistantService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolUiService;
 use OCA\EducAI\Service\PermissionService;
@@ -26,6 +28,7 @@ class BotController extends Controller {
 	private LoggerInterface $logger;
 	private IL10N $l10n;
 	private BuiltInToolUiService $builtInToolUiService;
+	private ?AssistantService $assistantService;
 
 	public function __construct(
 		string $appName,
@@ -36,6 +39,7 @@ class BotController extends Controller {
 		LoggerInterface $logger,
 		IL10N $l10n,
 		BuiltInToolUiService $builtInToolUiService,
+		?AssistantService $assistantService = null,
 	) {
 		parent::__construct($appName, $request);
 		$this->botService = $botService;
@@ -44,6 +48,7 @@ class BotController extends Controller {
 		$this->logger = $logger;
 		$this->l10n = $l10n;
 		$this->builtInToolUiService = $builtInToolUiService;
+		$this->assistantService = $assistantService;
 	}
 
 	/**
@@ -52,7 +57,7 @@ class BotController extends Controller {
 	 */
 	public function index(): DataResponse {
 		try {
-			$bots = $this->botService->getBotsByUserEnriched($this->userId);
+			$bots = $this->markAssistant($this->botService->getBotsByUserEnriched($this->userId));
 			return new DataResponse(array_map(fn (array $bot): array => $this->localizeToolList($bot), $bots));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list bots: ' . $e->getMessage());
@@ -85,7 +90,8 @@ class BotController extends Controller {
 
 	/**
 	 * @NoAdminRequired
-	 * Create a new bot
+	 * Create a new bot. With `assistant` it becomes the personal assistant of the user:
+	 * a personal bot with a mention name of its own, pinned in first place.
 	 */
 	public function create(
 		string $botName,
@@ -101,10 +107,32 @@ class BotController extends Controller {
 		?array $tools = null,
 		?string $description = null,
 		?array $onboardingQuestions = null,
+		$assistant = null,
 	): DataResponse {
 		// Normalize ragEnabled to bool (handles empty string from JSON false)
 		$ragEnabled = $this->normalizeBool($ragEnabled);
 		try {
+			if (is_scalar($assistant) && $this->normalizeBool($assistant) === true) {
+				if ($this->assistantService === null || $this->userId === null) {
+					return $this->errorResponse('bot_create_failed', $this->l10n->t('Failed to create bot'), 400);
+				}
+				$bot = $this->assistantService->createAssistant(
+					$this->userId,
+					$botName,
+					$systemPrompt,
+					$model,
+					$temperature,
+					$ragEnabled,
+					$tools,
+					$description,
+					$onboardingQuestions
+				);
+				$botData = $bot->jsonSerialize();
+				$botData['is_assistant'] = true;
+
+				return new DataResponse($botData, 201);
+			}
+
 			$bot = $this->botService->createBot(
 				$this->userId,
 				$botName,
@@ -123,6 +151,12 @@ class BotController extends Controller {
 			);
 
 			return new DataResponse($bot, 201);
+		} catch (AssistantExistsException $e) {
+			return $this->errorResponse(
+				'assistant_exists',
+				$this->l10n->t('You already have a personal assistant. You find it under "My bots".'),
+				409,
+			);
 		} catch (ApiToolAssignmentException $e) {
 			return $this->apiToolNotAssignableResponse($e);
 		} catch (ModelNotReleasedException $e) {
@@ -225,7 +259,7 @@ class BotController extends Controller {
 	 */
 	public function listPublic(): DataResponse {
 		try {
-			$bots = $this->botService->getAvailableBotsForUserEnriched((string)$this->userId);
+			$bots = $this->markAssistant($this->botService->getAvailableBotsForUserEnriched((string)$this->userId));
 			return new DataResponse(array_map(fn (array $bot): array => $this->localizeToolList($bot), $bots));
 		} catch (Exception $e) {
 			$this->logger->error('Failed to list public bots: ' . $e->getMessage());
@@ -261,6 +295,7 @@ class BotController extends Controller {
 	public function destroy(int $id): DataResponse {
 		try {
 			$this->botService->deleteBot($id, $this->userId);
+			$this->assistantService?->forget((string)$this->userId, $id);
 			return new DataResponse(['success' => true]);
 		} catch (AuthorizationException $e) {
 			$this->logger->error('Failed to delete bot: ' . $e->getMessage());
@@ -514,6 +549,20 @@ class BotController extends Controller {
 			]);
 			return $this->errorResponse('bot_update_failed', $this->l10n->t('Failed to update bot'), 400);
 		}
+	}
+
+	/**
+	 * Say which of the listed bots is the personal assistant of the current user.
+	 *
+	 * @param array<int,array<string,mixed>> $bots
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function markAssistant(array $bots): array {
+		if ($this->assistantService === null || $this->userId === null) {
+			return $bots;
+		}
+
+		return $this->assistantService->markAssistant($this->userId, $bots);
 	}
 
 	/**

@@ -1,7 +1,9 @@
 <template>
-	<article class="talkai-tile" :class="{ 'talkai-tile--link': !preview }" @click="onTileClick">
+	<article class="talkai-tile" :class="{ 'talkai-tile--link': !preview, 'talkai-tile--pinned': pinned }" @click="onTileClick">
 		<div class="talkai-tile__top">
-			<BotAvatar :name="name" :scope="scope.key" />
+			<BotAvatar :name="name" :scope="scope.key">
+				<TalkAiIcon v-if="pinned" name="sparkle" :size="22" />
+			</BotAvatar>
 			<div class="talkai-tile__id">
 				<h3 class="talkai-tile__name">
 					<button v-if="!preview"
@@ -19,7 +21,11 @@
 					{{ mention }}
 				</div>
 			</div>
-			<span v-if="state"
+			<span v-if="pinned" class="talkai-tile__pin">
+				<TalkAiIcon name="pin" :size="14" />
+				{{ t('educai', 'Pinned') }}
+			</span>
+			<span v-else-if="state"
 				class="talkai-chip talkai-chip--dot talkai-tile__state"
 				:class="`talkai-chip--${state.tone}`">{{ state.label }}</span>
 		</div>
@@ -72,6 +78,8 @@ export default {
 		directory: { type: Object, default: () => ({}) },
 		// A preview has no actions and does not open anything
 		preview: { type: Boolean, default: false },
+		// The personal assistant: marked as pinned and shown with its own symbol
+		pinned: { type: Boolean, default: false },
 	},
 	emits: ['details', 'talk'],
 	computed: {

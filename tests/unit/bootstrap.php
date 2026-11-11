@@ -494,6 +494,9 @@ interface IConfig {
 	public function getAppValue(string $appName, string $key, string $default = ''): string;
 	public function setAppValue(string $appName, string $key, string $value): void;
 	public function deleteAppValue(string $appName, string $key): void;
+	public function getUserValue($userId, $appName, $key, $default = '');
+	public function setUserValue($userId, $appName, $key, $value, $preCondition = null);
+	public function deleteUserValue($userId, $appName, $key);
 }
 PHP);
 			return;

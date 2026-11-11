@@ -15,6 +15,7 @@ import IconChevron from 'vue-material-design-icons/ChevronRight.vue'
 import IconClock from 'vue-material-design-icons/ClockOutline.vue'
 import IconClose from 'vue-material-design-icons/Close.vue'
 import IconCopy from 'vue-material-design-icons/ContentCopy.vue'
+import IconSparkle from 'vue-material-design-icons/CreationOutline.vue'
 import IconSidebar from 'vue-material-design-icons/DockRight.vue'
 import IconMore from 'vue-material-design-icons/DotsHorizontal.vue'
 import IconGlobe from 'vue-material-design-icons/Earth.vue'
@@ -29,6 +30,7 @@ import IconSearch from 'vue-material-design-icons/Magnify.vue'
 import IconChat from 'vue-material-design-icons/MessageOutline.vue'
 import IconMic from 'vue-material-design-icons/MicrophoneOutline.vue'
 import IconPencil from 'vue-material-design-icons/PencilOutline.vue'
+import IconPin from 'vue-material-design-icons/PinOutline.vue'
 import IconPlus from 'vue-material-design-icons/Plus.vue'
 import IconRefresh from 'vue-material-design-icons/Refresh.vue'
 import IconRobot from 'vue-material-design-icons/RobotOutline.vue'
@@ -61,6 +63,7 @@ const ICONS = {
 	mic: IconMic,
 	more: IconMore,
 	pencil: IconPencil,
+	pin: IconPin,
 	plus: IconPlus,
 	refresh: IconRefresh,
 	right: IconRight,
@@ -68,6 +71,7 @@ const ICONS = {
 	search: IconSearch,
 	shield: IconShield,
 	sidebar: IconSidebar,
+	sparkle: IconSparkle,
 	team: IconTeam,
 	tool: IconTool,
 	trash: IconTrash,

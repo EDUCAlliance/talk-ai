@@ -38,6 +38,24 @@
 	align-self: flex-start;
 }
 
+// The personal assistant is pinned in first place and carries the colour of "Only me".
+.talkai-tile--pinned {
+	border-color: var(--talkai-scope-personal);
+	background-color: var(--talkai-pinned-surface);
+}
+
+.talkai-tile__pin {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	align-self: flex-start;
+	gap: 4px;
+	color: var(--talkai-pinned-text);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
 .talkai-tile__name {
 	font-size: 17px;
 	font-weight: 700;
@@ -162,6 +180,112 @@
 	color: var(--talkai-ink-3);
 }
 
+// Invitation to set up the personal assistant, above the bots on Discover
+.talkai-assist {
+	display: flex;
+	align-items: stretch;
+	margin-block-end: 20px;
+	border: 1px solid var(--talkai-line);
+	border-radius: var(--talkai-radius);
+	background-color: var(--talkai-surface);
+	box-shadow: var(--talkai-shadow-sm);
+	overflow: hidden;
+}
+
+// Decoration in the colours of the design: a disc with the symbol of the assistant between two smaller ones
+.talkai-assist__art {
+	position: relative;
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 142px;
+	background-color: var(--talkai-pink);
+	color: #fff;
+	overflow: hidden;
+
+	&::before,
+	&::after {
+		position: absolute;
+		inset-inline-start: -52px;
+		width: 104px;
+		height: 104px;
+		border-radius: 50%;
+		content: '';
+	}
+
+	&::before {
+		inset-block-start: -50px;
+		background-color: var(--talkai-orange);
+	}
+
+	&::after {
+		inset-block-end: -62px;
+		background-color: var(--talkai-green);
+	}
+
+	> * {
+		position: relative;
+		display: grid;
+		place-items: center;
+		width: 160px;
+		height: 160px;
+		border-radius: 50%;
+		background-color: var(--talkai-violet);
+	}
+}
+
+.talkai-assist__body {
+	flex: 1;
+	min-width: 0;
+	padding: 18px 20px;
+}
+
+.talkai-assist__title {
+	font-size: 19px;
+	font-weight: 700;
+	line-height: 1.3;
+}
+
+.talkai-assist__text {
+	margin-block-start: 4px;
+	color: var(--talkai-ink-2);
+	font-size: 14.5px;
+}
+
+.talkai-assist__asks {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 8px;
+	margin-block-start: 10px;
+}
+
+.talkai-assist__ask {
+	max-width: 100%;
+	padding: 2px 12px;
+	border: 1px solid var(--talkai-line-2);
+	border-radius: 999px;
+	background-color: var(--talkai-surface-2);
+	color: var(--talkai-ink-2);
+	font-size: 13px;
+}
+
+.talkai-assist__go {
+	flex: none;
+	align-self: center;
+	margin-inline: 4px 20px;
+}
+
+// Set-up dialog of the personal assistant
+.talkai-assist-setup__sub {
+	margin-block-start: 0;
+}
+
+.talkai-assist-setup__next {
+	margin-block-start: 14px;
+	color: var(--talkai-ink-2);
+	font-size: 13.5px;
+}
+
 // My bots: table-like list
 .talkai-list {
 	border-block-end: 1px solid var(--talkai-line);
@@ -194,6 +318,11 @@
 
 .talkai-list__head + .talkai-list__row {
 	border-block-start: 0;
+}
+
+.talkai-list__row--pinned,
+.talkai-list__row--pinned:hover {
+	background-color: var(--talkai-pinned-surface);
 }
 
 .talkai-list__name {
@@ -317,5 +446,23 @@
 
 	.talkai-list__actions {
 		justify-content: flex-start;
+	}
+
+	.talkai-assist {
+		flex-wrap: wrap;
+	}
+
+	.talkai-assist__art {
+		display: none;
+	}
+
+	.talkai-assist__body {
+		flex-basis: 100%;
+		padding-block-end: 12px;
+	}
+
+	.talkai-assist__go {
+		margin-block-end: 18px;
+		margin-inline: 20px;
 	}
 }

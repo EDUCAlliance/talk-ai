@@ -11,13 +11,14 @@ All notable changes to Talk AI (`educai`) are documented in this file. The forma
 - Bot page with an overview, the history of creation and approval, and the settings in tabs. A save bar collects the changes and says when they go into review first.
 - Reviews show what a change to an approved bot alters, the reason, the instruction and the knowledge sources. Feedback is written next to the decision.
 - Bots show who can use them by one colour per audience (only you, group, team, everyone), always together with an icon and the words. Group and team admins get "Edit" on bots of their audience.
+- Personal assistant: Discover and My bots invite every user to set up one bot of their own, whatever other personal bots they have. Once it exists, the invitation disappears and the assistant is pinned in first place. It is an ordinary personal bot with a mention name of its own (`@assistant-<user>`); its folders are added on its page.
 
 ### Changed
 
 - The personal settings point to the app page. Creating, editing and reviewing bots, and the activity, moved there.
 - Capabilities are switches named after what they do (documents in chat, images, voice messages); the exact tool list stays under "Advanced". The knowledge search turns on with the first source and can be paused there.
 - Submitting a bot for approval asks one question instead of four.
-- API: `GET /api/v1/bots`, `/public-bots` and `/approvals` return additional fields (`can_edit`, `tools`, source counts, `live_tools`). Whoever may save a bot may now also load it, its tools and its sources.
+- API: `GET /api/v1/bots`, `/public-bots` and `/approvals` return additional fields (`can_edit`, `tools`, source counts, `live_tools`, `is_assistant`). Whoever may save a bot may now also load it, its tools and its sources. `POST /api/v1/bots` accepts `assistant: true` to create the personal assistant of the user and answers 409 (`assistant_exists`) when there already is one.
 
 ## 2.45.0 – 2026-11-02
 

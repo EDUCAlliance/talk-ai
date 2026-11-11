@@ -11,16 +11,45 @@
 			</div>
 		</header>
 
-		<div v-if="rows.length > 0" class="talkai-list">
+		<div v-if="rows.length > 0 || assistantMissing" class="talkai-list">
 			<div class="talkai-list__head" aria-hidden="true">
 				<span>{{ t('educai', 'Bot') }}</span>
 				<span>{{ t('educai', 'Status') }}</span>
 				<span>{{ t('educai', 'Knowledge') }}</span>
 				<span />
 			</div>
-			<div v-for="row in rows" :key="row.bot.id" class="talkai-list__row">
+			<!-- The invitation stays in first place until the assistant exists -->
+			<div v-if="assistantMissing" class="talkai-list__row talkai-list__row--pinned">
 				<div class="talkai-list__name">
-					<BotAvatar :name="row.bot.bot_name" :scope="row.scope.key" />
+					<BotAvatar scope="personal">
+						<TalkAiIcon name="sparkle" :size="22" />
+					</BotAvatar>
+					<div>
+						<b class="talkai-list__title">{{ t('educai', 'Personal assistant') }}</b>
+						<span class="talkai-list__sub">{{ t('educai', 'Only you') }}</span>
+					</div>
+				</div>
+				<div class="talkai-list__meta">
+					<span class="talkai-chip">{{ t('educai', 'Not set up yet') }}</span>
+				</div>
+				<div class="talkai-list__meta">
+					<span>{{ t('educai', 'Knows the folders you choose') }}</span>
+					<span class="talkai-list__note">{{ t('educai', 'Set up in a minute') }}</span>
+				</div>
+				<div class="talkai-list__actions">
+					<button type="button" class="talkai-btn talkai-btn--filled" @click="assistantSetup = true">
+						{{ t('educai', 'Set up') }}
+					</button>
+				</div>
+			</div>
+			<div v-for="row in rows"
+				:key="row.bot.id"
+				class="talkai-list__row"
+				:class="{ 'talkai-list__row--pinned': row.pinned }">
+				<div class="talkai-list__name">
+					<BotAvatar :name="row.bot.bot_name" :scope="row.scope.key">
+						<TalkAiIcon v-if="row.pinned" name="sparkle" :size="22" />
+					</BotAvatar>
 					<div>
 						<router-link class="talkai-list__title talkai-tile__open" :to="`/bots/${row.bot.id}`">
 							{{ row.bot.bot_name }}
@@ -76,28 +105,30 @@
 				</div>
 			</div>
 		</div>
-		<div v-else-if="failed" class="talkai-state" role="alert">
-			<span class="talkai-state__icon"><TalkAiIcon name="alert" :size="26" /></span>
-			<b class="talkai-state__title">{{ t('educai', 'Your bots could not be loaded') }}</b>
-			<button type="button" class="talkai-btn" @click="load">
-				{{ t('educai', 'Try again') }}
-			</button>
-		</div>
-		<div v-else-if="!loaded" class="talkai-state" role="status">
-			<NcLoadingIcon :size="32" />
-			<span>{{ t('educai', 'Loading bots…') }}</span>
-		</div>
-		<div v-else class="talkai-state">
-			<span class="talkai-state__icon"><TalkAiIcon name="robot" :size="26" /></span>
-			<b class="talkai-state__title">{{ t('educai', 'You have not created a bot yet') }}</b>
-			<p class="talkai-state__text">
-				{{ t('educai', 'A bot answers in Talk with the knowledge and the instruction you give it. A template gets you started in a few minutes.') }}
-			</p>
-			<router-link class="talkai-btn talkai-btn--filled" to="/new">
-				<TalkAiIcon name="plus" :size="16" />
-				{{ t('educai', 'New bot') }}
-			</router-link>
-		</div>
+		<template v-if="rows.length === 0">
+			<div v-if="failed" class="talkai-state" role="alert">
+				<span class="talkai-state__icon"><TalkAiIcon name="alert" :size="26" /></span>
+				<b class="talkai-state__title">{{ t('educai', 'Your bots could not be loaded') }}</b>
+				<button type="button" class="talkai-btn" @click="load">
+					{{ t('educai', 'Try again') }}
+				</button>
+			</div>
+			<div v-else-if="!loaded" class="talkai-state" role="status">
+				<NcLoadingIcon :size="32" />
+				<span>{{ t('educai', 'Loading bots…') }}</span>
+			</div>
+			<div v-else class="talkai-state">
+				<span class="talkai-state__icon"><TalkAiIcon name="robot" :size="26" /></span>
+				<b class="talkai-state__title">{{ t('educai', 'You have not created a bot yet') }}</b>
+				<p class="talkai-state__text">
+					{{ t('educai', 'A bot answers in Talk with the knowledge and the instruction you give it. A template gets you started in a few minutes.') }}
+				</p>
+				<router-link class="talkai-btn talkai-btn--filled" to="/new">
+					<TalkAiIcon name="plus" :size="16" />
+					{{ t('educai', 'New bot') }}
+				</router-link>
+			</div>
+		</template>
 
 		<BotSubmitDialog v-if="submitBot"
 			:bot="submitBot"
@@ -105,6 +136,7 @@
 			@close="submitBot = null"
 			@submitted="submitBot = null" />
 		<BotTalkDialog v-if="talkBot" :bot="talkBot" @close="talkBot = null" />
+		<AssistantSetupDialog v-if="assistantSetup" @close="assistantSetup = false" @created="onAssistantCreated" />
 		<TalkAiDialog v-if="deleteCandidate"
 			:name="t('educai', 'Delete {bot}?', { bot: deleteCandidate.bot_name })"
 			size="small"
@@ -133,6 +165,7 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import AssistantSetupDialog from '../components/AssistantSetupDialog.vue'
 import BotAvatar from '../components/BotAvatar.vue'
 import BotSubmitDialog from '../components/BotSubmitDialog.vue'
 import BotTalkDialog from '../components/BotTalkDialog.vue'
@@ -141,6 +174,7 @@ import TalkAiIcon from '../components/TalkAiIcon.vue'
 import { n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
+import { assistantFirst, assistantOf } from '../utils/assistant.js'
 import { scopeOf } from '../utils/botScope.js'
 import { statusOf } from '../utils/botStatus.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
@@ -148,13 +182,14 @@ import { capabilitiesOf } from '../utils/capabilities.js'
 // The bots the user created, with their state between draft and approval.
 export default {
 	name: 'MyBots',
-	components: { BotAvatar, BotSubmitDialog, BotTalkDialog, NcActionButton, NcActions, NcLoadingIcon, TalkAiDialog, TalkAiIcon },
+	components: { AssistantSetupDialog, BotAvatar, BotSubmitDialog, BotTalkDialog, NcActionButton, NcActions, NcLoadingIcon, TalkAiDialog, TalkAiIcon },
 	data() {
 		return {
 			submitBot: null,
 			talkBot: null,
 			deleteCandidate: null,
 			deleting: false,
+			assistantSetup: false,
 		}
 	},
 	computed: {
@@ -167,12 +202,17 @@ export default {
 		failed() {
 			return store.state.failed.ownBots
 		},
-		// Bots that need the owner first: feedback, then drafts, then the rest by name.
+		// The invitation stays until the assistant exists, whatever other bots the user has.
+		assistantMissing() {
+			return this.loaded && !this.failed && assistantOf(store.state.ownBots) === null
+		},
+		// The personal assistant is pinned in first place. Then bots that need the owner: feedback, drafts, the rest by name.
 		rows() {
 			const order = { feedback: 0, draft: 1 }
 			return store.state.ownBots
 				.map(bot => this.describe(bot))
-				.sort((a, b) => (order[a.status.stage] ?? 2) - (order[b.status.stage] ?? 2)
+				.sort((a, b) => assistantFirst(a.bot, b.bot)
+					|| (order[a.status.stage] ?? 2) - (order[b.status.stage] ?? 2)
 					|| String(a.bot.bot_name).localeCompare(String(b.bot.bot_name)))
 		},
 	},
@@ -194,6 +234,7 @@ export default {
 			}
 			return {
 				bot,
+				pinned: bot.is_assistant === true,
 				scope: scopeOf(bot, this.directory),
 				status: statusOf(bot),
 				mention: `@${String(bot.mention_name || '').replace(/^@+/, '')}`,
@@ -201,6 +242,11 @@ export default {
 				problems: problems > 0 ? n('educai', '%n problem', '%n problems', problems) : '',
 				abilities: abilities.map(capability => capability.label).join(' · '),
 			}
+		},
+		// The assistant exists now; its folders are chosen on its page.
+		onAssistantCreated(bot) {
+			this.assistantSetup = false
+			this.$router.push(`/bots/${bot.id}/knowledge`)
 		},
 		async deleteBot() {
 			const bot = this.deleteCandidate

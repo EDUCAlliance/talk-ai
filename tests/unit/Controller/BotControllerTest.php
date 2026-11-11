@@ -13,9 +13,11 @@ use OCA\EducAI\Db\ChatRoomMapper;
 use OCA\EducAI\Db\ConversationMapper;
 use OCA\EducAI\Db\EmbeddingMapper;
 use OCA\EducAI\Db\ToolMapper;
+use OCA\EducAI\Exception\AssistantExistsException;
 use OCA\EducAI\Exception\AuthorizationException;
 use OCA\EducAI\Exception\ModelNotReleasedException;
 use OCA\EducAI\Service\AgentExecutor;
+use OCA\EducAI\Service\AssistantService;
 use OCA\EducAI\Service\BotService;
 use OCA\EducAI\Service\BuiltInToolProvider;
 use OCA\EducAI\Service\BuiltInToolUiService;
@@ -208,11 +210,109 @@ class BotControllerTest extends TestCase {
 		$this->assertSame(['id' => 8], $response->getData()['bots'][1]);
 	}
 
+	public function testCreateWithTheAssistantFlagCreatesThePersonalAssistant(): void {
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->never())->method('createBot');
+		$assistant = new Bot();
+		$assistant->setId(31);
+		$assistant->setUserId('alice');
+		$assistant->setBotName('Personal assistant');
+		$assistant->setMentionName('@assistant-alice');
+		$assistant->setVisibility('personal');
+		$assistantService = $this->createMock(AssistantService::class);
+		$assistantService->expects($this->once())
+			->method('createAssistant')
+			->with('alice', 'Personal assistant', 'Help me.', null, null, false, [], 'Just for me', null)
+			->willReturn($assistant);
+		$controller = $this->createController($botService, assistantService: $assistantService);
+
+		$response = $controller->create(
+			'Personal assistant',
+			'assistant',
+			'Help me.',
+			visibility: 'global',
+			ragEnabled: false,
+			tools: [],
+			description: 'Just for me',
+			assistant: true,
+		);
+
+		$this->assertSame(201, $response->getStatus());
+		$this->assertSame(31, $response->getData()['id']);
+		$this->assertSame('@assistant-alice', $response->getData()['mention_name']);
+		$this->assertTrue($response->getData()['is_assistant']);
+	}
+
+	public function testCreateSaysWhenThePersonalAssistantAlreadyExists(): void {
+		$assistantService = $this->createMock(AssistantService::class);
+		$assistantService->method('createAssistant')->willThrowException(new AssistantExistsException());
+		$controller = $this->createController($this->createMock(BotService::class), assistantService: $assistantService);
+
+		$response = $controller->create('Personal assistant', 'assistant', 'Help me.', assistant: 'true');
+
+		$this->assertSame(409, $response->getStatus());
+		$this->assertSame('assistant_exists', $response->getData()['errorCode']);
+	}
+
+	public function testCreateWithoutTheAssistantFlagStaysAnOrdinaryBot(): void {
+		$bot = new Bot();
+		$bot->setId(9);
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->exactly(2))->method('createBot')->willReturn($bot);
+		$assistantService = $this->createMock(AssistantService::class);
+		$assistantService->expects($this->never())->method('createAssistant');
+		$controller = $this->createController($botService, assistantService: $assistantService);
+
+		foreach ([null, false] as $flag) {
+			$response = $controller->create('Test bot', 'test', 'Test prompt', assistant: $flag);
+
+			$this->assertSame(201, $response->getStatus());
+			$this->assertSame($bot, $response->getData());
+		}
+	}
+
+	public function testBotListsSayWhichBotIsThePersonalAssistant(): void {
+		$botService = $this->createMock(BotService::class);
+		$botService->method('getBotsByUserEnriched')->willReturn([['id' => 12], ['id' => 31]]);
+		$botService->method('getAvailableBotsForUserEnriched')->willReturn([['id' => 31], ['id' => 40]]);
+		$assistantService = $this->createMock(AssistantService::class);
+		$assistantService->method('markAssistant')
+			->willReturnCallback(static fn (string $userId, array $bots): array => array_map(
+				static fn (array $bot): array => $bot + ['is_assistant' => $userId === 'alice' && $bot['id'] === 31],
+				$bots,
+			));
+		$controller = $this->createController($botService, assistantService: $assistantService);
+
+		$this->assertSame([false, true], array_column($controller->index()->getData(), 'is_assistant'));
+		$this->assertSame([true, false], array_column($controller->listPublic()->getData(), 'is_assistant'));
+	}
+
+	public function testDeletingABotForgetsItAsPersonalAssistant(): void {
+		$botService = $this->createMock(BotService::class);
+		$botService->expects($this->once())->method('deleteBot')->with(31, 'alice');
+		$assistantService = $this->createMock(AssistantService::class);
+		$assistantService->expects($this->once())->method('forget')->with('alice', 31);
+		$controller = $this->createController($botService, assistantService: $assistantService);
+
+		$this->assertSame(200, $controller->destroy(31)->getStatus());
+	}
+
+	public function testAFailedDeleteKeepsThePersonalAssistant(): void {
+		$botService = $this->createMock(BotService::class);
+		$botService->method('deleteBot')->willThrowException(new AuthorizationException('no'));
+		$assistantService = $this->createMock(AssistantService::class);
+		$assistantService->expects($this->never())->method('forget');
+		$controller = $this->createController($botService, assistantService: $assistantService);
+
+		$this->assertSame(403, $controller->destroy(31)->getStatus());
+	}
+
 	private function createController(
 		BotService $botService,
 		?PermissionService $permissionService = null,
 		?string $userId = 'alice',
 		?BuiltInToolUiService $builtInToolUiService = null,
+		?AssistantService $assistantService = null,
 	): BotController {
 		return new BotController(
 			'educai',
@@ -223,6 +323,7 @@ class BotControllerTest extends TestCase {
 			$this->createMock(LoggerInterface::class),
 			$this->createL10n(),
 			$builtInToolUiService ?? $this->createMock(BuiltInToolUiService::class),
+			$assistantService,
 		);
 	}
 

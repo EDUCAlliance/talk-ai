@@ -7308,3 +7308,95 @@ msgstr "Abgelehnt"
 #: src/views/Review.vue
 msgid "Rejected. {owner} sees your feedback."
 msgstr "Abgelehnt. {owner} sieht deine Rückmeldung."
+
+#: src/utils/assistant.js
+msgid "What did we decide in the project meeting on Monday?"
+msgstr "Was haben wir im Projekttreffen am Montag beschlossen?"
+
+#: src/utils/assistant.js
+msgid "Summarise chapter 3 of my lecture notes."
+msgstr "Fasse Kapitel 3 aus meinem Skript zusammen."
+
+#: src/utils/assistant.js
+msgid "Where are the slides on media ethics?"
+msgstr "Wo liegen die Folien zur Medienethik?"
+
+#: src/utils/assistant.js
+msgid "Personal assistant"
+msgstr "Persönlicher Assistent"
+
+#: src/utils/assistant.js
+msgid "Your own bot. It knows the folders you choose and helps you search, summarise and write."
+msgstr "Dein eigener Bot. Er kennt die Ordner, die du auswählst, und hilft dir beim Suchen, Zusammenfassen und Formulieren."
+
+#: src/utils/assistant.js
+msgid "You are the personal assistant of one person. Help them search, summarise and write. When you use their files, name the file you took the information from. If you do not know something, say so."
+msgstr "Du bist der persönliche Assistent einer Person. Hilf ihr beim Suchen, Zusammenfassen und Formulieren. Wenn du ihre Dateien verwendest, nenne die Datei, aus der die Information stammt. Wenn du etwas nicht weißt, sag das."
+
+#: src/components/AssistantBanner.vue
+msgid "Your personal assistant"
+msgstr "Dein persönlicher Assistent"
+
+#: src/components/AssistantBanner.vue
+msgid "A bot just for you. It knows the folders you choose and helps you search, summarise and write. Set up in a minute."
+msgstr "Ein Bot nur für dich. Er kennt die Ordner, die du auswählst, und hilft dir beim Suchen, Zusammenfassen und Formulieren. In einer Minute eingerichtet."
+
+#: src/components/AssistantBanner.vue
+msgid "Example questions"
+msgstr "Beispielfragen"
+
+#: src/components/AssistantBanner.vue
+msgid "“{question}”"
+msgstr "„{question}“"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Set up your personal assistant"
+msgstr "Persönlichen Assistenten einrichten"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "A bot just for you"
+msgstr "Ein Bot nur für dich"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "What it can do"
+msgstr "Was er kann"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Only you can use it, and it needs no approval. It knows only the folders you add."
+msgstr "Nur du kannst ihn nutzen, und er braucht keine Freigabe. Er kennt nur die Ordner, die du hinzufügst."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Next you choose the folders it may know. Afterwards you find it pinned in first place under “Discover” and “My bots”."
+msgstr "Als Nächstes wählst du die Ordner aus, die er kennen darf. Danach findest du ihn angeheftet an erster Stelle unter „Entdecken“ und „Meine Bots“."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Setting up…"
+msgstr "Wird eingerichtet…"
+
+#: src/components/AssistantSetupDialog.vue
+msgid "Your assistant is set up. Now choose the folders it may know."
+msgstr "Dein Assistent ist eingerichtet. Wähle jetzt die Ordner aus, die er kennen darf."
+
+#: src/components/AssistantSetupDialog.vue
+msgid "The assistant could not be set up. Please try again."
+msgstr "Der Assistent konnte nicht eingerichtet werden. Bitte versuche es erneut."
+
+#: src/components/BotTile.vue
+msgid "Pinned"
+msgstr "Angeheftet"
+
+#: src/views/MyBots.vue
+msgid "Not set up yet"
+msgstr "Noch nicht eingerichtet"
+
+#: src/views/MyBots.vue
+msgid "Knows the folders you choose"
+msgstr "Kennt die Ordner, die du auswählst"
+
+#: src/views/MyBots.vue
+msgid "Set up in a minute"
+msgstr "In einer Minute eingerichtet"
+
+#: lib/Controller/BotController.php
+msgid "You already have a personal assistant. You find it under \"My bots\"."
+msgstr "Du hast bereits einen persönlichen Assistenten. Du findest ihn unter „Meine Bots“."
