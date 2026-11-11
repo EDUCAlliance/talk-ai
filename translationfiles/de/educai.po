@@ -7564,3 +7564,7 @@ msgstr "Das Modell ist gerade ausgelastet. Versuche es gleich noch einmal."
 #: lib/Controller/BotController.php
 msgid "The model gave no answer. Try again, or ask your administrator to check the model connection."
 msgstr "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Administration, die Modellverbindung zu prüfen."
+
+#: src/components/admin/ModelsTab.vue
+msgid "Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”."
+msgstr "Gilt für alle Bots ohne eigene Modellwahl. Wer einen Bot erstellt, sieht es als „Von der Administration empfohlen“."

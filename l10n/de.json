@@ -1499,7 +1499,6 @@
     "Updated {time} · next check {next}" : "Aktualisiert {time} · nächste Prüfung {next}",
     "Upload via {path}" : "Upload über {path}",
     "Use {position} for the queue position and {wait} for the estimated wait in seconds. Leave empty for the default text." : "Nutze {position} für den Platz in der Warteschlange und {wait} für die geschätzte Wartezeit in Sekunden. Leer lassen für den Standardtext.",
-    "Used by every bot without its own model choice." : "Gilt für alle Bots ohne eigene Modellwahl.",
     "Uses the primary endpoint and key" : "Nutzt primären Endpunkt und Schlüssel",
     "Waiting" : "Wartend",
     "Webhook URL" : "Webhook-URL",
@@ -2075,6 +2074,7 @@
     "The preview could not answer. Try again." : "Die Vorschau konnte nicht antworten. Versuche es erneut.",
     "The preview needs an instruction and a message. Very long conversations cannot be tried here." : "Die Vorschau braucht eine Anweisung und eine Nachricht. Sehr lange Gespräche lassen sich hier nicht ausprobieren.",
     "The model is busy right now. Try again in a moment." : "Das Modell ist gerade ausgelastet. Versuche es gleich noch einmal.",
-    "The model gave no answer. Try again, or ask your administrator to check the model connection." : "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Administration, die Modellverbindung zu prüfen."
+    "The model gave no answer. Try again, or ask your administrator to check the model connection." : "Das Modell hat nicht geantwortet. Versuche es erneut oder bitte deine Administration, die Modellverbindung zu prüfen.",
+    "Used by every bot without its own model choice. People who create a bot see it as “Recommended by the administration”." : "Gilt für alle Bots ohne eigene Modellwahl. Wer einen Bot erstellt, sieht es als „Von der Administration empfohlen“."
 },"pluralForm" :"nplurals=2; plural=(n != 1);"
 }
