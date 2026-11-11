@@ -109,6 +109,11 @@ export default {
 					this.offeredTools = await store.fetchOfferedTools().catch(() => [])
 				}
 				const bot = await store.createAssistant(this.payload)
+				if (bot === null) {
+					// The server says it exists, the list does not show it yet. Nothing to continue with.
+					this.$emit('close')
+					return
+				}
 				showSuccess(t('educai', 'Your assistant is set up. Now choose the folders it may know.'))
 				this.$emit('created', bot)
 			} catch (error) {

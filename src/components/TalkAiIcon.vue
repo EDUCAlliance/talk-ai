@@ -15,7 +15,6 @@ import IconChevron from 'vue-material-design-icons/ChevronRight.vue'
 import IconClock from 'vue-material-design-icons/ClockOutline.vue'
 import IconClose from 'vue-material-design-icons/Close.vue'
 import IconCopy from 'vue-material-design-icons/ContentCopy.vue'
-import IconSparkle from 'vue-material-design-icons/CreationOutline.vue'
 import IconSidebar from 'vue-material-design-icons/DockRight.vue'
 import IconMore from 'vue-material-design-icons/DotsHorizontal.vue'
 import IconGlobe from 'vue-material-design-icons/Earth.vue'
@@ -39,6 +38,7 @@ import IconShield from 'vue-material-design-icons/ShieldCheckOutline.vue'
 import IconTrash from 'vue-material-design-icons/TrashCanOutline.vue'
 import IconUpload from 'vue-material-design-icons/TrayArrowUp.vue'
 import IconTool from 'vue-material-design-icons/WrenchOutline.vue'
+import IconSparkle from './SparkleIcon.vue'
 
 const ICONS = {
 	alert: IconAlert,

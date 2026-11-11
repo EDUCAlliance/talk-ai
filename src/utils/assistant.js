@@ -26,19 +26,6 @@ export function assistantFirst(a, b) {
 }
 
 /**
- * Example questions that show what the assistant is for.
- *
- * @return {string[]}
- */
-export function assistantExamples() {
-	return [
-		t('educai', 'What did we decide in the project meeting on Monday?'),
-		t('educai', 'Summarise chapter 3 of my lecture notes.'),
-		t('educai', 'Where are the slides on media ethics?'),
-	]
-}
-
-/**
  * Request that creates the personal assistant: a bot only its owner can use.
  *
  * The server chooses the mention name, because mention names are unique across all bots.

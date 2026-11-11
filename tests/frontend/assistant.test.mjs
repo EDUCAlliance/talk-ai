@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { createTalkAiStore } from '../../src/store/createTalkAiStore.js'
-import { assistantExamples, assistantFirst, assistantOf, assistantPayload } from '../../src/utils/assistant.js'
+import { assistantFirst, assistantOf, assistantPayload } from '../../src/utils/assistant.js'
 
 const builtin = name => ({ id: null, name, is_builtin: true, builtin_name: name })
 const API = '/apps/educai/api/v1'
@@ -88,12 +88,6 @@ test('the assistant starts without tools when the administration offers none', (
 	assert.deepEqual(assistantPayload([builtin('catalogue_search')]).tools, [])
 })
 
-test('there are a few short example questions', () => {
-	const examples = assistantExamples()
-	assert.equal(examples.length, 3)
-	assert.ok(examples.every(example => example.length > 10 && example.length < 70))
-})
-
 test('setting up the assistant refreshes both lists that show it', async () => {
 	const { store, calls } = setup({
 		[`POST ${API}/bots`]: payload => Promise.resolve({ data: { id: 31, bot_name: payload.botName, is_assistant: true } }),
@@ -129,4 +123,53 @@ test('offered tools come from the tool list and default to none', async () => {
 
 	const empty = setup({ [`GET ${API}/tools`]: { tools: null } })
 	assert.deepEqual(await empty.store.fetchOfferedTools(), [])
+})
+
+const dropped = status => Object.assign(new Error('dropped'), status ? { response: { status, data: '<html>Bad Gateway</html>' } } : {})
+
+test('a set-up request that a gateway dropped is sent once more', async () => {
+	for (const failure of [dropped(502), dropped(503), dropped()]) {
+		let attempts = 0
+		const { store, calls } = setup({
+			[`POST ${API}/bots`]: payload => ++attempts === 1
+				? Promise.reject(failure)
+				: Promise.resolve({ data: { id: 31, bot_name: payload.botName, is_assistant: true } }),
+			[`GET ${API}/bots`]: [{ id: 31, is_assistant: true }],
+		})
+
+		const bot = await store.createAssistant({ botName: 'Personal assistant' })
+
+		assert.equal(bot.id, 31)
+		assert.equal(calls.filter(call => call[0] === 'POST').length, 2)
+		assert.deepEqual(calls[1], ['POST', `${API}/bots`, { botName: 'Personal assistant', assistant: true }])
+	}
+})
+
+test('when the dropped request did arrive, the refused second one still ends with the assistant', async () => {
+	let attempts = 0
+	const exists = Object.assign(new Error('conflict'), { response: { status: 409, data: { errorCode: 'assistant_exists' } } })
+	const { store, calls } = setup({
+		[`POST ${API}/bots`]: () => Promise.reject(++attempts === 1 ? dropped(502) : exists),
+		[`GET ${API}/bots`]: [{ id: 7 }, { id: 31, is_assistant: true }],
+	})
+
+	const bot = await store.createAssistant({ botName: 'Personal assistant' })
+
+	assert.deepEqual(bot, { id: 31, is_assistant: true })
+	assert.equal(calls.filter(call => call[0] === 'POST').length, 2)
+})
+
+test('a set-up the server refuses is not repeated, and a second dropped request is reported', async () => {
+	for (const status of [400, 403, 409, 500, 504]) {
+		const refusal = Object.assign(new Error('refused'), { response: { status, data: { errorCode: 'bot_create_failed' } } })
+		const { store, calls } = setup({ [`POST ${API}/bots`]: () => Promise.reject(refusal) })
+
+		await assert.rejects(store.createAssistant({ botName: 'Personal assistant' }), refusal)
+		assert.equal(calls.filter(call => call[0] === 'POST').length, 1, `status ${status}`)
+	}
+
+	const failure = dropped(502)
+	const { store, calls } = setup({ [`POST ${API}/bots`]: () => Promise.reject(failure) })
+	await assert.rejects(store.createAssistant({ botName: 'Personal assistant' }), failure)
+	assert.equal(calls.filter(call => call[0] === 'POST').length, 2)
 })

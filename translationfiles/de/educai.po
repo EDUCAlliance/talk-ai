@@ -7310,18 +7310,6 @@ msgid "Rejected. {owner} sees your feedback."
 msgstr "Abgelehnt. {owner} sieht deine Rückmeldung."
 
 #: src/utils/assistant.js
-msgid "What did we decide in the project meeting on Monday?"
-msgstr "Was haben wir im Projekttreffen am Montag beschlossen?"
-
-#: src/utils/assistant.js
-msgid "Summarise chapter 3 of my lecture notes."
-msgstr "Fasse Kapitel 3 aus meinem Skript zusammen."
-
-#: src/utils/assistant.js
-msgid "Where are the slides on media ethics?"
-msgstr "Wo liegen die Folien zur Medienethik?"
-
-#: src/utils/assistant.js
 msgid "Personal assistant"
 msgstr "Persönlicher Assistent"
 
@@ -7340,14 +7328,6 @@ msgstr "Dein persönlicher Assistent"
 #: src/components/AssistantBanner.vue
 msgid "A bot just for you. It knows the folders you choose and helps you search, summarise and write. Set up in a minute."
 msgstr "Ein Bot nur für dich. Er kennt die Ordner, die du auswählst, und hilft dir beim Suchen, Zusammenfassen und Formulieren. In einer Minute eingerichtet."
-
-#: src/components/AssistantBanner.vue
-msgid "Example questions"
-msgstr "Beispielfragen"
-
-#: src/components/AssistantBanner.vue
-msgid "“{question}”"
-msgstr "„{question}“"
 
 #: src/components/AssistantSetupDialog.vue
 msgid "Set up your personal assistant"

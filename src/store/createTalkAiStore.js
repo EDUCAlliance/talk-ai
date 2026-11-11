@@ -132,14 +132,35 @@ export function createTalkAiStore({ http, url }) {
 		return Array.isArray(tools) ? tools : []
 	}
 
+	// A request that never got an answer from the app: the connection failed, or a gateway in front of it gave up.
+	const droppedOnTheWay = error => !error?.response || [502, 503].includes(error.response.status)
+
 	// The personal assistant shows up in both lists: pinned on Discover and in first place under "My bots".
+	// A user has at most one. So a request that was dropped on the way is sent once more: if the first one did
+	// arrive after all, the second is refused with `assistant_exists` and the assistant is simply there.
 	async function createAssistant(payload) {
+		const send = async () => (await http.post(api('bots'), { ...payload, assistant: true })).data
+		let bot = null
 		try {
-			return (await http.post(api('bots'), { ...payload, assistant: true })).data
+			try {
+				bot = await send()
+			} catch (error) {
+				if (!droppedOnTheWay(error)) {
+					throw error
+				}
+				try {
+					bot = await send()
+				} catch (again) {
+					if (again?.response?.data?.errorCode !== 'assistant_exists') {
+						throw again
+					}
+				}
+			}
 		} finally {
 			// Also after a refusal: "already set up" means the lists on screen are out of date.
 			await Promise.all([loadOwnBots().catch(() => {}), loadPublicBots().catch(() => {})])
 		}
+		return bot ?? state.ownBots.find(own => own?.is_assistant === true) ?? null
 	}
 
 	async function updateBot(id, payload) {
