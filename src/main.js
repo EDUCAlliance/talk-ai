@@ -1,4 +1,5 @@
 import './utils/ensureOcFilePath.js'
+import './styles/talkai.scss'
 
 import App from './views/App.vue'
 import { createApp } from 'vue'

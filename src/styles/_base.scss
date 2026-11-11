@@ -1,0 +1,90 @@
+// Resets and the page frame. Loaded below the wrapper selector, see talkai.scss.
+
+// Core sets this inside #content only; dialogs are teleported out of it.
+:where([class^='talkai-'], [class*=' talkai-']),
+:where([class^='talkai-'], [class*=' talkai-'])::before,
+:where([class^='talkai-'], [class*=' talkai-'])::after {
+	box-sizing: border-box;
+}
+
+// Core draws every bare <button> as a filled pill, gives headings margins and its own colour
+// and links the main text colour. The resets stay inside :where(), so they sit above core
+// and below every rule that follows.
+:where(button[class^='talkai-'], button[class*=' talkai-']) {
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background-color: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: start;
+	cursor: pointer;
+}
+
+:where(button[class^='talkai-'], button[class*=' talkai-']):disabled {
+	cursor: default;
+}
+
+:where(h1, h2, h3, h4, p, ul, ol, li):where([class^='talkai-'], [class*=' talkai-']) {
+	margin: 0;
+	padding: 0;
+	color: inherit;
+}
+
+:where(a[class^='talkai-'], a[class*=' talkai-']) {
+	color: inherit;
+	text-underline-offset: 4px;
+}
+
+// Buttons keep the focus ring of core. Core has none for links inside #content-vue.
+:where(a, [tabindex]):where([class^='talkai-'], [class*=' talkai-']):focus-visible {
+	outline: 2px solid var(--talkai-ink-2);
+	outline-offset: 2px;
+}
+
+// vue-material-design-icons ships its base style separately. Inside our own markup an icon is a plain flex item.
+:where([class^='talkai-'], [class*=' talkai-']) > :where(.material-design-icon) {
+	display: inline-flex;
+	flex: none;
+}
+
+// Page frame. The top padding leaves room for the navigation toggle of Nextcloud.
+.talkai-screen {
+	max-width: 1200px;
+	padding: 56px 40px 96px;
+}
+
+.talkai-page-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 16px;
+	margin-block-end: 24px;
+}
+
+.talkai-page-head__title {
+	font-size: 32px;
+	font-weight: 700;
+	line-height: 1.15;
+	letter-spacing: -0.01em;
+}
+
+.talkai-page-head__lead {
+	max-width: 780px;
+	margin-block-start: 8px;
+	color: var(--talkai-ink-3);
+	font-size: 15px;
+}
+
+@container talkai-app (max-width: 759px) {
+
+	.talkai-screen {
+		padding-inline: 16px;
+	}
+
+	.talkai-page-head__title {
+		font-size: 28px;
+	}
+}

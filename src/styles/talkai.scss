@@ -1,0 +1,12 @@
+// Styles of the Talk AI app page: the content that sits inside the Nextcloud frame.
+// The frame itself (navigation, sidebar, dialog frame, menus) comes from @nextcloud/vue.
+@use 'sass:meta';
+@use 'tokens';
+
+// Nextcloud core styles bare elements (button, input, h2, a, dl) with selectors up to (0,4,1),
+// including their hover, focus and active states. The unused ID lifts everything below above
+// those rules, without !important and without an ID in the DOM. Dialogs are teleported to
+// <body>, so they only need the class on their content.
+:is(#talkai-specificity, .talkai) {
+	@include meta.load-css('base');
+}

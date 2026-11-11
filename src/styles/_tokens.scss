@@ -1,0 +1,75 @@
+@use 'scope';
+
+// Light values follow the EDUC Component Library.
+.talkai {
+	--talkai-ink: #3d3d3b;
+	--talkai-ink-2: #575754;
+	--talkai-ink-3: #70706d;
+	--talkai-on-ink: #fff;
+	--talkai-line: #d6d6cf;
+	--talkai-line-2: #bdbdb7;
+	--talkai-line-3: #a3a39e;
+	--talkai-surface: #fff;
+	--talkai-surface-2: #fafaf8;
+	--talkai-surface-3: #f0f0e8;
+	--talkai-green: #28be7f;
+	--talkai-green-soft: #c4f2df;
+	--talkai-orange: #ff9880;
+	--talkai-orange-soft: #ffe0d9;
+	--talkai-orange-text: #804c40;
+	--talkai-pink: #f96e99;
+	--talkai-pink-soft: #fcd4e1;
+	--talkai-violet: #9d76e5;
+	--talkai-violet-soft: #e4d7fc;
+	--talkai-radius: 10px;
+	--talkai-radius-md: 8px;
+	--talkai-radius-sm: 6px;
+	--talkai-shadow-xs: 0 1px 2px rgb(0 0 0 / 5%);
+	--talkai-shadow-sm: 0 1px 3px rgb(0 0 0 / 10%), 0 1px 2px -1px rgb(0 0 0 / 10%);
+	--talkai-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
+	--talkai-ease: 0.15s ease-in-out;
+	@include scope.tokens;
+	color: var(--talkai-ink);
+	font-family: var(--font-face);
+	font-size: 15px;
+	line-height: 1.5;
+}
+
+// The design has no dark theme of its own. Map the roles onto Nextcloud's theme so the app stays readable there.
+@mixin dark {
+	--talkai-ink: var(--color-main-text);
+	--talkai-ink-2: var(--color-main-text);
+	--talkai-ink-3: var(--color-text-maxcontrast);
+	--talkai-on-ink: var(--color-main-background);
+	--talkai-line: var(--color-border);
+	--talkai-line-2: var(--color-border-dark);
+	--talkai-line-3: var(--color-border-maxcontrast);
+	--talkai-surface: var(--color-main-background);
+	--talkai-surface-2: var(--color-background-hover);
+	--talkai-surface-3: var(--color-background-dark);
+	--talkai-green-soft: color-mix(in srgb, #28be7f 22%, transparent);
+	--talkai-orange-soft: color-mix(in srgb, #ff9880 22%, transparent);
+	--talkai-orange-text: #ff9880;
+	--talkai-pink-soft: color-mix(in srgb, #f96e99 22%, transparent);
+	--talkai-violet-soft: color-mix(in srgb, #9d76e5 26%, transparent);
+	@include scope.tokens-dark;
+}
+
+[data-theme-dark] .talkai,
+[data-theme-dark-highcontrast] .talkai {
+	@include dark;
+}
+
+@media (prefers-color-scheme: dark) {
+
+	[data-theme-default] .talkai {
+		@include dark;
+	}
+}
+
+// The page root is the size container: the layout follows the room the content really has,
+// whether the navigation is open or not.
+.talkai-app {
+	min-height: 100%;
+	container: talkai-app / inline-size;
+}
