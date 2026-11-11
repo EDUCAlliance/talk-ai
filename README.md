@@ -45,7 +45,7 @@ It connects Talk messages, per-bot system prompts, any **OpenAI-compatible** mod
 
 | My bots: every state at a glance | Admin settings (overview) |
 |---|---|
-| ![My bots](docs/screenshots/my-bots.png) | ![Admin settings](docs/screenshots/admin-settings.png) |
+| ![My bots](docs/screenshots/my-bots.png) | ![Admin settings](docs/screenshots/admin-overview.png) |
 
 ## Quick Start
 
