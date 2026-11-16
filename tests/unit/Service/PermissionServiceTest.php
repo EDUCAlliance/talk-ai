@@ -87,9 +87,44 @@ class PermissionServiceTest extends TestCase {
 		$bot = $this->createBot('owner', 'groups', ['group-a', 'group-b']);
 
 		$this->assertTrue($service->canApproveBot('reviewer', $bot));
+		$this->assertSame(['group-a', 'group-b'], $service->getReviewableUnitIds('reviewer', $bot));
 
-		$otherScopedBot = $this->createBot('owner', 'groups', ['group-a', 'group-c']);
-		$this->assertFalse($service->canApproveBot('reviewer', $otherScopedBot));
+		$unrelatedBot = $this->createBot('owner', 'groups', ['group-c', 'group-d']);
+		$this->assertFalse($service->canApproveBot('reviewer', $unrelatedBot));
+		$this->assertSame([], $service->getReviewableUnitIds('reviewer', $unrelatedBot));
+	}
+
+	public function testAnAdminOfOneOfSeveralGroupsOrTeamsReviewsTheirPart(): void {
+		$service = $this->createPermissionService(false, ['group-a'], ['team-1']);
+
+		$groupBot = $this->createBot('owner', 'groups', ['group-a', 'group-c']);
+		$this->assertTrue($service->canApproveBot('reviewer', $groupBot));
+		$this->assertSame(['group-a', 'group-c'], $service->getReviewUnitIds($groupBot));
+		$this->assertSame(['group-a'], $service->getReviewableUnitIds('reviewer', $groupBot));
+
+		$teamBot = $this->createBot('owner', 'teams', [], ['team-1', 'team-2']);
+		$this->assertTrue($service->canApproveBot('reviewer', $teamBot));
+		$this->assertSame(['team-1'], $service->getReviewableUnitIds('reviewer', $teamBot));
+
+		// Reviewing a part is not the right to publish to all of it, or to edit the bot
+		$this->assertFalse($service->canPublishBotToScope('reviewer', 'teams', null, ['team-1', 'team-2']));
+		$this->assertFalse($service->canEditBot('reviewer', $teamBot));
+
+		// Group rights do not count for a team bot and the other way round
+		$this->assertFalse($service->canApproveBot('reviewer', $this->createBot('owner', 'teams', [], ['group-a'])));
+		$this->assertFalse($service->canApproveBot('reviewer', $this->createBot('owner', 'groups', ['team-1'])));
+	}
+
+	public function testABotForEveryoneHasNoPartsAndIsReviewedByAdministratorsOnly(): void {
+		$globalBot = $this->createBot('owner', 'global');
+
+		$scopeAdmin = $this->createPermissionService(false, ['group-a'], ['team-1']);
+		$this->assertSame([], $scopeAdmin->getReviewUnitIds($globalBot));
+		$this->assertFalse($scopeAdmin->canApproveBot('reviewer', $globalBot));
+
+		$admin = $this->createPermissionService(true, [], []);
+		$this->assertTrue($admin->canApproveBot('admin', $globalBot));
+		$this->assertFalse($admin->canApproveBot('admin', $this->createBot('owner', 'personal')));
 	}
 
 	public function testCanApproveBotAllowsOwnerWhenTheyCanManageTargetScope(): void {
@@ -221,15 +256,33 @@ class PermissionServiceTest extends TestCase {
 		$this->assertFalse($service->canPublishBotToScope('reviewer', 'teams', null, ['team-1', 'team-3']));
 	}
 
-	public function testCanApproveTeamBotRequiresConcreteTeamAdminEvenForGlobalAdmin(): void {
-		$teamBot = $this->createBot('owner', 'teams', [], ['team-1']);
+	public function testANextcloudAdministratorReviewsTeamBotsWithoutBeingATeamAdmin(): void {
+		$teamBot = $this->createBot('owner', 'teams', [], ['team-1', 'team-2']);
 
+		// Otherwise a bot for teams without a common admin could never be decided
 		$globalAdminOnly = $this->createPermissionService(true, [], []);
-		$this->assertFalse($globalAdminOnly->canApproveBot('admin', $teamBot));
+		$this->assertTrue($globalAdminOnly->canApproveBot('admin', $teamBot));
+		$this->assertSame(['team-1', 'team-2'], $globalAdminOnly->getReviewableUnitIds('admin', $teamBot));
 		$this->assertTrue($globalAdminOnly->canPublishBotToScope('admin', 'teams', null, ['team-1']));
 
-		$teamAdmin = $this->createPermissionService(true, [], ['team-1']);
-		$this->assertTrue($teamAdmin->canApproveBot('admin', $teamBot));
+		$teamAdmin = $this->createPermissionService(false, [], ['team-1']);
+		$this->assertTrue($teamAdmin->canApproveBot('reviewer', $teamBot));
+		$this->assertFalse($this->createPermissionService(false, [], ['team-3'])->canApproveBot('reviewer', $teamBot));
+	}
+
+	public function testThePartsUnderReviewFollowThePendingTargetScope(): void {
+		$service = $this->createPermissionService(false, [], ['team-2']);
+		$bot = $this->createBot('owner', 'teams', [], ['team-1']);
+		$bot->setApprovalStatus('pending');
+		$bot->setPendingChangesArray([
+			'visibility' => 'teams',
+			'allowed_groups' => json_encode([]),
+			'allowed_teams' => json_encode(['team-1', 'team-2']),
+		]);
+
+		$this->assertSame(['team-1', 'team-2'], $service->getReviewUnitIds($bot));
+		$this->assertSame(['team-2'], $service->getReviewableUnitIds('reviewer', $bot));
+		$this->assertTrue($service->canApproveBot('reviewer', $bot));
 	}
 
 	private function createSubAdmin(): ISubAdmin {

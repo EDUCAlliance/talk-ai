@@ -3281,6 +3281,233 @@ class BotServiceTest extends TestCase {
 		$this->assertTrue($service->userCanAccessBot($approved, 'guests/3f2a9c'));
 	}
 
+	// ---- A bot for several teams or groups is approved part by part ----
+
+	public function testSubmittingForTwoTeamsCountsTheOwnTeamOfTheOwnerAsApproved(): void {
+		$bot = $this->createDraftTeamBot('dave', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$submitted = $service->submitForApproval(7, 'dave', 'Both teams asked for it.');
+
+		$this->assertSame('pending', $submitted->getApprovalStatus());
+		$this->assertSame(['team-1'], array_keys($submitted->getScopeApprovalsArray()));
+		$this->assertSame('dave', $submitted->getScopeApprovalsArray()['team-1']['by']);
+	}
+
+	public function testSubmittingWithoutOwnRightsStartsWithoutApprovals(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$this->assertSame([], $service->submitForApproval(7, 'alice')->getScopeApprovalsArray());
+	}
+
+	public function testAnOwnerWhoManagesEveryTeamStillApprovesTheSubmissionExplicitly(): void {
+		$bot = $this->createDraftTeamBot('dave', ['team-1']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$submitted = $service->submitForApproval(7, 'dave');
+
+		$this->assertSame('pending', $submitted->getApprovalStatus());
+		$this->assertSame([], $submitted->getScopeApprovalsArray());
+		$this->assertSame('approved', $service->approveBot(7, 'dave')->getApprovalStatus());
+	}
+
+	public function testTheBotGoesLiveWhenTheAdminOfTheLastTeamApproves(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+		$service->submitForApproval(7, 'alice');
+
+		$afterFirst = $service->approveBot(7, 'dave');
+		$this->assertSame('pending', $afterFirst->getApprovalStatus());
+		$this->assertNull($afterFirst->getApprovedAt());
+		$this->assertSame(['team-1'], array_keys($afterFirst->getScopeApprovalsArray()));
+		$firstTime = $afterFirst->getScopeApprovalsArray()['team-1']['at'];
+
+		// Approving the own part twice changes nothing
+		$again = $service->approveBot(7, 'dave');
+		$this->assertSame('pending', $again->getApprovalStatus());
+		$this->assertSame(['team-1' => ['by' => 'dave', 'at' => $firstTime]], $again->getScopeApprovalsArray());
+
+		$afterSecond = $service->approveBot(7, 'bob');
+		$this->assertSame('approved', $afterSecond->getApprovalStatus());
+		$this->assertSame('bob', $afterSecond->getApprovedBy());
+		$this->assertNotNull($afterSecond->getApprovedAt());
+		$this->assertNull($afterSecond->getScopeApprovals());
+	}
+
+	public function testANextcloudAdministratorApprovesForEveryTeamAtOnce(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+		$service->submitForApproval(7, 'alice');
+
+		$approved = $service->approveBot(7, 'admin');
+
+		$this->assertSame('approved', $approved->getApprovalStatus());
+		$this->assertSame('admin', $approved->getApprovedBy());
+		$this->assertNull($approved->getScopeApprovals());
+	}
+
+	public function testSomebodyWithoutATeamOfTheBotCannotApproveOrReject(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+		$service->submitForApproval(7, 'alice');
+
+		foreach (['approveBot', 'rejectBot'] as $action) {
+			try {
+				$service->$action(7, 'carol');
+				$this->fail($action . ' should be refused');
+			} catch (AuthorizationException) {
+				$this->assertSame('pending', $bot->getApprovalStatus());
+			}
+		}
+	}
+
+	public function testOneTeamAdminRejectsTheWholeSubmissionAndTheApprovalsAreForgotten(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+		$service->submitForApproval(7, 'alice');
+		$service->approveBot(7, 'dave');
+
+		$rejected = $service->rejectBot(7, 'bob', 'Not for our team.');
+
+		$this->assertSame('draft', $rejected->getApprovalStatus());
+		$this->assertSame('Not for our team.', $rejected->getRejectionReason());
+		$this->assertNull($rejected->getScopeApprovals());
+
+		// A new submission is reviewed again by both teams
+		$service->submitForApproval(7, 'alice');
+		$this->assertSame('pending', $service->approveBot(7, 'bob')->getApprovalStatus());
+	}
+
+	public function testEditingAWaitingBotAsksEveryTeamAgain(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+		$service->submitForApproval(7, 'alice');
+		$service->approveBot(7, 'dave');
+
+		$edited = $service->updateBot(id: 7, userId: 'alice', botName: 'Team bot', systemPrompt: 'A changed instruction.');
+
+		$this->assertSame('pending', $edited->getApprovalStatus());
+		$this->assertSame([], $edited->getScopeApprovalsArray());
+		$this->assertSame('pending', $service->approveBot(7, 'bob')->getApprovalStatus());
+		$this->assertSame('approved', $service->approveBot(7, 'dave')->getApprovalStatus());
+	}
+
+	public function testAddingATeamToAnApprovedBotNeedsOnlyTheNewTeamWhenTheOwnerManagesTheOld(): void {
+		$bot = $this->createDraftTeamBot('dave', ['team-1']);
+		$bot->setApprovalStatus('approved');
+		$bot->setApprovedBy('dave');
+		$bot->setApprovedAt(100);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$changed = $service->updateBot(
+			id: 7,
+			userId: 'dave',
+			botName: 'Team bot',
+			systemPrompt: 'An instruction.',
+			visibility: 'teams',
+			allowedTeams: ['team-1', 'team-2']
+		);
+
+		$this->assertSame('pending', $changed->getApprovalStatus());
+		$this->assertSame(json_encode(['team-1']), $changed->getAllowedTeams(), 'the approved version stays live');
+		$this->assertSame(['team-1'], array_keys($changed->getScopeApprovalsArray()));
+
+		$approved = $service->approveBot(7, 'bob');
+		$this->assertSame('approved', $approved->getApprovalStatus());
+		$this->assertSame(json_encode(['team-1', 'team-2']), $approved->getAllowedTeams());
+		$this->assertNull($approved->getScopeApprovals());
+	}
+
+	public function testAnApprovalForATeamThatLeftTheSubmissionDoesNotCount(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-2', 'team-3']);
+		$bot->setApprovalStatus('pending');
+		// Left over from an earlier submission for team-1 and team-2
+		$bot->setScopeApprovalsArray(['team-1' => ['by' => 'dave', 'at' => 5]]);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$afterBob = $service->approveBot(7, 'bob');
+
+		$this->assertSame('pending', $afterBob->getApprovalStatus());
+		$this->assertSame(['team-2'], array_keys($afterBob->getScopeApprovalsArray()));
+	}
+
+	public function testGroupsAreApprovedPartByPartAsWell(): void {
+		$bot = $this->createApprovedBot();
+		$bot->setApprovalStatus('draft');
+		$bot->setApprovedBy(null);
+		$bot->setApprovedAt(null);
+		$bot->setAllowedGroups(json_encode(['group-a', 'group-b']) ?: '[]');
+		$permissions = $this->createScopedPermissionService([], ['anna' => ['group-a'], 'ben' => ['group-b']]);
+		$service = $this->createBotService($this->botMapperFor($bot), $permissions);
+		$service->submitForApproval(7, 'owner');
+
+		$this->assertSame('pending', $service->approveBot(7, 'anna')->getApprovalStatus());
+		$this->assertSame('approved', $service->approveBot(7, 'ben')->getApprovalStatus());
+	}
+
+	public function testTheReviewListShowsEveryTeamAdminTheBotWithItsProgress(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$botMapper = $this->botMapperFor($bot);
+		$botMapper->method('findByApprovalStatus')->willReturn([$bot]);
+		$userManager = $this->createUserManagerWith(['alice' => 'Alice Schmidt', 'dave' => 'Dave Okafor']);
+		$service = $this->createBotService($botMapper, $this->twoTeamPermissions(), null, $userManager);
+		$service->submitForApproval(7, 'alice');
+		$service->approveBot(7, 'dave');
+
+		$forBob = $service->getPendingApprovals('bob');
+		$this->assertCount(1, $forBob);
+		$this->assertSame(['team-2'], $forBob[0]['reviewable_scope_ids']);
+		$this->assertCount(1, $forBob[0]['scope_approvals']);
+		$this->assertSame('team-1', $forBob[0]['scope_approvals'][0]['id']);
+		$this->assertSame('dave', $forBob[0]['scope_approvals'][0]['by']);
+		$this->assertSame('Dave Okafor', $forBob[0]['scope_approvals'][0]['by_name']);
+
+		// Dave keeps seeing the bot he already approved for his team, the administrator sees it too
+		$this->assertSame(['team-1'], $service->getPendingApprovals('dave')[0]['reviewable_scope_ids']);
+		$this->assertSame(['team-1', 'team-2'], $service->getPendingApprovals('admin')[0]['reviewable_scope_ids']);
+	}
+
+	/**
+	 * dave manages team-1, bob manages team-2, admin is a Nextcloud administrator;
+	 * alice and carol manage nothing.
+	 */
+	private function twoTeamPermissions(): PermissionService {
+		return $this->createScopedPermissionService(['admin'], [], ['dave' => ['team-1'], 'bob' => ['team-2']]);
+	}
+
+	/**
+	 * @param list<string> $teams
+	 */
+	private function createDraftTeamBot(string $owner, array $teams): Bot {
+		$bot = new Bot();
+		$bot->setId(7);
+		$bot->setUserId($owner);
+		$bot->setBotName('Team bot');
+		$bot->setMentionName('@team-bot');
+		$bot->setSystemPrompt('An instruction.');
+		$bot->setVisibility('teams');
+		$bot->setIsPublic(false);
+		$bot->setAllowedGroups(json_encode([]) ?: '[]');
+		$bot->setAllowedTeams(json_encode($teams) ?: '[]');
+		$bot->setApprovalStatus('draft');
+		$bot->setCreatedAt(10);
+		$bot->setUpdatedAt(10);
+
+		return $bot;
+	}
+
+	/**
+	 * A mapper that keeps one bot, the way the table would.
+	 */
+	private function botMapperFor(Bot $bot): BotMapper&\PHPUnit\Framework\MockObject\MockObject {
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('findById')->willReturn($bot);
+		$botMapper->method('update')->willReturnCallback(static fn (Bot $updated): Bot => $updated);
+
+		return $botMapper;
+	}
+
 	private function createApprovedBot(): Bot {
 		$bot = new Bot();
 		$bot->setId(7);

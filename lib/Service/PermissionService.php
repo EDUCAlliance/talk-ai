@@ -229,9 +229,13 @@ class PermissionService {
      * Pending updates must be reviewed against the submitted target visibility,
      * not the currently live visibility.
      *
-     * Owners may review their own pending submission when they can manage the
-     * target scope themselves (for example Nextcloud admins reviewing global
-     * bots, or scope admins reviewing bots in their own scope).
+     * A bot for several groups or teams is reviewed part by part: an admin of
+     * one of them may review it and decides for the groups or teams they manage
+     * (see getReviewableUnitIds). Nextcloud administrators may review every
+     * shared bot, so no submission is left without a reviewer.
+     *
+     * Owners may review their own pending submission when they manage a part
+     * of the target scope themselves.
      */
     public function canApproveBot(string $userId, Bot $bot): bool {
         $approvalScope = $this->getApprovalScope($bot);
@@ -241,13 +245,49 @@ class PermissionService {
             return false;
         }
 
-        return $this->canManageScope(
-            $userId,
-            $visibility,
-            $approvalScope['groups'],
-            $approvalScope['teams'],
-            $visibility !== 'teams'
-        );
+        if ($this->isAdmin($userId)) {
+            return true;
+        }
+
+        return $this->getReviewableUnitIds($userId, $bot) !== [];
+    }
+
+    /**
+     * The parts a waiting bot is approved in: its groups or its teams, in the
+     * scope that is under review. A bot for everyone has no parts.
+     *
+     * @return array<string> group ids or team ids
+     */
+    public function getReviewUnitIds(Bot $bot): array {
+        $approvalScope = $this->getApprovalScope($bot);
+
+        return match ($approvalScope['visibility']) {
+            'groups' => array_values(array_unique($approvalScope['groups'])),
+            'teams' => array_values(array_unique($approvalScope['teams'])),
+            default => [],
+        };
+    }
+
+    /**
+     * The groups or teams of a waiting bot this user may decide for.
+     * Nextcloud administrators decide for all of them.
+     *
+     * @return array<string> group ids or team ids
+     */
+    public function getReviewableUnitIds(string $userId, Bot $bot): array {
+        $units = $this->getReviewUnitIds($bot);
+        if ($units === [] || $this->isAdmin($userId)) {
+            return $units;
+        }
+
+        $managed = $this->getApprovalScope($bot)['visibility'] === 'groups'
+            ? $this->getAdminGroups($userId)
+            : $this->getAdminTeams($userId);
+
+        return array_values(array_filter(
+            $units,
+            static fn (string $id): bool => in_array($id, $managed, true)
+        ));
     }
 
     /**
@@ -393,8 +433,8 @@ class PermissionService {
      * @param array<string> $groups
      * @param array<string> $teams
      */
-    private function canManageScope(string $userId, string $visibility, array $groups, array $teams, bool $includeGlobalAdmins = true): bool {
-        if ($includeGlobalAdmins && $this->isAdmin($userId)) {
+    private function canManageScope(string $userId, string $visibility, array $groups, array $teams): bool {
+        if ($this->isAdmin($userId)) {
             return true;
         }
 
