@@ -51,7 +51,7 @@ Who reviews a waiting bot:
 - A bot for a group: the admins of that group. A bot for a team: its moderators, admins and owner.
 - A bot for several groups or teams is approved part by part: one admin of each group or team approves for it, and the bot goes live when all of them have. A reviewer who manages several of them approves for all of those at once. Groups or teams the submitter manages count as approved when the bot is submitted; somebody who manages all of them approves the submission under "To review".
 - Nextcloud administrators can review every shared bot and decide for all of its groups or teams at once.
-- Any of these reviewers can reject the submission. A changed submission is reviewed again by every group or team.
+- Any of these reviewers can reject the submission. A changed submission is reviewed again by every group or team, also when only its knowledge sources changed.
 
 Publishing without a review stays stricter: a user publishes a bot directly only when they manage every group or team it is for.
 

@@ -9,11 +9,13 @@ The upgrade adds one database migration, a column for approvals that are still c
 ### Fixed
 
 - A bot for several teams could wait for approval forever. Only somebody who managed every one of its teams could review it, and Nextcloud administrators could not review team bots at all, so with no such person the bot was in nobody's "To review". The same was true for a team that was added to an approved bot.
+- A waiting change that makes a bot personal could be decided by nobody. Making a bot personal now takes effect at once, also while another change waits.
+- An approval could land on a bot that its owner changed at the same moment. Decisions about one bot now run one after the other, each on the bot as it is then.
 - The review named "the admins of the teams" as reviewers although none of them could decide alone. It now says who really reviews, and the bot page of the owner shows which groups or teams have approved and which are still asked.
 
 ### Changed
 
-- A bot for several groups or teams is approved part by part: one admin of each group or team approves for it, and the bot goes live when all of them have. Groups or teams the submitter manages count as approved when the bot is submitted. Any reviewer can still reject the submission, and a changed submission is reviewed again by all.
+- A bot for several groups or teams is approved part by part: one admin of each group or team approves for it, and the bot goes live when all of them have. Groups or teams the submitter manages count as approved when the bot is submitted. Any reviewer can still reject the submission. A changed submission is reviewed again by all, also when only its knowledge sources changed.
 - Nextcloud administrators can review team bots, like group bots before, and decide for all teams at once.
 - "To review" lists a bot for everybody who manages one of its groups or teams, with the progress. The counter in the navigation counts what still waits for a decision of this user.
 - API: bots carry `scope_approvals`, a list of `{id, by, at}` for the groups or teams that approved the waiting version (with `by_name` in the own bot list and in `/approvals`). `/approvals` adds `reviewable_scope_ids`, the groups or teams the reviewer decides for. `POST /api/v1/bots/{id}/approve` can answer with `approval_status: "pending"` when other groups or teams are still asked.
