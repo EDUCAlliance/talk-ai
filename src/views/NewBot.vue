@@ -216,7 +216,7 @@ import TalkAiIcon from '../components/TalkAiIcon.vue'
 import { t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
-import { reviewersOf } from '../utils/botScope.js'
+import { ownScopesOf, reviewersOf } from '../utils/botScope.js'
 
 const SIDEBAR_KEY = 'talkai-preview-sidebar'
 
@@ -390,7 +390,7 @@ export default {
 			if (this.done.state === 'submitted') {
 				return {
 					title: t('educai', 'Submitted'),
-					text: t('educai', 'Reviewed by: {reviewers}. Until approval only you and the reviewers can use the bot.', { reviewers: reviewersOf(this.done.bot, this.directory, { groups: store.state.permissions.adminGroups, teams: store.state.permissions.adminTeams }) }),
+					text: t('educai', 'Reviewed by: {reviewers}. Until approval only you and the reviewers can use the bot.', { reviewers: reviewersOf(this.done.bot, this.directory, ownScopesOf(store.state.permissions)) }),
 				}
 			}
 			if (this.done.state === 'draft') {

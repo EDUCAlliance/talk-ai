@@ -160,6 +160,19 @@ export function reviewProgressOf(bot, directory = {}) {
 	}
 }
 
+/**
+ * The groups and teams whose approval a user gives by submitting a bot: the ones they manage. A Nextcloud
+ * administrator decides for every group or team and therefore approves under "To review" instead.
+ *
+ * @param {{ isAdmin?: boolean, adminGroups?: string[], adminTeams?: string[] }} permissions Permissions of the user
+ * @return {{ groups: string[], teams: string[] }} For reviewersOf() and ownPartsOf()
+ */
+export function ownScopesOf(permissions) {
+	return permissions?.isAdmin
+		? { groups: [], teams: [] }
+		: { groups: permissions?.adminGroups ?? [], teams: permissions?.adminTeams ?? [] }
+}
+
 // The version under review: a waiting change may give the bot another audience than the live one.
 function submittedVersionOf(bot) {
 	if (bot?.review_target) {

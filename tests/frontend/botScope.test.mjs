@@ -149,6 +149,17 @@ test('teams the submitter manages count as approved and are not named as reviewe
 	assert.deepEqual(ownPartsOf({ visibility: 'global' }, TEAMS, { teams: ['a'] }), [])
 })
 
+test('a Nextcloud administrator gets nothing approved by submitting', async () => {
+	const { reviewersOf, ownPartsOf, ownScopesOf } = await import('../../src/utils/botScope.js')
+	assert.deepEqual(ownScopesOf({ isAdmin: false, adminGroups: ['g'], adminTeams: ['a'] }), { groups: ['g'], teams: ['a'] })
+	assert.deepEqual(ownScopesOf(undefined), { groups: [], teams: [] })
+	// The server lets an administrator decide for every team, so it records no part when they submit
+	const own = ownScopesOf({ isAdmin: true, adminGroups: [], adminTeams: ['a'] })
+	assert.deepEqual(own, { groups: [], teams: [] })
+	assert.equal(reviewersOf(twoTeams(), TEAMS, own), 'one admin of each of the teams “EDUC Dev”, “Methods lab”')
+	assert.deepEqual(ownPartsOf(twoTeams(), TEAMS, own), [])
+})
+
 test('the progress of a review names what is approved and who is still asked', async () => {
 	const { reviewProgressOf } = await import('../../src/utils/botScope.js')
 	const waiting = twoTeams({ approval_status: 'pending', scope_approvals: [{ id: 'a', by: 'dave', by_name: 'Dave Okafor', at: 5 }] })

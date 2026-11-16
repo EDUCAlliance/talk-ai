@@ -70,7 +70,7 @@ import TalkAiIcon from './TalkAiIcon.vue'
 import { n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
-import { ownPartsOf, reviewersOf, scopeOf } from '../utils/botScope.js'
+import { ownPartsOf, ownScopesOf, reviewersOf, scopeOf } from '../utils/botScope.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
 
 // One question instead of four: what the bot can do and what it knows is taken from the bot itself.
@@ -95,7 +95,7 @@ export default {
 		},
 		// Groups and teams the submitter manages count as approved, the others review.
 		own() {
-			return { groups: store.state.permissions.adminGroups, teams: store.state.permissions.adminTeams }
+			return ownScopesOf(store.state.permissions)
 		},
 		reviewers() {
 			return reviewersOf(this.bot, this.directory, this.own)

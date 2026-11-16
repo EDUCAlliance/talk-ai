@@ -281,7 +281,7 @@ import { getCanonicalLocale, n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { diffVersions } from '../utils/botDiff.js'
-import { SCOPE_ICONS, audienceWithGuests, reviewProgressOf, reviewersOf, scopeOf } from '../utils/botScope.js'
+import { SCOPE_ICONS, audienceWithGuests, ownScopesOf, reviewProgressOf, reviewersOf, scopeOf } from '../utils/botScope.js'
 import { statusOf } from '../utils/botStatus.js'
 
 const TABS = ['overview', 'basics', 'knowledge', 'capabilities', 'access', 'advanced']
@@ -416,7 +416,7 @@ export default {
 		approvalText() {
 			const reviewers = ['in-review', 'change-in-review'].includes(this.status.stage)
 				? this.reviewProgress.waitingFor
-				: reviewersOf(this.bot, this.directory, { groups: store.state.permissions.adminGroups, teams: store.state.permissions.adminTeams })
+				: reviewersOf(this.bot, this.directory, ownScopesOf(store.state.permissions))
 			switch (this.status.stage) {
 			case 'personal':
 				return t('educai', 'A bot only for you needs no approval.')
