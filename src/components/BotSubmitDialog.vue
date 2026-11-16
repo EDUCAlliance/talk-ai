@@ -7,6 +7,9 @@
 				<div class="talkai-dialog__sub">
 					{{ t('educai', 'Reviewed by: {reviewers}', { reviewers }) }}
 				</div>
+				<div v-if="ownParts" class="talkai-dialog__sub">
+					{{ t('educai', 'Counts as approved, because you manage it: {names}', { names: ownParts }) }}
+				</div>
 			</div>
 		</template>
 
@@ -67,7 +70,7 @@ import TalkAiIcon from './TalkAiIcon.vue'
 import { n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
-import { reviewersOf, scopeOf } from '../utils/botScope.js'
+import { ownPartsOf, reviewersOf, scopeOf } from '../utils/botScope.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
 
 // One question instead of four: what the bot can do and what it knows is taken from the bot itself.
@@ -90,8 +93,15 @@ export default {
 		scope() {
 			return scopeOf(this.bot, this.directory)
 		},
+		// Groups and teams the submitter manages count as approved, the others review.
+		own() {
+			return { groups: store.state.permissions.adminGroups, teams: store.state.permissions.adminTeams }
+		},
 		reviewers() {
-			return reviewersOf(this.bot, this.directory)
+			return reviewersOf(this.bot, this.directory, this.own)
+		},
+		ownParts() {
+			return ownPartsOf(this.bot, this.directory, this.own).map(name => `“${name}”`).join(', ')
 		},
 		mention() {
 			return `@${String(this.bot.mention_name || '').replace(/^@+/, '')}`

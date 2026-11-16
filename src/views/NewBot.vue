@@ -390,7 +390,7 @@ export default {
 			if (this.done.state === 'submitted') {
 				return {
 					title: t('educai', 'Submitted'),
-					text: t('educai', 'Reviewed by: {reviewers}. Until approval only you and the reviewers can use the bot.', { reviewers: reviewersOf(this.done.bot, this.directory) }),
+					text: t('educai', 'Reviewed by: {reviewers}. Until approval only you and the reviewers can use the bot.', { reviewers: reviewersOf(this.done.bot, this.directory, { groups: store.state.permissions.adminGroups, teams: store.state.permissions.adminTeams }) }),
 				}
 			}
 			if (this.done.state === 'draft') {

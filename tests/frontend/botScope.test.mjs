@@ -116,10 +116,76 @@ test('reviewers are named by the audience, a personal bot has none', async () =>
 		'the admins of the group “IKM students”',
 	)
 	assert.equal(
-		reviewersOf({ visibility: 'teams', allowed_teams: ['a', 'b'] }, { teams: [{ id: 'a', displayName: 'EDUC Dev' }, { id: 'b', displayName: 'Methods lab' }] }),
-		'the admins of the teams “EDUC Dev”, “Methods lab”',
+		reviewersOf({ visibility: 'teams', allowed_teams: ['a'] }, { teams: [{ id: 'a', displayName: 'EDUC Dev' }] }),
+		'the admins of the team “EDUC Dev”',
 	)
 	assert.deepEqual(Object.keys(SCOPE_ICONS), SCOPE_KEYS)
+})
+
+const TEAMS = { teams: [{ id: 'a', displayName: 'EDUC Dev' }, { id: 'b', displayName: 'Methods lab' }] }
+const twoTeams = extra => ({ visibility: 'teams', allowed_teams: ['a', 'b'], ...extra })
+
+test('a bot for several teams or groups is reviewed by one admin of each', async () => {
+	const { reviewersOf } = await import('../../src/utils/botScope.js')
+	assert.equal(reviewersOf(twoTeams(), TEAMS), 'one admin of each of the teams “EDUC Dev”, “Methods lab”')
+	assert.equal(
+		reviewersOf({ visibility: 'groups', allowed_groups: ['staff', 'ikm'] }, { groups: [{ id: 'staff', displayName: 'Staff' }] }),
+		'one admin of each of the groups “Staff”, “ikm”',
+	)
+	// A team the reader is not in has no name to show
+	assert.equal(reviewersOf(twoTeams(), {}), 'one admin of each team')
+})
+
+test('teams the submitter manages count as approved and are not named as reviewers', async () => {
+	const { reviewersOf, ownPartsOf } = await import('../../src/utils/botScope.js')
+	assert.equal(reviewersOf(twoTeams(), TEAMS, { teams: ['a'] }), 'the admins of the team “Methods lab”')
+	assert.deepEqual(ownPartsOf(twoTeams(), TEAMS, { teams: ['a'] }), ['EDUC Dev'])
+	// Group rights say nothing about teams
+	assert.equal(reviewersOf(twoTeams(), TEAMS, { groups: ['a'] }), 'one admin of each of the teams “EDUC Dev”, “Methods lab”')
+	assert.deepEqual(ownPartsOf(twoTeams(), TEAMS, { groups: ['a'] }), [])
+	// Managing every team: nothing is approved by submitting, the submitter approves under "To review"
+	assert.equal(reviewersOf(twoTeams(), TEAMS, { teams: ['a', 'b'] }), 'one admin of each of the teams “EDUC Dev”, “Methods lab”')
+	assert.deepEqual(ownPartsOf(twoTeams(), TEAMS, { teams: ['a', 'b'] }), [])
+	assert.deepEqual(ownPartsOf({ visibility: 'global' }, TEAMS, { teams: ['a'] }), [])
+})
+
+test('the progress of a review names what is approved and who is still asked', async () => {
+	const { reviewProgressOf } = await import('../../src/utils/botScope.js')
+	const waiting = twoTeams({ approval_status: 'pending', scope_approvals: [{ id: 'a', by: 'dave', by_name: 'Dave Okafor', at: 5 }] })
+
+	const forOwner = reviewProgressOf(waiting, TEAMS)
+	assert.deepEqual(forOwner.parts.map(part => [part.name, part.approved, part.byName]), [['EDUC Dev', true, 'Dave Okafor'], ['Methods lab', false, null]])
+	assert.equal(forOwner.waitingFor, 'the admins of the team “Methods lab”')
+	assert.equal(forOwner.needsMe, false, 'an owner list carries no reviewer rights')
+
+	// In the review list the API says which teams this reviewer decides for
+	assert.equal(reviewProgressOf({ ...waiting, reviewable_scope_ids: ['b'] }, TEAMS).needsMe, true)
+	assert.equal(reviewProgressOf({ ...waiting, reviewable_scope_ids: ['a'] }, TEAMS).needsMe, false, 'the own part is approved already')
+	assert.deepEqual(reviewProgressOf({ ...waiting, reviewable_scope_ids: ['a', 'b'] }, TEAMS).parts.map(part => part.mine), [true, true])
+
+	const untouched = reviewProgressOf(twoTeams({ scope_approvals: [], reviewable_scope_ids: ['a'] }), TEAMS)
+	assert.equal(untouched.waitingFor, 'one admin of each of the teams “EDUC Dev”, “Methods lab”')
+	assert.equal(untouched.needsMe, true)
+})
+
+test('the progress follows the submitted version, not the live one', async () => {
+	const { reviewProgressOf } = await import('../../src/utils/botScope.js')
+	// An approved bot for one team whose owner adds a second team: the id lists of a waiting change are JSON text
+	const owned = { visibility: 'teams', allowed_teams: ['a'], pending_changes: { visibility: 'teams', allowed_teams: '["a","b"]' }, scope_approvals: [{ id: 'a', by: 'dave', at: 5 }] }
+	assert.deepEqual(reviewProgressOf(owned, TEAMS).parts.map(part => [part.id, part.approved]), [['a', true], ['b', false]])
+
+	// The review list delivers the submitted version with the team names
+	const listed = { visibility: 'teams', allowed_teams: ['a'], review_target: { visibility: 'teams', allowed_teams: ['a', 'x'], allowed_team_names: ['EDUC Dev', 'Hidden team'] }, scope_approvals: [], reviewable_scope_ids: ['x'] }
+	assert.deepEqual(reviewProgressOf(listed, {}).parts.map(part => [part.name, part.mine]), [['EDUC Dev', false], ['Hidden team', true]])
+})
+
+test('a bot for everyone has no parts: the administration decides at once', async () => {
+	const { reviewProgressOf } = await import('../../src/utils/botScope.js')
+	const progress = reviewProgressOf({ visibility: 'global', scope_approvals: [], reviewable_scope_ids: [] })
+	assert.deepEqual(progress.parts, [])
+	assert.equal(progress.waitingFor, 'the administration')
+	assert.equal(progress.needsMe, true)
+	assert.equal(reviewProgressOf({ visibility: 'global' }).needsMe, false)
 })
 
 test('the audience names guests only when the bot answers them', async () => {

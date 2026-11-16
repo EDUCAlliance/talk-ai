@@ -824,8 +824,12 @@ export default {
 		directory() {
 			return { groups: this.availableGroups, teams: this.availableTeams }
 		},
+		// Groups and teams the user manages count as approved when they submit, so the others are named.
 		reviewers() {
-			return reviewersOf(this.previewBot, this.directory)
+			return reviewersOf(this.previewBot, this.directory, {
+				groups: this.userPermissions.adminGroups ?? [],
+				teams: this.userPermissions.adminTeams ?? [],
+			})
 		},
 		// Whether saving sends the changes into review instead of making them live.
 		saveGoesToReview() {

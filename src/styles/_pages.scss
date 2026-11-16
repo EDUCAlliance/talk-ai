@@ -66,8 +66,25 @@
 	font-size: 12.5px;
 }
 
+.talkai-queue__progress {
+	color: var(--talkai-ink-2);
+	font-weight: 600;
+}
+
 .talkai-review__head {
 	margin-block-end: 12px;
+}
+
+// One line per group or team of a bot that several of them approve
+.talkai-review__parts {
+	display: grid;
+	gap: 4px;
+}
+
+.talkai-review__part {
+	display: flex;
+	align-items: center;
+	gap: 6px;
 }
 
 .talkai-review__title {
