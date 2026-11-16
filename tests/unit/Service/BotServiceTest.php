@@ -3468,6 +3468,111 @@ class BotServiceTest extends TestCase {
 		$this->assertSame(['team-1', 'team-2'], $service->getPendingApprovals('admin')[0]['reviewable_scope_ids']);
 	}
 
+	public function testChangedSourcesRestartAReviewThatIsUnderWay(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+		$service->submitForApproval(7, 'alice');
+		$service->approveBot(7, 'dave');
+
+		$service->restartReviewAfterSourceChange(7, 'alice');
+
+		$this->assertSame('pending', $bot->getApprovalStatus());
+		$this->assertSame([], $bot->getScopeApprovalsArray());
+		$this->assertSame('pending', $service->approveBot(7, 'bob')->getApprovalStatus(), 'dave is asked again');
+	}
+
+	public function testChangedSourcesKeepTheOwnPartOfWhoeverChangedThem(): void {
+		$bot = $this->createDraftTeamBot('dave', ['team-1', 'team-2']);
+		$bot->setApprovalStatus('pending');
+		$bot->setScopeApprovalsArray(['team-1' => ['by' => 'dave', 'at' => 5], 'team-2' => ['by' => 'someone', 'at' => 6]]);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$service->restartReviewAfterSourceChange(7, 'dave');
+
+		$this->assertSame(['team-1'], array_keys($bot->getScopeApprovalsArray()));
+	}
+
+	public function testChangedSourcesDoNotTouchABotThatIsNotInAReviewByParts(): void {
+		foreach (['approved', 'draft', 'pending'] as $status) {
+			$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+			$bot->setApprovalStatus($status);
+			$botMapper = $this->createMock(BotMapper::class);
+			$botMapper->method('findById')->willReturn($bot);
+			$botMapper->expects($this->never())->method('update');
+			$botMapper->expects($this->once())->method('commitDecision');
+
+			$this->createBotService($botMapper, $this->twoTeamPermissions())->restartReviewAfterSourceChange(7, 'alice');
+
+			$this->assertSame($status, $bot->getApprovalStatus());
+		}
+	}
+
+	public function testADecisionLocksTheBotBeforeReadingItAndSavesInOneStep(): void {
+		$bot = $this->createDraftTeamBot('alice', ['team-1', 'team-2']);
+		$bot->setApprovalStatus('pending');
+		$calls = [];
+		$botMapper = $this->createMock(BotMapper::class);
+		$botMapper->method('beginDecision')->willReturnCallback(static function (int $id) use (&$calls): void {
+			$calls[] = 'begin ' . $id;
+		});
+		$botMapper->method('findById')->willReturnCallback(static function () use (&$calls, $bot): Bot {
+			$calls[] = 'read';
+			return $bot;
+		});
+		$botMapper->method('update')->willReturnCallback(static function (Bot $updated) use (&$calls): Bot {
+			$calls[] = 'write';
+			return $updated;
+		});
+		$botMapper->method('commitDecision')->willReturnCallback(static function () use (&$calls): void {
+			$calls[] = 'commit';
+		});
+		$botMapper->method('rollBackDecision')->willReturnCallback(static function () use (&$calls): void {
+			$calls[] = 'roll back';
+		});
+		$service = $this->createBotService($botMapper, $this->twoTeamPermissions());
+
+		$service->approveBot(7, 'dave');
+		$this->assertSame(['begin 7', 'read', 'write', 'commit'], $calls);
+
+		$calls = [];
+		$service->rejectBot(7, 'bob', 'No.');
+		$this->assertSame(['begin 7', 'read', 'write', 'commit'], $calls);
+
+		// A refused decision leaves nothing behind
+		$calls = [];
+		$bot->setApprovalStatus('pending');
+		try {
+			$service->approveBot(7, 'carol');
+			$this->fail('carol manages no team of the bot');
+		} catch (AuthorizationException) {
+			$this->assertSame(['begin 7', 'read', 'roll back'], $calls);
+		}
+	}
+
+	public function testMakingABotPersonalTakesEffectAtOnceAlsoWhileAChangeWaits(): void {
+		$bot = $this->createDraftTeamBot('dave', ['team-1']);
+		$bot->setApprovalStatus('pending');
+		$bot->setApprovedBy('dave');
+		$bot->setApprovedAt(100);
+		$bot->setPendingChangesArray([
+			'bot_name' => 'Team bot',
+			'system_prompt' => 'A waiting instruction.',
+			'visibility' => 'teams',
+			'allowed_groups' => json_encode([]),
+			'allowed_teams' => json_encode(['team-1', 'team-2']),
+		]);
+		$bot->setScopeApprovalsArray(['team-1' => ['by' => 'dave', 'at' => 5]]);
+		$service = $this->createBotService($this->botMapperFor($bot), $this->twoTeamPermissions());
+
+		$personal = $service->updateBot(id: 7, userId: 'dave', botName: 'Team bot', systemPrompt: 'An instruction.', visibility: 'personal');
+
+		// A waiting change to "personal" could be decided by nobody
+		$this->assertSame('personal', $personal->getApprovalStatus());
+		$this->assertSame('personal', $personal->getVisibility());
+		$this->assertFalse($personal->hasPendingChanges());
+		$this->assertNull($personal->getScopeApprovals());
+	}
+
 	/**
 	 * dave manages team-1, bob manages team-2, admin is a Nextcloud administrator;
 	 * alice and carol manage nothing.

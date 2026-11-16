@@ -503,7 +503,9 @@ class BotService {
 		$selfApprovalBlocked = $bot->getUserId() === $userId && $targetVisibility !== 'personal';
 
 		// Already-versioned updates must stay in pending_changes so the approved version remains live.
-		$storePending = $bot->hasPendingChanges()
+		// Making the bot personal needs no approval and takes effect at once, also while a change
+		// waits: a waiting change to "personal" could be approved or rejected by nobody.
+		$storePending = ($bot->hasPendingChanges() && $targetVisibility !== 'personal')
 			|| ($originalStatus === 'approved' && (!$canPublishTargetScope || $selfApprovalBlocked));
 
 		if ($storePending) {
@@ -741,6 +743,27 @@ class BotService {
 	}
 
 	/**
+	 * The knowledge sources are part of what reviewers read. When they change
+	 * while the bot waits, approvals of single groups or teams no longer cover
+	 * the bot, so the review starts again for everybody.
+	 */
+	public function restartReviewAfterSourceChange(int $botId, string $actorId): void {
+		$this->botMapper->beginDecision($botId);
+		try {
+			$bot = $this->botMapper->findById($botId);
+			if (($bot->getApprovalStatus() ?? 'approved') === 'pending' && $bot->getScopeApprovalsArray() !== []) {
+				$this->startScopeApprovals($bot, $actorId, time());
+				$bot->setUpdatedAt(time());
+				$this->botMapper->update($bot);
+			}
+			$this->botMapper->commitDecision();
+		} catch (\Throwable $e) {
+			$this->botMapper->rollBackDecision();
+			throw $e;
+		}
+	}
+
+	/**
 	 * Notes that the reviewer approves the waiting submission for the groups or
 	 * teams they manage.
 	 *
@@ -780,6 +803,21 @@ class BotService {
 	 * @throws Exception
 	 */
 	public function approveBot(int $botId, string $approverId): Bot {
+		// Decisions about one bot run one after the other, each on the bot as it is then:
+		// otherwise an approval could land on a version that was changed in the meantime.
+		$this->botMapper->beginDecision($botId);
+		try {
+			$bot = $this->approveLockedBot($botId, $approverId);
+			$this->botMapper->commitDecision();
+
+			return $bot;
+		} catch (\Throwable $e) {
+			$this->botMapper->rollBackDecision();
+			throw $e;
+		}
+	}
+
+	private function approveLockedBot(int $botId, string $approverId): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($approverId, $bot)) {
 			throw new AuthorizationException('You do not have permission to approve this bot');
@@ -852,6 +890,19 @@ class BotService {
 	 * @throws Exception
 	 */
 	public function rejectBot(int $botId, string $rejecterId, ?string $reason = null): Bot {
+		$this->botMapper->beginDecision($botId);
+		try {
+			$bot = $this->rejectLockedBot($botId, $rejecterId, $reason);
+			$this->botMapper->commitDecision();
+
+			return $bot;
+		} catch (\Throwable $e) {
+			$this->botMapper->rollBackDecision();
+			throw $e;
+		}
+	}
+
+	private function rejectLockedBot(int $botId, string $rejecterId, ?string $reason): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($rejecterId, $bot)) {
 			throw new AuthorizationException('You do not have permission to reject this bot');
