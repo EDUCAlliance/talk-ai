@@ -6,7 +6,7 @@ import { createRenderer, h, nextTick } from 'vue'
 import { getCanonicalLocale, n, t } from '../../src/l10n.js'
 import { apiToolBlockReason, unavailableSelections } from '../../src/utils/apiConnections.js'
 import { getApiErrorMessage } from '../../src/utils/apiError.js'
-import { SCOPE_ICONS, reviewersOf } from '../../src/utils/botScope.js'
+import { SCOPE_ICONS, ownScopesOf, reviewersOf } from '../../src/utils/botScope.js'
 import { capabilitiesOf, capabilityTexts, groupOfferedTools } from '../../src/utils/capabilities.js'
 import * as modelSelection from '../../src/utils/modelSelection.js'
 import { normalizeToolSelectionAliases } from '../../src/utils/toolAliases.js'
@@ -62,7 +62,7 @@ function editor(ctx, { props = {}, routes = {}, ownBots = [], publicBots = [] } 
 		axios, WIKI_ROOT_FOLDER: 'Talk AI', generateUrl: value => value,
 		NcProgressBar: {}, NcSelect: {}, ModelSelector: {}, TalkAiIcon: {},
 		t, n, getCanonicalLocale, getApiErrorMessage, modelSelection, normalizeToolSelectionAliases,
-		apiToolBlockReason, unavailableSelections, SCOPE_ICONS, reviewersOf, capabilitiesOf, capabilityTexts, groupOfferedTools,
+		apiToolBlockReason, unavailableSelections, SCOPE_ICONS, ownScopesOf, reviewersOf, capabilitiesOf, capabilityTexts, groupOfferedTools,
 		store: { state: { ownBots, publicBots } },
 		showError: value => errors.push(value), showSuccess() {},
 		console: { error() {}, log() {}, warn() {} },

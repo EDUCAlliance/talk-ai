@@ -281,7 +281,7 @@ import { getCanonicalLocale, n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { diffVersions } from '../utils/botDiff.js'
-import { SCOPE_ICONS, audienceWithGuests, reviewersOf, scopeOf } from '../utils/botScope.js'
+import { SCOPE_ICONS, audienceWithGuests, ownScopesOf, reviewProgressOf, reviewersOf, scopeOf } from '../utils/botScope.js'
 import { statusOf } from '../utils/botStatus.js'
 
 const TABS = ['overview', 'basics', 'knowledge', 'capabilities', 'access', 'advanced']
@@ -383,7 +383,9 @@ export default {
 				return {
 					tone: 'info',
 					icon: 'clock',
-					text: t('educai', 'Waiting for approval by {reviewers}. Until then only you and the reviewers can use the bot.', { reviewers: reviewersOf(this.bot, this.directory) }),
+					text: this.reviewProgress.approved === ''
+						? t('educai', 'Waiting for approval by {reviewers}. Until then only you and the reviewers can use the bot.', { reviewers: this.reviewProgress.waitingFor })
+						: t('educai', 'Approved for {names}. Still waiting for approval by {reviewers}.', { names: this.reviewProgress.approved, reviewers: this.reviewProgress.waitingFor }),
 				}
 			case 'draft':
 				return {
@@ -403,8 +405,18 @@ export default {
 					: null
 			}
 		},
+		// Who still has to approve the waiting version, and which groups or teams already did.
+		reviewProgress() {
+			const progress = reviewProgressOf(this.bot, this.directory)
+			return {
+				waitingFor: progress.waitingFor,
+				approved: progress.parts.filter(part => part.approved).map(part => `“${part.name ?? part.id}”`).join(', '),
+			}
+		},
 		approvalText() {
-			const reviewers = reviewersOf(this.bot, this.directory)
+			const reviewers = ['in-review', 'change-in-review'].includes(this.status.stage)
+				? this.reviewProgress.waitingFor
+				: reviewersOf(this.bot, this.directory, ownScopesOf(store.state.permissions))
 			switch (this.status.stage) {
 			case 'personal':
 				return t('educai', 'A bot only for you needs no approval.')
@@ -413,9 +425,11 @@ export default {
 			case 'feedback':
 				return t('educai', 'Sent back by the reviewer. Revise the bot and submit it again.')
 			case 'in-review':
-				return t('educai', 'Submitted on {date}. Reviewed by: {reviewers}.', { date: this.formatDate(this.bot.submitted_at), reviewers })
+				return this.reviewProgress.approved === ''
+					? t('educai', 'Submitted on {date}. Reviewed by: {reviewers}.', { date: this.formatDate(this.bot.submitted_at), reviewers })
+					: t('educai', 'Submitted on {date}. Approved for {names}. Still to review: {reviewers}.', { date: this.formatDate(this.bot.submitted_at), names: this.reviewProgress.approved, reviewers })
 			case 'change-in-review':
-				return t('educai', 'A change was submitted on {date} and is waiting for approval. The approved version stays live.', { date: this.formatDate(this.bot.submitted_at) })
+				return t('educai', 'A change was submitted on {date} and is waiting for approval by {reviewers}. The approved version stays live.', { date: this.formatDate(this.bot.submitted_at), reviewers })
 			default:
 				return this.bot.approved_at
 					? t('educai', 'Approved on {date}. Later changes are reviewed again.', { date: this.formatDate(this.bot.approved_at) })

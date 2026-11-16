@@ -128,6 +128,9 @@ class RagController extends Controller {
                 return new DataResponse($this->formatSource($existing), 200);
             }
 
+            // Reviewers read the sources: approvals of single groups or teams do not cover a changed list.
+            $this->botService->restartReviewAfterSourceChange($botId, (string)$this->userId);
+
             $source = new BotSource();
             $source->setBotId($botId);
             $source->setOwnerUid($this->userId);
@@ -172,6 +175,8 @@ class RagController extends Controller {
         if ($existing instanceof BotSource) {
             return new DataResponse($this->formatSource($existing), 200);
         }
+
+        $this->botService->restartReviewAfterSourceChange($botId, (string)$this->userId);
 
         $source = new BotSource();
         $source->setBotId($botId);
@@ -231,6 +236,7 @@ class RagController extends Controller {
 
             $source = $this->getLinkedSource($botId, $sourceId);
 
+            $this->botService->restartReviewAfterSourceChange($botId, (string)$this->userId);
             $this->embeddingMapper->deleteBySource($sourceId);
             $this->botSourceMapper->deleteById($sourceId);
 

@@ -697,7 +697,7 @@ import TalkAiIcon from './TalkAiIcon.vue'
 import { n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
-import { SCOPE_ICONS, reviewersOf } from '../utils/botScope.js'
+import { SCOPE_ICONS, ownScopesOf, reviewersOf } from '../utils/botScope.js'
 import { capabilitiesOf, capabilityTexts, groupOfferedTools } from '../utils/capabilities.js'
 
 const MENTION_PATTERN = /^[a-zA-Z0-9_-]+$/
@@ -824,8 +824,9 @@ export default {
 		directory() {
 			return { groups: this.availableGroups, teams: this.availableTeams }
 		},
+		// Groups and teams the user manages count as approved when they submit, so the others are named.
 		reviewers() {
-			return reviewersOf(this.previewBot, this.directory)
+			return reviewersOf(this.previewBot, this.directory, ownScopesOf(this.userPermissions))
 		},
 		// Whether saving sends the changes into review instead of making them live.
 		saveGoesToReview() {

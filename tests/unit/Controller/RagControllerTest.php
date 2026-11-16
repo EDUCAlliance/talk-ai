@@ -209,7 +209,10 @@ class RagControllerTest extends TestCase {
 		$ragIngestionService->method('enqueueSource')->willReturnCallback(static function (int $sourceId, bool $force = false) use (&$queued): void {
 			$queued[] = [$sourceId, $force];
 		});
-		$controller = $this->createController($this->botServiceFor($this->pendingGroupBot()), $botSourceMapper, $userId, $ragIngestionService, $embeddingMapper);
+		$botService = $this->botServiceFor($this->pendingGroupBot());
+		// Adding and removing a source restarts a review that is under way; listing and reindexing do not
+		$botService->expects($this->exactly(2))->method('restartReviewAfterSourceChange')->with(42, $userId);
+		$controller = $this->createController($botService, $botSourceMapper, $userId, $ragIngestionService, $embeddingMapper);
 
 		$listed = $controller->index(42);
 		$added = $controller->store(42, 55, 'folder');

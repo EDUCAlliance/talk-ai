@@ -43,7 +43,17 @@ Talk AI supports four visibility scopes:
 - `teams`: visible to selected Nextcloud teams
 - `global`: visible to all users
 
-Personal bots do not need approval. Shared bots can move through draft, pending, and approved states. Users with scope rights can review pending bots for the groups or teams they manage. The approved version stays live while an update waits for review.
+Personal bots do not need approval. Shared bots can move through draft, pending, and approved states. The approved version stays live while an update waits for review.
+
+Who reviews a waiting bot:
+
+- A bot for everyone: Nextcloud administrators.
+- A bot for a group: the admins of that group. A bot for a team: its moderators, admins and owner.
+- A bot for several groups or teams is approved part by part: one admin of each group or team approves for it, and the bot goes live when all of them have. A reviewer who manages several of them approves for all of those at once. Groups or teams the submitter manages count as approved when the bot is submitted; somebody who manages all of them approves the submission under "To review".
+- Nextcloud administrators can review every shared bot and decide for all of its groups or teams at once.
+- Any of these reviewers can reject the submission. A changed submission is reviewed again by every group or team, also when only its knowledge sources changed.
+
+Publishing without a review stays stricter: a user publishes a bot directly only when they manage every group or team it is for.
 
 Each scope has its own colour, one of the four of the EDUC logo: violet for personal, green for groups, orange for teams and pink for global. The colour always comes with an icon and the words.
 

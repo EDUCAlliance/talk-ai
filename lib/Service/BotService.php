@@ -227,11 +227,37 @@ class BotService {
 				)
 			));
 			$botData['can_edit'] = true;
+			$botData['scope_approvals'] = $this->describeScopeApprovals($bot);
 
 			$result[] = $botData;
 		}
 
 		return $result;
+	}
+
+	/**
+	 * The groups or teams that already approved a waiting bot, with the name of
+	 * who approved, for the lists that show the progress of a review.
+	 *
+	 * @return list<array{id: string, by: string, by_name: string, at: int}> empty when nothing is approved yet
+	 */
+	private function describeScopeApprovals(Bot $bot): array {
+		if (($bot->getApprovalStatus() ?? 'approved') !== 'pending') {
+			return [];
+		}
+
+		$units = $this->permissionService->getReviewUnitIds($bot);
+		$list = [];
+		foreach ($bot->getScopeApprovalsList() as $approval) {
+			if (!in_array($approval['id'], $units, true)) {
+				continue;
+			}
+			$reviewer = $this->userManager->get($approval['by']);
+			$approval['by_name'] = $reviewer !== null ? $reviewer->getDisplayName() : $approval['by'];
+			$list[] = $approval;
+		}
+
+		return $list;
 	}
 
 	/**
@@ -477,7 +503,9 @@ class BotService {
 		$selfApprovalBlocked = $bot->getUserId() === $userId && $targetVisibility !== 'personal';
 
 		// Already-versioned updates must stay in pending_changes so the approved version remains live.
-		$storePending = $bot->hasPendingChanges()
+		// Making the bot personal needs no approval and takes effect at once, also while a change
+		// waits: a waiting change to "personal" could be approved or rejected by nobody.
+		$storePending = ($bot->hasPendingChanges() && $targetVisibility !== 'personal')
 			|| ($originalStatus === 'approved' && (!$canPublishTargetScope || $selfApprovalBlocked));
 
 		if ($storePending) {
@@ -504,6 +532,8 @@ class BotService {
 			$bot->setRejectionReason(null);
 			$bot->setTestingEnabledBy(null);
 			$bot->setUpdatedAt(time());
+			// A changed submission is reviewed again by every group or team.
+			$this->startScopeApprovals($bot, $userId, time());
 
 			$bot = $this->botMapper->update($bot);
 
@@ -529,6 +559,8 @@ class BotService {
 		$isNewPendingBot = $originalStatus === 'pending'
 			&& !$bot->hasPendingChanges()
 			&& $bot->getApprovedAt() === null;
+		// Approvals of single groups or teams belong to the version that was reviewed.
+		$bot->setScopeApprovals(null);
 
 		// Recalculate status for direct updates so transitions such as
 		// personal -> groups/teams/global do not get stuck in 'personal'.
@@ -553,6 +585,7 @@ class BotService {
 			$bot->setRejectionReason(null);
 			$bot->setTestingEnabledBy(null);
 			$bot->clearPendingChanges();
+			$this->startScopeApprovals($bot, $userId, $now);
 		} elseif ($canPublishTargetScope) {
 			$bot->setApprovalStatus('approved');
 			$bot->setSubmittedAt(null);
@@ -684,8 +717,75 @@ class BotService {
 		$bot->setApprovalStatus('pending');
 		$bot->setSubmittedAt(time());
 		$bot->setUpdatedAt(time());
+		$this->startScopeApprovals($bot, $userId, time());
 
 		return $this->botMapper->update($bot);
+	}
+
+	/**
+	 * A submission starts without approvals. When the person who submits manages
+	 * some of the groups or teams, but not all, those count as approved: they
+	 * could publish there themselves, and the others still review the bot.
+	 *
+	 * Somebody who manages every group or team approves their own submission
+	 * under "To review", as before.
+	 */
+	private function startScopeApprovals(Bot $bot, string $submitterId, int $now): void {
+		$bot->setScopeApprovals(null);
+
+		$units = $this->permissionService->getReviewUnitIds($bot);
+		$own = $this->permissionService->getReviewableUnitIds($submitterId, $bot);
+		if ($own === [] || count($own) === count($units)) {
+			return;
+		}
+
+		$bot->setScopeApprovalsArray(array_fill_keys($own, ['by' => $submitterId, 'at' => $now]));
+	}
+
+	/**
+	 * The knowledge sources are part of what reviewers read. When they change
+	 * while the bot waits, approvals of single groups or teams no longer cover
+	 * the bot, so the review starts again for everybody.
+	 */
+	public function restartReviewAfterSourceChange(int $botId, string $actorId): void {
+		$this->botMapper->beginDecision($botId);
+		try {
+			$bot = $this->botMapper->findById($botId);
+			if (($bot->getApprovalStatus() ?? 'approved') === 'pending' && $bot->getScopeApprovalsArray() !== []) {
+				$this->startScopeApprovals($bot, $actorId, time());
+				$bot->setUpdatedAt(time());
+				$this->botMapper->update($bot);
+			}
+			$this->botMapper->commitDecision();
+		} catch (\Throwable $e) {
+			$this->botMapper->rollBackDecision();
+			throw $e;
+		}
+	}
+
+	/**
+	 * Notes that the reviewer approves the waiting submission for the groups or
+	 * teams they manage.
+	 *
+	 * @return bool whether every group or team has approved now. Always true for
+	 *              a bot for everyone and for a Nextcloud administrator, who
+	 *              decides for all of them.
+	 */
+	private function addScopeApprovals(Bot $bot, string $reviewerId, int $now): bool {
+		$units = $this->permissionService->getReviewUnitIds($bot);
+		$reviewable = $this->permissionService->getReviewableUnitIds($reviewerId, $bot);
+		if ($units === [] || count($reviewable) === count($units)) {
+			return true;
+		}
+
+		// Only approvals for a group or team that is still part of the submission count.
+		$approvals = array_intersect_key($bot->getScopeApprovalsArray(), array_flip($units));
+		foreach ($reviewable as $id) {
+			$approvals[$id] ??= ['by' => $reviewerId, 'at' => $now];
+		}
+		$bot->setScopeApprovalsArray($approvals);
+
+		return count($approvals) === count($units);
 	}
 
 	/**
@@ -693,12 +793,31 @@ class BotService {
 	 * If bot has pending changes, apply them to actual fields.
 	 * User must have approval rights.
 	 *
+	 * A bot for several groups or teams goes live when each of them has
+	 * approved. Until then the call only notes the reviewer's part, and the bot
+	 * keeps waiting (approval_status stays "pending").
+	 *
 	 * @param int $botId
 	 * @param string $approverId
 	 * @return Bot
 	 * @throws Exception
 	 */
 	public function approveBot(int $botId, string $approverId): Bot {
+		// Decisions about one bot run one after the other, each on the bot as it is then:
+		// otherwise an approval could land on a version that was changed in the meantime.
+		$this->botMapper->beginDecision($botId);
+		try {
+			$bot = $this->approveLockedBot($botId, $approverId);
+			$this->botMapper->commitDecision();
+
+			return $bot;
+		} catch (\Throwable $e) {
+			$this->botMapper->rollBackDecision();
+			throw $e;
+		}
+	}
+
+	private function approveLockedBot(int $botId, string $approverId): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($approverId, $bot)) {
 			throw new AuthorizationException('You do not have permission to approve this bot');
@@ -732,6 +851,12 @@ class BotService {
 			$publishedBefore ? $liveVisibility : null,
 			is_string($pendingVisibility) && $pendingVisibility !== '' ? $pendingVisibility : $liveVisibility
 		);
+		if (!$this->addScopeApprovals($bot, $approverId, $now)) {
+			$bot->setUpdatedAt($now);
+
+			return $this->botMapper->update($bot);
+		}
+
 		if ($pendingChanges !== null) {
 			$bot->applyPendingChanges();
 
@@ -746,6 +871,7 @@ class BotService {
 		$bot->setApprovedAt($now);
 		$bot->setRejectionReason(null);
 		$bot->setTestingEnabledBy(null);
+		$bot->setScopeApprovals(null);
 		$bot->setUpdatedAt($now);
 
 		return $this->botMapper->update($bot);
@@ -764,6 +890,19 @@ class BotService {
 	 * @throws Exception
 	 */
 	public function rejectBot(int $botId, string $rejecterId, ?string $reason = null): Bot {
+		$this->botMapper->beginDecision($botId);
+		try {
+			$bot = $this->rejectLockedBot($botId, $rejecterId, $reason);
+			$this->botMapper->commitDecision();
+
+			return $bot;
+		} catch (\Throwable $e) {
+			$this->botMapper->rollBackDecision();
+			throw $e;
+		}
+	}
+
+	private function rejectLockedBot(int $botId, string $rejecterId, ?string $reason): Bot {
 		$bot = $this->botMapper->findById($botId);
 		if (!$this->permissionService->canApproveBot($rejecterId, $bot)) {
 			throw new AuthorizationException('You do not have permission to reject this bot');
@@ -794,6 +933,7 @@ class BotService {
 		$bot->setSubmittedAt(null);
 		$bot->setRejectionReason($reason);
 		$bot->setTestingEnabledBy(null);
+		$bot->setScopeApprovals(null);
 		$bot->setUpdatedAt(time());
 
 		$this->logger->info('Bot rejected', [
@@ -830,6 +970,9 @@ class BotService {
 
 			$botData = $bot->jsonSerialize();
 			$botData['review_target'] = $this->buildReviewTarget($bot);
+			$botData['scope_approvals'] = $this->describeScopeApprovals($bot);
+			// The groups or teams this reviewer decides for. A Nextcloud administrator decides for all.
+			$botData['reviewable_scope_ids'] = $this->permissionService->getReviewableUnitIds($userId, $bot);
 			// Counterpart of review_target.tools, so the review can show which tools change
 			$botData['live_tools'] = $this->buildToolDisplayEntries($this->resolveToolLoadout($bot, false));
 
@@ -2113,7 +2256,7 @@ class BotService {
 	 * @param array<int,string> $teamIds
 	 * @return array<int,string>
 	 */
-	private function resolveTeamDisplayNames(array $teamIds): array {
+	private function resolveTeamDisplayNames(array $teamIds, bool $alsoForNonMembers = false): array {
 		if ($teamIds === []) {
 			return [];
 		}
@@ -2126,7 +2269,9 @@ class BotService {
 		foreach ($teamIds as $teamId) {
 			$displayName = '';
 			try {
-				$circle = \OCA\Circles\Api\v1\Circles::detailsCircle($teamId);
+				$circle = $alsoForNonMembers
+					? $this->findTeamWithoutMembership($teamId)
+					: \OCA\Circles\Api\v1\Circles::detailsCircle($teamId);
 				if (method_exists($circle, 'getDisplayName')) {
 					$displayName = (string)$circle->getDisplayName();
 				}
@@ -2144,6 +2289,27 @@ class BotService {
 		}
 
 		return $names;
+	}
+
+	/**
+	 * Looks a team up for somebody who need not be a member: a reviewer decides
+	 * for one team of a bot and reads the names of its other teams.
+	 *
+	 * The lookup of the Teams app is tied to the user it was last asked about, so
+	 * it runs in a session without a user, which is closed again right away.
+	 */
+	private function findTeamWithoutMembership(string $teamId): object {
+		if (!class_exists('\\OCA\\Circles\\CirclesManager')) {
+			return \OCA\Circles\Api\v1\Circles::detailsCircle($teamId, true);
+		}
+
+		$manager = \OCP\Server::get(\OCA\Circles\CirclesManager::class);
+		$manager->startSuperSession();
+		try {
+			return $manager->getCircle($teamId);
+		} finally {
+			$manager->stopSession();
+		}
 	}
 
 	/**
@@ -2498,7 +2664,8 @@ class BotService {
 			'visibility' => $this->normalizeVisibilityValue($targetBot->getVisibility(), $targetBot->getIsPublic()),
 			'allowed_groups' => $this->decodeIdList($targetBot->getAllowedGroups()),
 			'allowed_teams' => $allowedTeamIds,
-			'allowed_team_names' => $this->resolveTeamDisplayNames($allowedTeamIds),
+			// A reviewer decides for one team of the bot and has to read the names of the others as well.
+			'allowed_team_names' => $this->resolveTeamDisplayNames($allowedTeamIds, true),
 			'rag_enabled' => $targetBot->getRagEnabled(),
 			'allow_guests' => $targetBot->getAllowGuests(),
 			'onboarding_questions' => $targetBot->getOnboardingQuestionsArray(),

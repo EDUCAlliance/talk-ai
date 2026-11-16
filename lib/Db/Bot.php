@@ -48,6 +48,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setRagSourceDescription(?string $ragSourceDescription)
  * @method ?string getTestingDescription()
  * @method void setTestingDescription(?string $testingDescription)
+ * @method ?string getScopeApprovals()
+ * @method void setScopeApprovals(?string $scopeApprovals)
  * @method ?string getRejectionReason()
  * @method void setRejectionReason(?string $rejectionReason)
  * @method ?string getTestingEnabledBy()
@@ -96,6 +98,9 @@ class Bot extends Entity implements JsonSerializable {
 	protected ?string $approvedBy = null;
 	protected ?int $approvedAt = null;
 	protected ?string $pendingChanges = null;
+	// While a shared bot waits for approval: which of its groups or teams already said yes.
+	// JSON object, group or team id => {"by": user id, "at": unix time}.
+	protected ?string $scopeApprovals = null;
 	protected ?string $onboardingQuestions = null;
 	protected int $createdAt = 0;
 	protected int $updatedAt = 0;
@@ -143,11 +148,59 @@ class Bot extends Entity implements JsonSerializable {
 			'approved_at' => $this->approvedAt,
 			'pending_changes' => $this->getPendingChangesArray(),
 			'has_pending_changes' => $this->hasPendingChanges(),
+			'scope_approvals' => $this->getScopeApprovalsList(),
 			'onboarding_questions' => $this->getOnboardingQuestionsArray(),
 			'has_onboarding_questions' => $this->hasOnboardingQuestions(),
 			'created_at' => $this->createdAt,
 			'updated_at' => $this->updatedAt,
 		];
+	}
+
+	/**
+	 * The groups or teams that already approved the waiting submission.
+	 *
+	 * @return array<string, array{by: string, at: int}> keyed by group or team id
+	 */
+	public function getScopeApprovalsArray(): array {
+		if ($this->scopeApprovals === null || $this->scopeApprovals === '') {
+			return [];
+		}
+
+		$decoded = json_decode($this->scopeApprovals, true);
+		if (!is_array($decoded)) {
+			return [];
+		}
+
+		$approvals = [];
+		foreach ($decoded as $id => $entry) {
+			if (!is_array($entry) || !is_string($entry['by'] ?? null) || $entry['by'] === '') {
+				continue;
+			}
+			$approvals[(string)$id] = ['by' => $entry['by'], 'at' => (int)($entry['at'] ?? 0)];
+		}
+
+		return $approvals;
+	}
+
+	/**
+	 * The same approvals in the form the API returns.
+	 *
+	 * @return list<array{id: string, by: string, at: int}>
+	 */
+	public function getScopeApprovalsList(): array {
+		$list = [];
+		foreach ($this->getScopeApprovalsArray() as $id => $approval) {
+			$list[] = ['id' => (string)$id, 'by' => $approval['by'], 'at' => $approval['at']];
+		}
+
+		return $list;
+	}
+
+	/**
+	 * @param array<string, array{by: string, at: int}> $approvals keyed by group or team id
+	 */
+	public function setScopeApprovalsArray(array $approvals): void {
+		$this->setScopeApprovals($approvals === [] ? null : (json_encode($approvals) ?: null));
 	}
 
 	/**

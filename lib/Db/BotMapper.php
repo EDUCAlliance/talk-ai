@@ -17,6 +17,36 @@ class BotMapper extends QBMapper {
 		parent::__construct($db, 'educai_bots', Bot::class);
 	}
 
+	/**
+	 * Starts a transaction and locks the row of a bot, so that a decision about
+	 * it reads the bot as it is and writes before anybody else does. Read the
+	 * bot after this call, then end with commitDecision() or rollBackDecision().
+	 *
+	 * The lock is a write that changes nothing: it works the same on every
+	 * database, and a write of somebody else waits until the decision is saved.
+	 */
+	public function beginDecision(int $id): void {
+		$this->db->beginTransaction();
+		try {
+			$qb = $this->db->getQueryBuilder();
+			$qb->update($this->getTableName())
+				->set('updated_at', 'updated_at')
+				->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
+			$qb->executeStatement();
+		} catch (\Throwable $e) {
+			$this->db->rollBack();
+			throw $e;
+		}
+	}
+
+	public function commitDecision(): void {
+		$this->db->commit();
+	}
+
+	public function rollBackDecision(): void {
+		$this->db->rollBack();
+	}
+
     /**
      * Find a bot by its primary id
      *

@@ -43,6 +43,7 @@
 						<b class="talkai-queue__name">{{ entry.target.bot_name }}</b>
 						<span class="talkai-queue__sub">{{ entry.isUpdate ? t('educai', 'Changed bot') : t('educai', 'New bot') }} · {{ entry.bot.owner_name }}</span>
 						<span class="talkai-queue__sub">{{ entry.scope.detail }}<template v-if="entry.submitted"> · {{ entry.submitted }}</template></span>
+						<span v-if="entry.progress.parts.length > 1" class="talkai-queue__sub talkai-queue__progress">{{ entry.progressShort }}</span>
 					</span>
 				</button>
 			</nav>
@@ -127,6 +128,17 @@
 							<dd class="talkai-dl__value">
 								{{ sourcesSummary }}
 							</dd>
+							<template v-if="current.progress.parts.length > 1">
+								<dt class="talkai-dl__term">
+									{{ t('educai', 'Approval') }}
+								</dt>
+								<dd class="talkai-dl__value talkai-review__parts">
+									<span v-for="part in current.progress.parts" :key="part.id" class="talkai-review__part">
+										<TalkAiIcon :name="part.approved ? 'check' : 'clock'" :size="14" />
+										{{ partText(part, current.progress.key) }}
+									</span>
+								</dd>
+							</template>
 						</dl>
 					</div>
 				</div>
@@ -177,6 +189,9 @@
 						v-model="feedback"
 						class="talkai-input"
 						rows="2" />
+					<p v-if="current.decisionNote" class="talkai-hint talkai-decision__note" role="status">
+						{{ current.decisionNote }}
+					</p>
 					<div class="talkai-row talkai-decision__actions">
 						<button type="button"
 							class="talkai-btn talkai-btn--danger"
@@ -184,12 +199,13 @@
 							@click="askReject(current.bot)">
 							{{ t('educai', 'Reject') }}
 						</button>
-						<button type="button"
+						<button v-if="current.progress.needsMe"
+							type="button"
 							class="talkai-btn talkai-btn--filled"
 							:disabled="busy"
-							@click="approve(current.bot)">
+							@click="approve(current)">
 							<TalkAiIcon name="check" :size="16" />
-							{{ t('educai', 'Approve') }}
+							{{ current.approveLabel }}
 						</button>
 					</div>
 				</div>
@@ -242,7 +258,7 @@ import { getCanonicalLocale, n, t } from '../l10n.js'
 import { store } from '../store/talkAi.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { diffVersions } from '../utils/botDiff.js'
-import { audienceWithGuests, scopeOf } from '../utils/botScope.js'
+import { audienceWithGuests, reviewProgressOf, scopeOf } from '../utils/botScope.js'
 import { capabilitiesOf } from '../utils/capabilities.js'
 
 // Bots waiting for the approval of this user: what was submitted, what it changes, and the decision.
@@ -345,6 +361,7 @@ export default {
 				target,
 				scope,
 				isUpdate,
+				...this.describeProgress(bot, directory),
 				submitted: this.formatDate(bot.submitted_at),
 				byline: bot.submitted_at
 					? t('educai', 'submitted by {owner} on {date}', { owner: bot.owner_name, date: this.formatDate(bot.submitted_at) })
@@ -374,6 +391,49 @@ export default {
 					})
 					: [],
 			}
+		},
+		// A bot for several groups or teams is approved part by part. This reviewer decides for `mine`.
+		describeProgress(bot, directory) {
+			const progress = reviewProgressOf(bot, directory)
+			const several = progress.parts.length > 1
+			const quoted = parts => parts.map(part => `“${part.name ?? part.id}”`).join(', ')
+			const open = progress.parts.filter(part => !part.approved)
+			const mine = open.filter(part => part.mine)
+			const completes = mine.length === open.length
+			const approvedCount = progress.parts.length - open.length
+
+			let decisionNote = ''
+			if (several && !progress.needsMe) {
+				decisionNote = t('educai', 'Your part is approved. The bot goes live when these have approved as well: {reviewers}.', { reviewers: progress.waitingFor })
+			} else if (several && !completes) {
+				decisionNote = t('educai', 'You approve for {names}. The bot goes live when these have approved as well: {reviewers}.', {
+					names: quoted(mine),
+					reviewers: reviewProgressOf({ ...bot, scope_approvals: [...(bot.scope_approvals ?? []), ...mine.map(part => ({ id: part.id }))] }, directory).waitingFor,
+				})
+			} else if (several) {
+				decisionNote = approvedCount > 0
+					? t('educai', 'Everyone else has approved. With your approval the bot goes live.')
+					: t('educai', 'You decide for every group or team of this bot.')
+			}
+
+			return {
+				progress,
+				progressShort: !progress.needsMe
+					? t('educai', 'Your part is approved')
+					: t('educai', '{approved} of {total} approved', { approved: approvedCount, total: progress.parts.length }),
+				approveLabel: several && !completes ? t('educai', 'Approve for {names}', { names: quoted(mine) }) : t('educai', 'Approve'),
+				decisionNote,
+				completes: !several || completes,
+			}
+		},
+		partText(part, key) {
+			const name = part.name ?? (key === 'team' ? t('educai', 'Another team') : part.id)
+			if (!part.approved) {
+				return t('educai', '{name}: waiting', { name })
+			}
+			return part.byName
+				? t('educai', '{name}: approved by {person}', { name, person: part.byName })
+				: t('educai', '{name}: approved', { name })
 		},
 		formatDate(timestamp) {
 			return timestamp
@@ -427,10 +487,16 @@ export default {
 				this.busy = false
 			}
 		},
-		async approve(bot) {
+		async approve(entry) {
+			const bot = entry.bot
 			this.busy = true
 			try {
-				await store.approveBot(bot.id)
+				const result = await store.approveBot(bot.id)
+				if (result?.approval_status === 'pending') {
+					// Other groups or teams still have to approve: the bot stays in the list with its progress.
+					showSuccess(t('educai', 'Your part is approved. The bot goes live when the others have approved as well.'))
+					return
+				}
 				showSuccess(bot.has_pending_changes
 					? t('educai', 'Approved. The new version is live now.')
 					: t('educai', 'Approved. The bot is live now.'))

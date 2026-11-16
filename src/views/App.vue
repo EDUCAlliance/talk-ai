@@ -90,6 +90,7 @@ import TalkAiTour from '../components/TalkAiTour.vue'
 import { APP_DISPLAY_NAME } from '../branding.js'
 import { store } from '../store/talkAi.js'
 import { assistantOf } from '../utils/assistant.js'
+import { reviewProgressOf } from '../utils/botScope.js'
 import { tour, tourSteps } from '../utils/tour.js'
 
 export default {
@@ -128,8 +129,9 @@ export default {
 			return store.state.permissions.hasApprovalRights
 		},
 
+		// What still waits for a decision of this user. A bot whose other teams are still asked stays in the list, uncounted.
 		reviewCount() {
-			return store.state.approvals.length
+			return store.state.approvals.filter(bot => reviewProgressOf(bot).needsMe).length
 		},
 	},
 
