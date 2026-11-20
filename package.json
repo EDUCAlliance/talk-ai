@@ -51,7 +51,7 @@
     "@nextcloud/eslint-config": "^8.4.2",
     "@nextcloud/stylelint-config": "^3.1.0",
     "@nextcloud/vite-config": "^2.5.4",
-    "vite": "^7.3.6",
+    "vite": "^7.3.8",
     "vite-plugin-eslint": "^1.8.1",
     "vite-plugin-stylelint": "^6.0.2",
     "@vue/compiler-sfc": "^3.5.44",
